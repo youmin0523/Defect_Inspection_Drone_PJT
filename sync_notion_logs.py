@@ -4,10 +4,26 @@ import json
 import urllib.request
 import urllib.error
 import re
+import subprocess
 from datetime import datetime
 
-DATABASE_ID = "34153e5e-7e18-800b-8f95-c70e153b18a5"
+DATABASE_ID = os.environ.get("NOTION_DATABASE_ID", "")
 CURSOR_FILE = ".vibe_sync_cursor.json"
+
+def get_git_info():
+    try:
+        branch = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        branch = 'main'
+        
+    try:
+        author = subprocess.check_output(['git', 'config', 'user.name'], stderr=subprocess.DEVNULL).decode().strip()
+        if not author:
+            author = subprocess.check_output(['git', 'config', 'user.email'], stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        author = 'Developer'
+        
+    return branch, author
 
 def get_notion_key():
     key = os.environ.get("NOTION_API_KEY")
@@ -172,8 +188,15 @@ def main():
                     new_logs = f.read()
                     
                 title, date, obj = extract_meta(new_logs)
-                if not title.strip():
-                    title = f"[Log] Update from {path_key}"
+                branch, author = get_git_info()
+                
+                # 강제 오버라이드: AI가 만든 제목에서 작성자와 브랜치명을 제거하고 실제 Git 정보로 덮어씌움
+                clean_title = re.sub(r'^\[.*?\]\s*', '', title)
+                clean_title = clean_title.split('- @')[0].strip()
+                if not clean_title:
+                    clean_title = "Vibe Coding Update"
+                
+                title = f"[{branch}] {clean_title} - @{author}"
                     
                 # 추후 프론트/백엔드 레포지토리 분할 및 통합 로깅 시 구분을 위한 자동 태깅
                 if "frontend" in path_key.lower() and "frontend" not in title.lower():
