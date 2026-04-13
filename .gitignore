@@ -1,0 +1,7 @@
+# Node & Environment Variables
+node_modules/
+.env
+
+# MacOS & Windows
+.DS_Store
+Thumbs.db
