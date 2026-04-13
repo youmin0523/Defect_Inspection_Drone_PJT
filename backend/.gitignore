@@ -1,0 +1,46 @@
+# =============================================
+# backend/.gitignore
+# 역할: Git 추적 제외 파일/폴더 목록
+# =============================================
+
+# 환경변수 (실제 키 노출 방지)
+.env
+
+# Python 가상환경
+venv/
+.venv/
+env/
+
+# Python 캐시
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# YOLOv8 가중치 파일 (용량 큼)
+models_weights/*.pt
+models_weights/*.pth
+
+# 하자 이미지 크롭 저장 디렉토리
+captured_frames/*
+!captured_frames/.gitkeep
+
+# 빌드 / 배포
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 테스트 커버리지
+.coverage
+htmlcov/
+.pytest_cache/

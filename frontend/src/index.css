@@ -1,0 +1,48 @@
+/**
+ * index.css
+ * 역할: Tailwind CSS 베이스 레이어 임포트 및 전역 스타일
+ *       - Tailwind 기본/컴포넌트/유틸리티 레이어 로드
+ *       - 다크 대시보드 배경 전역 적용
+ *       - 스크롤바 커스텀 스타일
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 전역 배경 (드론 관제 대시보드 다크 테마) */
+body {
+  @apply bg-dashboard-bg text-white;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 커스텀 스크롤바 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-dashboard-surface;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-dashboard-border rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-500;
+}
+
+/* 심각도 뱃지 공통 스타일 */
+@layer components {
+  .badge-high {
+    @apply bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-0.5 rounded text-xs font-semibold;
+  }
+  .badge-med {
+    @apply bg-orange-500/20 text-orange-400 border border-orange-500/30 px-2 py-0.5 rounded text-xs font-semibold;
+  }
+  .badge-low {
+    @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded text-xs font-semibold;
+  }
+  .card {
+    @apply bg-dashboard-surface border border-dashboard-border rounded-lg p-4;
+  }
+}
