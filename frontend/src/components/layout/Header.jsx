@@ -20,7 +20,18 @@ const STATUS_CONFIG = {
 export default function Header() {
   const connectionStatus = useDroneStore((s) => s.connectionStatus)
   const telemetry = useDroneStore((s) => s.telemetry)
-  const severityCounts = useDefectStore((s) => s.getSeverityCounts())
+  
+  // defects 배열의 레퍼런스만 구독
+  const defects = useDefectStore((s) => s.defects)
+  
+  // 렌더링 시점에 심각도 카운트 계산
+  const severityCounts = defects.reduce(
+    (acc, d) => {
+      acc[d.severity] = (acc[d.severity] || 0) + 1
+      return acc
+    },
+    { HIGH: 0, MED: 0, LOW: 0 }
+  )
 
   const status = STATUS_CONFIG[connectionStatus] ?? STATUS_CONFIG.disconnected
 

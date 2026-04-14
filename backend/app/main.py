@@ -29,8 +29,11 @@ async def lifespan(app: FastAPI):
     print("[AeroInspect] 서버 시작 중...")
 
     # DB 테이블 생성 (처음 실행 시)
-    await init_db()
-    print("[AeroInspect] DB 초기화 완료")
+    try:
+        await init_db()
+        print("[AeroInspect] DB 초기화 완료")
+    except Exception as e:
+        print(f"[AeroInspect] DB 초기화 실패 (DB 연결 안 됨, 임시 무시): {e}")
 
     # RGB 카메라 (USB Capture Card) 열기
     await rgb_camera_service.open()
