@@ -5,3 +5,17 @@ node_modules/
 # MacOS & Windows
 .DS_Store
 Thumbs.db
+
+# Claude Code (개인 설정 — 팀원 공유 불필요)
+.claude/
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+
+# Vibe Coding 자동화 (개인 로컬 파일)
+screenshots/
+.vibe_sync_cursor.json
+sync_notion_logs.py
+capture_result.py

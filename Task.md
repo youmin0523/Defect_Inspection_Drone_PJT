@@ -12,6 +12,7 @@
 - [x] v1.5 - 독립 레포지토리 가이드라인 무결성 강화 (작성자: @youminsu0523 / branch: MS)
 - [x] v1.6 - 프로젝트 구조 분석 완료: 하이레벨 아키텍처 및 데이터 플로우 명세 (작성자: @youminsu0523 / branch: MS)
 - [ ] v1.7 - 서브 모듈(Backend/Frontend) 상세 분석 및 API 문서화 (작성자: @youminsu0523 / branch: MS)
+- [x] v1.8 - Notion 연동 스크린샷 캡쳐 폴백 로직 통합 및 단일 파일화 (작성자: @Antigravity / branch: main)
 
 ## 요구사항
 1. `team_project_rules.md`에 명시된 모든 협업 규칙 준수
@@ -20,6 +21,12 @@
 4. 모든 답변에 필수 보고서 (Scope, Refactoring, Checklist 등) 포함
 
 ## Revision History
+
+### v1.8_260414 (작성자: @Antigravity / branch: main)
+**[Root]**
+- 완료: `capture_result.py`의 전체 화면 캡쳐(Pillow/PowerShell 폴백) 로직을 `sync_notion_logs.py`로 통합
+- 완료: Vibe Coding Stop 훅에 `sync_notion_logs.py` 단일 실행 파일로 파이프라인 정리 (`.claude/settings.json` 변경)
+- 완료: 팀 협업 목적과 개인 환경 분리를 위해 `.gitignore`에 노션 동기화 스크립트(`sync_notion_logs.py`, `capture_result.py`) 추가 및 Git 트래킹 해제
 
 ### v1.6_260413 (작성자: @youminsu0523 / branch: MS)
 **[Root]**
