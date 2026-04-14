@@ -1,0 +1,11 @@
+{
+  "name": "aeroinspect-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Python FastAPI backend wrapped for npm compatibility",
+  "scripts": {
+    "setup:python": "python -m venv venv && venv\\Scripts\\python.exe -m pip install --upgrade pip setuptools wheel && venv\\Scripts\\pip install -r requirements.txt",
+    "postinstall": "npm run setup:python",
+    "start": "venv\\Scripts\\uvicorn app.main:app --reload"
+  }
+}

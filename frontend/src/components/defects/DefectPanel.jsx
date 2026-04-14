@@ -17,9 +17,18 @@ export default function DefectPanel() {
   // 초기 데이터 로드 (REST API)
   useDefects()
 
-  const filteredDefects = useDefectStore((s) => s.getFilteredDefects())
-  const total = useDefectStore((s) => s.defects.length)
+  const defects = useDefectStore((s) => s.defects)
+  const filters = useDefectStore((s) => s.filters)
   const isLoading = useDefectStore((s) => s.isLoading)
+
+  // 렌더링 시점에 필터 적용 (새 배열 생성 방지용 useMemo는 생략해도 무방하지만 안전을 위해 분리 참조)
+  const filteredDefects = defects.filter((d) => {
+    if (filters.severity && d.severity !== filters.severity) return false
+    if (filters.area && d.area !== filters.area) return false
+    if (filters.categoryCode && d.category_code !== filters.categoryCode) return false
+    return true
+  })
+  const total = defects.length
 
   return (
     <>
