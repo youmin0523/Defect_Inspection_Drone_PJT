@@ -6,6 +6,10 @@
 
 ## Revision History
 
+### v1.8_260414 (작성자: @Antigravity / branch: main)
+- **통합 스크린샷 캡쳐 파이프라인**: `sync_notion_logs.py`에서 Playwright 앱 화면 캡쳐 실패 혹은 노드 서버 미동작 시 Pillow / PowerShell 폴백을 통한 전체 화면 캡쳐 로직 작동 추가. Vibe Coding 훅 최적화.
+- **로컬 스크립트 Git 제외**: 개인 자동화 용도로 사용되는 노션 업로드 스크립트(`sync_notion_logs.py`, `capture_result.py`)가 팀 저장소에 커밋되지 않도록 `.gitignore` 등록 및 트래킹 해제.
+
 ### v1.1_260413 (작성자: @Antigravity / branch: main)
 - 백엔드 및 프론트엔드 개별 태스크/계획 문서 구조화 완료
 
