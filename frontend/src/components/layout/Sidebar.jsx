@@ -20,12 +20,13 @@ import {
 import logoWhite from '../../assets/logo/logo_white.png'
 
 // 내비 항목. disabled: true → "준비 중" placeholder (클릭 시 무동작, 툴팁만 표시).
+// //* [Modified Code] 2026-04-16: /employee/reports 페이지 실제 구축 → 하자 리포트 활성화
 const NAV_ITEMS = [
-  { key: 'dashboard', to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
-  { key: 'reports',   to: '#',          icon: FileText,        label: '하자 리포트', disabled: true },
-  { key: 'flights',   to: '#',          icon: Map,             label: '비행 경로',   disabled: true },
-  { key: 'drones',    to: '#',          icon: Plane,           label: '드론 관리',   disabled: true },
-  { key: 'settings',  to: '#',          icon: Settings,        label: '설정',        disabled: true },
+  { key: 'dashboard', to: '/dashboard',        icon: LayoutDashboard, label: '대시보드' },
+  { key: 'reports',   to: '/employee/reports', icon: FileText,        label: '하자 리포트' },
+  { key: 'flights',   to: '#',                 icon: Map,             label: '비행 경로',  disabled: true },
+  { key: 'drones',    to: '#',                 icon: Plane,           label: '드론 관리',  disabled: true },
+  { key: 'settings',  to: '#',                 icon: Settings,        label: '설정',       disabled: true },
 ]
 
 export default function Sidebar() {

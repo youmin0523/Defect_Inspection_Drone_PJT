@@ -55,10 +55,25 @@ export default function DefectPanel() {
       {/* 하자 목록 */}
       <div className="flex-1 overflow-y-auto space-y-2 pr-1">
         {filteredDefects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-slate-600">
-            <span className="text-3xl mb-2">✅</span>
-            <span className="text-sm">
+          /* //* [Modified Code] 빈 상태 — 스캐닝 펄스 + 상태 tier + mono 타이포 */
+          <div className="flex flex-col items-center justify-center py-10 text-slate-500">
+            {/* 펄스 링 */}
+            <div className="relative w-14 h-14 mb-3">
+              <div className="absolute inset-0 rounded-full border border-accent-500/30" />
+              <div className="absolute inset-[20%] rounded-full border border-accent-500/40" />
+              <div className="absolute inset-0 rounded-full border border-accent-500/50 animate-ping" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="w-2 h-2 rounded-full bg-accent-400" />
+              </div>
+            </div>
+            <span className="text-[10px] font-mono uppercase tracking-[0.25em] text-accent-300 mb-1">
+              {total === 0 ? 'Scanning · Idle' : 'Filter Mismatch'}
+            </span>
+            <span className="text-xs text-slate-400 font-semibold">
               {total === 0 ? '탐지된 하자 없음' : '필터 조건에 맞는 하자 없음'}
+            </span>
+            <span className="text-[10px] text-slate-600 font-mono mt-2">
+              {total === 0 ? '드론 스트림에서 수신 대기 중' : `전체 ${total}건 중 필터링 결과 0건`}
             </span>
           </div>
         ) : (

@@ -87,6 +87,21 @@ export default function Dashboard() {
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-dashboard-bg">
+      {/* //* [Modified Code] 은은한 도트 그리드 배경 — HUD 느낌 강화 (검은 공백 방지) */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 pointer-events-none opacity-[0.45]"
+        style={{
+          backgroundImage: 'radial-gradient(circle at center, rgba(51,65,85,0.35) 0.5px, transparent 1px)',
+          backgroundSize: '24px 24px',
+        }}
+      />
+      {/* //* [Modified Code] 상단/하단 비네팅 글로우 — 정적 대시보드에 깊이감 */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_80%_50%_at_50%_0%,rgba(16,185,129,0.06),transparent_60%)]"
+      />
+
       {/* ── 상단 HUD 바 ─────────────────────────────────────── */}
       <DashboardTopBar onMissionEnd={handleMissionEnd} />
 
@@ -103,13 +118,19 @@ export default function Dashboard() {
         }}
       >
         <div
-          className="relative bg-black rounded-xl overflow-hidden border border-slate-700/60 shadow-2xl"
+          className="relative bg-black rounded-xl overflow-hidden border border-slate-700/60 shadow-2xl ring-1 ring-accent-500/5"
           style={{
             aspectRatio: '16 / 9',
             width: '100%',
             maxHeight: '100%',
           }}
         >
+          {/* //* [Modified Code] HUD 코너 브래킷 4개 — "관제실 카메라 프레임" 톤 */}
+          <CornerBracket position="tl" />
+          <CornerBracket position="tr" />
+          <CornerBracket position="bl" />
+          <CornerBracket position="br" />
+
           <LiveVideoFeed fill />
 
           {/* 피드 상단 좌측: 드론/카메라 컨텍스트 HUD 뱃지 */}
@@ -164,12 +185,22 @@ export default function Dashboard() {
         className="absolute right-4 bottom-4 z-20 pointer-events-auto"
         style={{ width: MINIMAP_W, height: MINIMAP_H }}
       >
-        <div className="flex flex-col h-full rounded-xl bg-slate-900/80 border border-slate-700/60 backdrop-blur-md shadow-2xl overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-700/60 flex-shrink-0">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-white">
-              3D Mini Map
+        <div className="relative flex flex-col h-full rounded-xl bg-slate-900/85 border border-slate-700/60 backdrop-blur-md shadow-2xl overflow-hidden ring-1 ring-slate-500/5">
+          {/* //* [Modified Code] 헤더 폴리시 — 좌측 accent 바 + Map 아이콘 + 상태 dot */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700/60 flex-shrink-0 bg-gradient-to-r from-accent-500/5 to-transparent">
+            <div className="flex items-center gap-2">
+              <span className="w-0.5 h-4 bg-accent-400 rounded-full" />
+              <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-100">
+                3D Mini Map
+              </span>
+              <span className="text-[9px] font-mono text-slate-500 bg-slate-800/60 border border-slate-700 rounded px-1 py-0.5">
+                FLOOR · SIM
+              </span>
+            </div>
+            <span className="flex items-center gap-1 text-[9px] font-mono text-accent-300 tracking-wider">
+              <span className="w-1 h-1 rounded-full bg-accent-400 animate-pulse" />
+              LIVE
             </span>
-            <span className="text-[9px] font-mono text-slate-500">floor plan · sim</span>
           </div>
           <div className="flex-1 relative">
             <BuildingScene />
@@ -204,4 +235,17 @@ export default function Dashboard() {
       </aside>
     </div>
   )
+}
+
+// //* [Modified Code] HUD 코너 브래킷 — LIVE 피드 16:9 박스 네 모서리에 L자 형태 배치
+// "관제실 카메라 프레임" 톤 주는 장식 (pointer-events-none 이라 클릭 방해 없음)
+function CornerBracket({ position }) {
+  const base = 'pointer-events-none absolute w-5 h-5 border-accent-400/60'
+  const posClass = {
+    tl: 'top-2 left-2 border-t-2 border-l-2 rounded-tl',
+    tr: 'top-2 right-2 border-t-2 border-r-2 rounded-tr',
+    bl: 'bottom-2 left-2 border-b-2 border-l-2 rounded-bl',
+    br: 'bottom-2 right-2 border-b-2 border-r-2 rounded-br',
+  }[position]
+  return <div className={`${base} ${posClass}`} />
 }

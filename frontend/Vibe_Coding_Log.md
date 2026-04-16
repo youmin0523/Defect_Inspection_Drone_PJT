@@ -554,3 +554,151 @@ Dashboard (12-col grid)
   - `MOCK_MONTHLY_KPI` · `MOCK_TODAY_SCHEDULE` · `MOCK_NOTIFICATIONS` · `MOCK_TEAM_MEMBERS` · `MOCK_RECENT_ACTIVITIES` 는 하드코딩 상수. 백엔드 API 연결 후 점진 교체(각 섹션이 독립적이라 부분 교체 가능).
   - `LIVE` KPI 는 persist 된 **현재 세션 단위 스냅샷** — 이번 달 누적은 BE 집계 필요.
   - 팀원 재배정 · 현장 관리는 권한 기반 API 가 필요해 SOON/placeholder 유지.
+
+#### ⏱ 2026-04-16 17:22 | 프로세스 재정립 — 사전 작업(사무실) ↔ 세션(현장) 분리, Level 선택 → Load vs Scan
+- **피드백**: 사용자가 "너 프로세스에 대한 이해와 순서 확립이 좀 필요하겠는걸?" 지적. 내가 L1/L2/L3 를 **세션 내부 선택지**로 오해하고 모두 `/session/level` 에서 선택하게 만들었던 부분을 교정. 실제 올바른 흐름:
+  - **사무실 사전 작업 (`/employee/pre-work`)**: CAD(L1) 또는 평면도(L2) 를 **미리** 업로드해 Mock 3D 모델링까지 완료 → 결과물을 `preModelStore` 라이브러리에 저장
+  - **현장 세션 (`/session/level`)**: 같은 현장 라벨로 진입하면 그 라벨에 매칭되는 **사전 모델 목록** 이 자동 노출되어 "Load" 선택 가능. 매칭이 없으면 **드론 자율비행 스캔(L3) 만** 가능 (fallback)
+- **반영** (7 파일):
+  - `store/preModelStore.js` (신규) — persist Zustand. `preModels: [{ id, siteName, level, fileName, fileSize, imageDataUrl, createdAt }]` 배열 + `addPreModel / removePreModel / listForSite / clear`. 세션과 완전 분리된 전역 자원
+  - `store/sessionStore.js` (수정) — `modelSource: 'premodel' | 'drone' | null`, `loadedPreModelId` 필드 추가. `selectPreModel(preModel)` 액션: level + imageDataUrl + fileName 을 preModel 에서 복사 (BuildingMesh L2 텍스처 호환). `selectDroneScan()` 액션: level=3 + source='drone'. 기존 `setLevel` 이 두 필드도 함께 리셋하도록 갱신. persist partialize 에 새 필드 포함
+  - `pages/employee/PreWork.jsx` (신규) — 사무실 톤(흰 배경 + blue accent) 유지. 3 단계: 현장 라벨 입력 → Level(L1 CAD / L2 평면도) 선택 → FileDropzone 업로드 → "모델링 시작" → 기존 `runMockModeling(level)` 7초 러너 재활용 → 완료 시 `preModelStore.addPreModel()` 호출. 하단에 **라이브러리 목록** 섹션 — 역순 정렬 + 삭제 버튼. "다른 도면 추가" 버튼으로 동일 페이지에서 연속 생성 가능
+  - `pages/session/SessionLevel.jsx` (전면 재작성) — 기존 3-카드(L1/L2/L3) 구조 폐기. 신규 구조:
+    - 상단 `사전 작업된 모델 — 매칭 N건` 섹션: `usePreModelStore.preModels.filter(siteName 매칭)` 결과를 카드 그리드로 노출. 매칭 없으면 "사전 모델이 없습니다 + `/employee/pre-work` 바로가기" 안내 박스
+    - 하단 `실시간 스캔 (Fallback)` 섹션: 드론 자율비행 카드 항상 노출
+    - `choice` 로컬 state 로 선택 추적(매칭 사전 모델 우선, 없으면 드론). "다음" 클릭 시 `selectPreModel(m)` 또는 `selectDroneScan()` 호출 후 `/session/modeling` 이동
+  - `pages/session/SessionModeling.jsx` (재작성) — `modelSource` 기반 분기:
+    - `premodel` 진입 시 `useEffect` 로 자동 로드 애니메이션 (2.5초, 4 스테이지: 메타 검증 → 메시 로드 → 텍스처 매핑 → 완료). `runMockModeling` 대신 로컬 `setTimeout` 으로 짧게 처리 — 이미 사무실에서 모델링 끝났으므로 "로드만" 연출
+    - `drone` 진입 시 기존 "3D 시뮬레이션 시작" 버튼 + 11초 `runMockModeling(level=3)` 플로우 유지
+    - 완료 후 1.8초 대기 → `/dashboard` 자동 이동 (기존과 동일)
+  - `App.jsx` — `/employee/pre-work` 라우트 추가(`EmployeeLanding` 외 독립 페이지), `PreWork` import
+  - `pages/EmployeeLanding.jsx` — `QUICK_ACTIONS` 의 `upload-drawing` 카드 `to: '/session/level'` → `to: '/employee/pre-work'` 수정 + 설명 문구 재작성
+- **UX 경계 준수**: `project_ux_boundary_employee_vs_session` 메모리에 따라 `/employee/pre-work` 는 사무실 톤(흰 배경/blue accent/카드 레이아웃), 실시간 드론 HUD/현장 요소 미포함. `/session/*` 와 완전히 다른 레이어드 스타일 유지.
+- **BuildingMesh 호환성**: 기존 L1/L2/L3 렌더 로직(치수 라벨 / 바닥 텍스처 / 포인트 클라우드)은 그대로 유지. `modelSource='premodel'` 경로는 sessionStore 가 preModel.level 을 복사하므로 BuildingMesh 에서 자연스럽게 L1/L2 분기가 돈다. L3 경로는 변함없이 point cloud.
+- **검증**: 기존 Vite(port 5176) HMR 상에 7개 신규/수정 파일 curl 스캔 → 모두 OK, Pre-transform error 없음.
+- **잔여 한계**:
+  - `preModelStore` persist 쿼터: L2 이미지 base64 는 항목당 300KB~1MB 정도. 라이브러리에 10~15개 이상 쌓이면 localStorage 5MB 한계 위험 — 실제 운영에선 S3 업로드로 전환 필요
+  - 현장 라벨 매칭이 **문자열 완전 일치 기반** — 오타 허용 X. 실제 운영에선 site_id 기반 FK 매칭으로 전환 필요 (현재는 DB 미연결 단계라 라벨을 식별자로 사용)
+  - `/employee/pre-work` 에서 Mock 러너는 `sessionStore.startModeling` 이 아닌 로컬 `useRef` + `runMockModeling` 직접 호출 — 세션 state 오염 방지. 대신 progress state 는 컴포넌트 로컬(`useState`) 이므로 페이지 떠나면 날아감(진행 중 navigate 시 cancel 필요 — `useEffect` cleanup 으로 처리)
+  - 드론 자율비행 경로는 `sessionStore.startModeling` 을 통해 기존 L3(11초) 그대로 — 변경 없음
+
+#### ⏱ 2026-04-16 17:53 | 보고서 작성·조회 모듈 — 편집 테이블 + 공종 AI 제안 + Excel/PDF 내보내기 + 아카이브
+- **피드백**: 사용자가 "보고서 작성·조회" 카드 구현 요청. 요구사항:
+  1. 드론 탐지 하자 데이터를 **공종별**로 분류(이미지 + 장소 포함)
+  2. Excel 파일로 출력, PDF 변환 가능
+  3. 미리보기 + **편집**: false positive 삭제 / 드론 미탐 하자 수동 추가 / 재저장
+  4. Claude AI 활용 가능?
+  5. 직원 HUB(`/employee`) 와 현장(`/dashboard/report`) 양쪽에서 접근
+- **사용자 확정 결정**:
+  - Excel/PDF 는 **프론트엔드 생성** (부하 최소, 빠르고 정확)
+  - 공종 분류는 **AI 자동 제안 + 수동 수정**
+  - 아카이브는 **DB 저장이 이상적**이나 현재 미연결 → "나중에 교체만 하면 되는 구조" 로 작성
+  - 편집 범위: 공종 / 심각도 / 조치 메모 / (장소는 area→label 일괄 매핑 편집)
+- **Claude AI 적용 범위 판단**: 내레이션(요약·권장사항) 은 기존 `ReportPanel` + `POST /api/v1/report/generate` 재활용. 구조적 작업(Excel/PDF/편집 UI) 는 코드. 공종 자동 제안은 1차로 category_code 휴리스틱, 향후 Claude 엔드포인트로 교체 가능한 구조로 추상화.
+- **구현** (의존성 2개 + 신규 14 파일 + 수정 4 파일):
+  - **의존성**: `npm i xlsx @react-pdf/renderer` (MIT, 무료). `xlsx` 는 1 high-severity CVE 존재 보고되지만 데모용은 수용, 실제 운영 전 `@e965/xlsx` 등 대안 검토 권장.
+  - **신규 상수**: `constants/trades.js` — TRADES 12종(골조/도배/도장/타일/목공/마루·바닥재/창호/방수/단열/설비/전기/기타) + `CATEGORY_TRADE_MAP` (A-01..E-02 → 공종 1차 매핑) + `DEFAULT_LOCATION_MAP` (A=거실 / B=공용주방 / C=방1 / D=방2 / E=방3) + `suggestTradeFromCode(code)` 휴리스틱 헬퍼
+  - **신규 API 추상화**: `api/reportsApi.js` — `listReports / getReport / createReport / updateReport / deleteReport / clearAllReports`. 모두 async, `await simulateLatency()` 로 네트워크 지연 흉내. 내부는 localStorage(`drone-inspect-reports-archive` 키). **백엔드 연결 시 이 파일만 `fetch()` 호출로 교체하면 호출부 변경 0**. 파일 상단에 예상 백엔드 엔드포인트(`GET /api/v1/reports` 등) + 리포트 스키마(camelCase→snake_case 매핑 포함) 주석
+  - **신규 store**: `store/reportsStore.js` — Zustand (persist 없음: SoT 는 reportsApi 가 관리). `fetchAll / fetchOne / create / update / remove / clear` 액션
+  - **기존 API 확장**: `api/reportApi.js` 에 `suggestTrades(defects)` 추가 — 현재 `suggestTradeFromCode` 휴리스틱 + `confidence: 0.65` 반환. 주석에 향후 `POST /report/suggest-trades` Claude 호출로 교체 예정 기록
+  - **신규 UI 컴포넌트** (`components/report/`):
+    - `TradeSelect.jsx` — 공종 드롭다운. value === suggested 일 때 `<Sparkles />` + "AI" 뱃지 노출
+    - `LocationMapEditor.jsx` — area(A~E) → 장소 라벨 일괄 편집 모달. 저장 시 onSave(newMap) → 부모가 모든 defect 의 location_label 재계산
+    - `AddDefectDialog.jsx` — 수동 하자 추가 모달. 유형명/area/공종/심각도/조치메모/이미지(선택) + `is_manual: true` 플래그
+    - `DefectEditRow.jsx` — 편집 테이블 행. 썸네일 / 유형명+수동뱃지 / 공종(TradeSelect) / 장소(read-only, 매핑 편집은 상단) / 심각도(셀 내부 select) / 조치메모(인라인 input) / 검증·삭제 버튼
+    - `ExcelExportButton.jsx` — SheetJS 기반. 2 시트 (요약 + 하자목록), 컬럼 너비 힌트 `!cols`, 파일명 `YYYYMMDD_현장명_하자리포트.xlsx`
+    - `PdfExportButton.jsx` — `@react-pdf/renderer`. Noto Sans KR 폰트 CDN 등록(한글 지원), 요약 헤더 + 공종별 그룹 + 하자별 썸네일(base64 Image) + 심각도 뱃지 + 조치메모 + 하단 고정 푸터. A4 세로
+    - `ReportEditor.jsx` — 메인 편집기. 툴바(카운터/AI 뱃지 + 장소 매핑 편집 + 하자 추가 + Excel/PDF) + 공종별 접이식 그룹 테이블. 진입 시 미할당 하자에 AI 공종 제안 배치 주입. `variant: 'modal' | 'page'` 로 스크롤 처리 분기
+  - **신규 페이지** (`pages/employee/`):
+    - `ReportsList.jsx` (`/employee/reports`) — 아카이브 테이블(현장/운용자/일자/하자 요약/상태/열기·삭제). 빈 상태 UI + 하단 DB 연결 안내 블록
+    - `ReportDetail.jsx` (`/employee/reports/:id`) — 메타 요약 + ReportEditor(page variant). 편집 시 **500ms debounce** 후 `reportsStore.update` 자동 저장. "초안 ↔ 발행" 토글 버튼. 헤더에 저장 인디케이터
+  - **기존 수정**: `ReportModal.jsx` v2 전면 재작성. 기존 "세션 요약 + ReportPanel" → **탭 전환 UI** (편집 탭 / AI 내레이션 탭). 편집 탭에 ReportEditor 삽입. 하단에 **아카이브 저장** 버튼 추가 → `reportsStore.create` 호출 → 저장 후 "사무실에서 열기" 버튼으로 전환되어 `/employee/reports/:id` 이동 가능. defectStore 변경 시 draft.defects 에 id 기준 merge(편집된 건은 유지, 새 수신은 AI 제안 공종으로 자동 추가)
+  - **라우트 + 링크**: `App.jsx` 에 `/employee/reports` + `/employee/reports/:id` 추가. `EmployeeLanding.jsx` 의 `write-report` 카드 `to: '/dashboard/report'` → `to: '/employee/reports'` 수정
+- **검증**: 기존 Vite(5176) HMR 상에 16개 신규/수정 파일 curl 스캔 → 모두 OK, `xlsx`·`@react-pdf/renderer` deps 도 Vite 최적화 경로 200 응답
+- **두 진입점 동작**:
+  - **현장 즉석**: 비행 종료 → ReportModal 편집 탭에서 공종 AI 제안 확인 → 수정/추가 → Excel/PDF 내보내기 + 아카이브 저장 → "사무실에서 열기" 로 `/employee/reports/:id` 진입
+  - **사무실**: `/employee` → "보고서 작성·조회" 카드 → `/employee/reports` 목록 → 행 클릭 → `/employee/reports/:id` 에서 재편집 + 재발행
+- **백엔드 연결 시 리팩토링 포인트**:
+  1. `api/reportsApi.js` 각 함수 body → `fetch()` 호출로 교체 (지연 시뮬레이션 `simulateLatency` 제거)
+  2. `api/reportApi.js` 의 `suggestTrades` → `POST /api/v1/report/suggest-trades` 배치 호출로 교체 (현재 휴리스틱은 백엔드 실패 시 fallback 으로 보존 가능)
+  3. localStorage 키(`drone-inspect-reports-archive`) 는 마이그레이션 스크립트로 DB 로 1회 업로드 후 제거
+  4. 이미지 base64 → S3 URL 참조로 전환 (쿼터 문제 해결 + PDF 생성 속도 향상)
+- **잔여 한계**:
+  - 공종 AI 제안은 현재 **카테고리 코드 매핑 휴리스틱** — 실제 이미지 기반 추론 아님. Claude 엔드포인트 붙이면 `image + defect_type + area` 종합 분석 가능
+  - PDF 한글 폰트는 CDN(`jsdelivr`) 의존 — 오프라인 환경에선 Helvetica fallback 으로 한글 깨짐. 향후 `public/fonts/` 에 NotoSansKR .ttf 번들 권장
+  - xlsx 패키지에 alleged CVE(prototype pollution) — 데모용은 허용하나 운영 배포 전 `@e965/xlsx` 또는 `exceljs` 로 교체 검토
+  - 리포트 편집 중 브라우저 새로고침 시 **저장되지 않은 draft 는 유실** (ReportModal) — ReportDetail 은 debounce 자동 저장이라 안전. 필요 시 ReportModal 도 같은 패턴 적용 가능
+  - `/dashboard/report` ReportModal 에서 defectStore 가 실시간 업데이트 → draft.defects merge 로직 있지만, 복잡한 편집 중 새 하자 도착 시 사용자 혼란 가능 — 향후 "미션 종료 시점에 스냅샷 고정" 옵션 추가 고려
+
+#### ⏱ 2026-04-16 18:06 | 리포트 편집기 — area/location 개념 분리 + 공종 직접 입력 + 시각 폴리시
+- **피드백** (3가지):
+  1. UI 가 너무 "AI 로 만든 듯한" 톤 — 편집 모달이 일반 폼 느낌이라 브랜드 정체성 약함
+  2. 영역 드롭다운에 `A · 구조·기하학 (거실)` 처럼 **기술 영역 + 방 이름** 이 한꺼번에 나오는 게 맞는지? (= 버그 지적)
+  3. 공종 드롭다운에 **"직접 입력"** 옵션 추가해 애매한 케이스 자유 입력 허용
+- **판단 및 설명**:
+  - 2번은 명백한 **데이터 모델 버그**. `area`(A~E, 기술 분류 = 구조·기하학/단열·방수/마감재/바닥/창호)와 `location`(거실/방1/공용주방 등 물리 공간)은 완전히 다른 개념인데 `DEFAULT_LOCATION_MAP` 으로 1:1 매핑해두어 한 드롭다운에 혼용됐음. 같은 area 에도 거실일 수도 방1일 수도 있는데 매핑이 강제되어 부정확했음.
+- **반영** (9 파일 리팩토링):
+  - `constants/trades.js` — `DEFAULT_LOCATION_MAP` 삭제. 대체:
+    - `LOCATION_PRESETS = ['거실','공용주방','방1','방2','방3','욕실','발코니','현관']` (datalist 제안용)
+    - `inferInitialLocation(area)` — 신규 수신 하자에 대한 초기 추정값만 반환(area 와 무관한 독립 필드로 이후 자유 편집). 향후 3D 좌표 + room segmentation 으로 교체 가능
+  - `components/report/TradeSelect.jsx` — "직접 입력" 옵션 추가. 고정 목록 외 값이면 자동으로 text input 모드 전환, ↶ 버튼으로 목록 모드 복귀. 기존 AI 뱃지 로직 유지
+  - `components/report/AddDefectDialog.jsx` v2 전면 재작성:
+    - **영역(area)** 과 **장소(location)** 를 완전히 분리된 필드로 노출. 영역 드롭다운은 `A · 구조·기하학` (부연 없음), 장소는 text input + datalist(LOCATION_PRESETS) 자유 입력
+    - 공종 드롭다운에 "직접 입력" 옵션 추가 (TradeSelect 와 동일 패턴)
+    - 시각 폴리시: 헤더 `bg-gradient-to-br from-blue-50 to-white` + 아이콘 박스 `shadow-md shadow-blue-600/30`, 각 필드를 `FieldBlock` 컴포넌트로 감싸 아이콘 + 레이블 + 힌트 일관 적용, 심각도 버튼 `activeCls` 에 컬러별 glow shadow, 이미지 dropzone 은 `border-dashed` hover 시 blue-50 배경, 전체 radius `rounded-2xl` + `border-t-4 border-blue-600` 악센트
+  - `components/report/LocationMapEditor.jsx` v2 — 기존 "area → 방 매핑" 구조 완전 폐기. 새 역할: **현재 리포트에 실제 사용된 고유 `location` 값을 나열하고 bulk rename**. 각 행 `[기존 값] → [변경 input] [건수]`, 저장 시 `{oldLabel: newLabel}` 맵을 부모에 전달하고 부모가 모든 defect 의 location 일괄 갱신. 사용자 원 요청("방3 → 방1 전체 일괄 변경")에 정확히 매칭
+  - `components/report/DefectEditRow.jsx` — location 을 **read-only 라벨에서 editable text input 으로 변경**(datalist 프리셋 연결), area 는 작은 색상 chip 으로 축약 표시(읽기 전용)
+  - `components/report/ReportEditor.jsx` — `locationMap` 관련 로직 제거. `LOCATION_PRESETS` + 현재 사용 중인 고유 location 값을 합친 배열을 `<datalist id="report-editor-location-presets">` 로 테이블 상단에 1회 렌더, 모든 하자 행의 location input 이 이 id 공유. `applyLocationRename(mapping)` 액션으로 bulk rename 수행. 공종 그룹 헤더에 `bg-gradient-to-r from-blue-50/80` + hover 전이 폴리시
+  - `components/report/ReportModal.jsx` — `toEditableDefects` 에서 `location_label` → `location` 필드 사용, `location_map` 저장 제거, `inferInitialLocation` import 로 교체
+  - `components/report/ExcelExportButton.jsx` — Excel 컬럼 헤더 `장소` 는 이제 `d.location` 우선 참조(v1 호환 위해 `location_label` 폴백), area 컬럼은 `영역코드` 로 명확화
+  - `components/report/PdfExportButton.jsx` — PDF 메타 pill 에 `장소: ...` 와 `영역 A` 를 별도 표시(기존엔 area 가 location fallback 이었음)
+- **시각 폴리시 차이점 (before → after)**:
+  - 모달 헤더: 단색 → 그라데이션 배경 + 악센트 border-top
+  - 드롭다운: 기본 select → FieldBlock(아이콘+레이블+힌트) 래퍼
+  - 심각도 버튼: 플랫 컬러 → 선택 시 glow shadow + 톤 강조
+  - 공종 그룹 헤더: 단색 파스텔 → 좌측에서 우측으로 fading gradient + hover 짙어짐
+- **검증**: Vite(5176) HMR transform — 9개 수정 파일 모두 OK, 컴파일 에러 0
+- **잔여 한계 / 향후**:
+  - 기존 아카이브에 저장된 리포트(v1, `location_label`/`location_map` 필드) 는 backward-compat 으로 읽기 시 자동 마이그레이션됨(`d.location ?? d.location_label`). 실제 운영 전 migration 스크립트로 1회 정리 권장
+  - 시각 폴리시는 편집 모달·편집기 테이블까지만 적용. 대시보드 HUD(어두운 톤)는 별도 디자인 정체성이라 건드리지 않음 — 추후 사용자 피드백에 따라 폴리시 범위 확장 가능
+
+#### ⏱ 2026-04-16 18:16 | 대시보드 HUD 폴리시 — "AI-스럽다" 재지적 반영
+- **피드백**: `/dashboard` UI 가 여전히 AI-제너릭 느낌이 강하다. 특히 거대한 camera-off 아이콘이 메인 공간을 허전하게 채우고, 모든 패널이 동일 카드 스타일(`bg-slate-900/80 + border-slate-700/60`)로 찍혀나온 듯한 인상.
+- **분석**: 대시보드 HUD 가 "기본 Tailwind 스켈레톤" 수준에 머물러 있어 브랜드/디자인 정체성 부재. 특히 **빈 상태** (No Signal / 탐지된 하자 없음) 가 제네릭 플레이스홀더라 전체 화면이 비어있어 보임.
+- **반영** (5 파일 폴리시):
+  - `components/video/LiveVideoFeed.jsx` — fill 모드 No-Signal 전면 재디자인:
+    - 거대한 📷 이모지 삭제 → **레이더 UI** (동심원 3개 + crosshair + 회전 스캔 라인 + 중앙 펄스 점)
+    - 상태 텍스트 계층화: "Awaiting Signal"(accent mono + 도트) → "RGB 스트림 대기 중"(한글 메인) → "CAM · RGB · /api/v1/stream/rgb"(경로 mono)
+    - 하단에 "ENCODER IDLE · WS PENDING" tier 추가 → 시스템 상태감 부여
+    - 재연결 버튼 `border-b border-accent-500/30` underline-only 스타일로 교체 (기존 "text-brand-500 hover:underline" 은 hover 전 밋밋했음)
+    - PIP 용 컴팩트 No-Signal 도 분리 (작은 📷 + 소형 텍스트)
+  - `pages/Dashboard.jsx`:
+    - **도트 그리드 배경** (radial-gradient dot pattern 24px) 전역 `inset-0` 으로 추가 → 검은 공백 해소
+    - **상단 accent 글로우** (`bg-[radial-gradient(ellipse_80%_50%_at_50%_0%,rgba(16,185,129,0.06),...)`) → HUD 상단에 은은한 emerald 발광
+    - **HUD 코너 브래킷** — LIVE 피드 16:9 박스 네 모서리에 L자 브래킷(5x5, `border-accent-400/60`) 배치. 신규 `<CornerBracket position="tl|tr|bl|br" />` 컴포넌트
+    - 피드 박스에 `ring-1 ring-accent-500/5` 추가 → 외곽선 깊이
+  - `components/defects/DefectPanel.jsx` — 빈 상태 업그레이드:
+    - 기존 "✅ + 탐지된 하자 없음" → **펄스 링 3겹(animate-ping) + 중앙 accent 점** + "Scanning · Idle" mono 레이블 + "드론 스트림에서 수신 대기 중" 서브
+    - 필터 미스매치 시 "Filter Mismatch · 전체 N건 중 0건" 로 구분 메시지
+  - `components/dashboard/DronesPanel.jsx` — 전면 리디자인:
+    - 📷 🌡️ 이모지 → `Camera` / `Thermometer` lucide 아이콘 (헤더에도 `Radio` 아이콘)
+    - 신규 `<SignalBars strength={1..4} active />` — 4-segment 신호 세기 바(데모용 각 드론에 fixed strength)
+    - 선택된 카드 상단에 발광 gradient 라인 (`bg-gradient-to-r from-transparent via-accent-400 to-transparent`)
+    - 헤더 `LINK · OK` 에 pulse 도트 + 상태 색상 분기(connected/disconnected)
+    - 배터리 섹션을 "BATTERY 라벨 + 퍼센트" 2행 구조로 분리, low 시 붉은색 경고 + 선택 시 accent glow
+    - 헤더 카운터 `2` → `bg-slate-800/60 border rounded` pill
+  - `components/map3d/BuildingScene.jsx` — 범례 pill 리디자인:
+    - 크기 축소 (`text-[10px] → text-[9px]`, `gap-3 → gap-2`, padding 압축)
+    - HIGH/MED/LOW 사이에 `w-px h-2` divider 삽입 → HUD 장식
+    - 마커 수 표시 앞에도 divider — "3-segment + count" 시각적 리듬 생성
+    - `shadow-md` 추가
+  - `pages/Dashboard.jsx` 미니맵 카드 헤더 폴리시:
+    - 헤더 배경 `bg-gradient-to-r from-accent-500/5 to-transparent`
+    - 좌측에 `w-0.5 h-4 bg-accent-400` 세로 바(accent rail)
+    - "3D Mini Map" 다음에 `FLOOR · SIM` pill
+    - 우측에 `● LIVE` 상태 도트 + pulse
+- **시각 비교**:
+  - Before: 거대한 camera-off 아이콘이 중앙을 채움, 모든 패널이 동일 grey card, 빈 상태는 이모지 단발
+  - After: 레이더 스캔 + crosshair + context tiers, 선택된 드론에 발광, 미니맵 accent rail, 배경에 도트 그리드 + 상단 glow, 피드 박스에 HUD 코너 브래킷 → "관제실 콘솔" 톤
+- **검증**: Vite(5176) HMR — 5개 폴리시 파일 전부 transform 성공, 컴파일 에러 0. lucide 신규 아이콘(Camera / Thermometer / Radio) 번들 존재 확인
+- **잔여**: 실제 드론 스트림/텔레메트리 연결 전엔 여전히 "대기 상태" 가 주로 보일 것 — 그래도 그 대기 상태 자체가 폴리시 됨. WS 연결 후 실제 데이터 흐르면 더 "live" 해 보임

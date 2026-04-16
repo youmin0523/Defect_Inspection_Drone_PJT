@@ -61,24 +61,74 @@ export default function LiveVideoFeed({ fill = false, mode }) {
           onLoad={() => setIsLoaded(true)}
           onError={() => setHasError(true)}
         />
-      ) : (
-        /* No Signal 플레이스홀더 */
-        <div className={`flex flex-col items-center justify-center w-full h-full text-slate-500 ${noSignalBg}`}>
-          {fill && (
-            /* 풀스크린 모드: 은은한 레이더 그리드 오버레이 */
-            <div className="absolute inset-0 opacity-[0.08] bg-[linear-gradient(0deg,transparent_24%,rgba(16,185,129,0.6)_25%,rgba(16,185,129,0.6)_26%,transparent_27%,transparent_74%,rgba(16,185,129,0.6)_75%,rgba(16,185,129,0.6)_76%,transparent_77%),linear-gradient(90deg,transparent_24%,rgba(16,185,129,0.6)_25%,rgba(16,185,129,0.6)_26%,transparent_27%,transparent_74%,rgba(16,185,129,0.6)_75%,rgba(16,185,129,0.6)_76%,transparent_77%)] bg-[size:56px_56px]" />
-          )}
-          <span className={fill ? 'text-6xl mb-3 opacity-40' : 'text-4xl mb-2'}>📷</span>
-          <span className={fill ? 'text-sm font-mono tracking-widest uppercase text-slate-400' : 'text-sm'}>
-            {fill ? 'Signal Standby' : 'No Signal'}
-          </span>
-          {fill && (
-            <span className="text-[10px] font-mono text-slate-600 mt-1">
-              {MODE_LABELS[cameraMode]} · {cameraMode.toUpperCase()} CAM
+      ) : fill ? (
+        /* 풀스크린 No-Signal — 레이더 스캔/격자/타이포 */
+        <div className={`relative flex flex-col items-center justify-center w-full h-full text-slate-500 ${noSignalBg}`}>
+          {/* 배경 격자 */}
+          <div className="absolute inset-0 opacity-[0.06] bg-[linear-gradient(0deg,transparent_24%,rgba(16,185,129,0.8)_25%,rgba(16,185,129,0.8)_26%,transparent_27%,transparent_74%,rgba(16,185,129,0.8)_75%,rgba(16,185,129,0.8)_76%,transparent_77%),linear-gradient(90deg,transparent_24%,rgba(16,185,129,0.8)_25%,rgba(16,185,129,0.8)_26%,transparent_27%,transparent_74%,rgba(16,185,129,0.8)_75%,rgba(16,185,129,0.8)_76%,transparent_77%)] bg-[size:56px_56px]" />
+
+          {/* 레이더 원 + 스캔 라인 */}
+          <div className="relative w-40 h-40 mb-5">
+            {/* 동심원 3개 */}
+            <div className="absolute inset-0 rounded-full border border-accent-500/20" />
+            <div className="absolute inset-[15%] rounded-full border border-accent-500/25" />
+            <div className="absolute inset-[32%] rounded-full border border-accent-500/30" />
+            {/* 십자 crosshair */}
+            <div className="absolute left-1/2 top-0 bottom-0 w-px -translate-x-1/2 bg-accent-500/15" />
+            <div className="absolute top-1/2 left-0 right-0 h-px -translate-y-1/2 bg-accent-500/15" />
+            {/* 회전 스캔 라인 */}
+            <div className="absolute inset-0 rounded-full overflow-hidden">
+              <div
+                className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full w-px h-1/2 origin-bottom bg-gradient-to-t from-accent-400/70 to-transparent"
+                style={{ animation: 'spin 3.5s linear infinite' }}
+              />
+            </div>
+            {/* 중앙 펄스 점 */}
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+              <span className="block w-2 h-2 rounded-full bg-accent-400" />
+              <span className="absolute inset-0 w-2 h-2 rounded-full bg-accent-400 animate-ping opacity-60" />
+            </div>
+          </div>
+
+          {/* 텍스트 타이포 — 모노 + 트래킹 */}
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-accent-400 animate-pulse" />
+            <span className="text-[11px] font-mono uppercase tracking-[0.25em] text-accent-300">
+              Awaiting Signal
             </span>
-          )}
+          </div>
+          <div className="text-sm font-semibold text-slate-300 mb-1">
+            {MODE_LABELS[cameraMode]} 스트림 대기 중
+          </div>
+          <div className="text-[10px] font-mono text-slate-600 tracking-wider">
+            CAM · {cameraMode.toUpperCase()} · /api/v1/stream/{cameraMode}
+          </div>
+
+          {/* 상태 tier + 재연결 */}
+          <div className="mt-5 flex items-center gap-3 text-[10px] font-mono text-slate-600">
+            <span className="flex items-center gap-1">
+              <span className="w-1 h-1 rounded-full bg-slate-600" />
+              ENCODER IDLE
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-1 h-1 rounded-full bg-slate-600" />
+              WS PENDING
+            </span>
+          </div>
           <button
-            className="mt-3 text-xs text-brand-500 hover:underline"
+            className="mt-4 text-[11px] font-mono uppercase tracking-widest text-accent-400 hover:text-accent-300 border-b border-accent-500/30 hover:border-accent-500/60 pb-0.5 transition"
+            onClick={() => setHasError(false)}
+          >
+            재연결 시도
+          </button>
+        </div>
+      ) : (
+        /* 컴팩트 No-Signal (PIP 등 작은 박스) */
+        <div className="flex flex-col items-center justify-center w-full h-full text-slate-500">
+          <span className="text-2xl mb-1 opacity-60">📷</span>
+          <span className="text-xs font-mono tracking-wider">No Signal</span>
+          <button
+            className="mt-2 text-[10px] text-brand-500 hover:underline"
             onClick={() => setHasError(false)}
           >
             재연결
