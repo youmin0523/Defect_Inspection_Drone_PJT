@@ -60,3 +60,21 @@ export async function generateReportPreview(request) {
   const { data } = await axios.post(`${BASE}/preview`, request)
   return data
 }
+
+/**
+ * 하자 배열에 대한 공종 자동 제안.
+ *   현재(DB 미연결): category_code 휴리스틱(constants/trades.js) 로 즉시 반환.
+ *   추후(백엔드 연결): `POST /api/v1/report/suggest-trades` 로 교체 — Claude 가 image + defect_type + area 를 종합 분석.
+ *
+ * @param {Array} defects - DefectLog 배열
+ * @returns {Promise<Array<{ id, trade, confidence }>>}
+ */
+export async function suggestTrades(defects) {
+  // 동적 import 로 순환 참조 방지 (trades.js 는 순수 상수라 OK)
+  const { suggestTradeFromCode } = await import('../constants/trades.js')
+  return defects.map((d) => ({
+    id: d.id,
+    trade: suggestTradeFromCode(d.category_code),
+    confidence: 0.65, // 휴리스틱 기본값. Claude 전환 시 실제 신뢰도로 교체.
+  }))
+}

@@ -37,6 +37,12 @@ const useSessionStore = create(
       modelProgress: 0,
       modelStage: '',
 
+      // //* [Modified Code] 흐름 재설계 (2026-04-16): 모델 소스 구분
+      //   'premodel'  = /employee/pre-work 에서 미리 만들어둔 모델을 로드
+      //   'drone'     = L3 자율비행 실시간 스캔
+      modelSource: null, // 'premodel' | 'drone' | null
+      loadedPreModelId: null, // preModelStore.preModels 의 id 참조
+
       // ── 세션 메타 ──────────────────────────
       sessionId: null,
       startedAt: null,
@@ -52,6 +58,40 @@ const useSessionStore = create(
       setLevel: (level) =>
         set({
           level,
+          uploadedFileName: null,
+          uploadedFileSize: null,
+          uploadedImageDataUrl: null,
+          modelStatus: 'pending',
+          modelProgress: 0,
+          modelStage: '',
+          modelSource: null,
+          loadedPreModelId: null,
+        }),
+
+      /**
+       * 사전 모델 선택 — /session/level 에서 pre-made model 클릭 시.
+       * preModel: { id, level, fileName, imageDataUrl } — preModelStore 에서 꺼낸 엔트리
+       * /session/modeling 은 modelSource='premodel' 감지 시 짧은 "로드 중" 애니메이션 후 ready 처리.
+       */
+      selectPreModel: (preModel) =>
+        set({
+          level: preModel.level,
+          modelSource: 'premodel',
+          loadedPreModelId: preModel.id,
+          uploadedFileName: preModel.fileName,
+          uploadedFileSize: preModel.fileSize ?? 0,
+          uploadedImageDataUrl: preModel.imageDataUrl ?? null,
+          modelStatus: 'pending',
+          modelProgress: 0,
+          modelStage: '',
+        }),
+
+      /** 드론 자율비행 선택 — L3 고정. */
+      selectDroneScan: () =>
+        set({
+          level: 3,
+          modelSource: 'drone',
+          loadedPreModelId: null,
           uploadedFileName: null,
           uploadedFileSize: null,
           uploadedImageDataUrl: null,
@@ -130,6 +170,8 @@ const useSessionStore = create(
           modelStatus: 'pending',
           modelProgress: 0,
           modelStage: '',
+          modelSource: null,
+          loadedPreModelId: null,
           sessionId: null,
           startedAt: null,
           finishedAt: null,
@@ -148,6 +190,8 @@ const useSessionStore = create(
         uploadedFileSize: state.uploadedFileSize,
         uploadedImageDataUrl: state.uploadedImageDataUrl,
         modelStatus: state.modelStatus,
+        modelSource: state.modelSource,
+        loadedPreModelId: state.loadedPreModelId,
         sessionId: state.sessionId,
         startedAt: state.startedAt,
         finishedAt: state.finishedAt,

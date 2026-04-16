@@ -59,12 +59,15 @@ export default function BuildingScene() {
         </Suspense>
       </Canvas>
 
-      {/* //* [Modified Code] 범례 — HUD 레이아웃에서 DronesPanel 과 겹치지 않도록 bottom-center 로 이동 */}
-      <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 text-[10px] text-slate-400 px-3 py-1.5 rounded-full bg-slate-900/60 border border-slate-700/60 backdrop-blur-sm">
+      {/* //* [Modified Code v3] 범례 — bottom-center pill, 작은 HUD 장식 */}
+      <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2 text-[9px] text-slate-400 px-2 py-1 rounded-full bg-slate-900/75 border border-slate-700/70 backdrop-blur-sm shadow-md">
         <LegendItem color="#ef4444" label="HIGH" />
+        <span className="w-px h-2 bg-slate-700" />
         <LegendItem color="#f97316" label="MED" />
+        <span className="w-px h-2 bg-slate-700" />
         <LegendItem color="#eab308" label="LOW" />
-        <span className="ml-1 font-mono text-slate-500">{mappedDefects.length} markers</span>
+        <span className="w-px h-2 bg-slate-700" />
+        <span className="font-mono text-slate-500 tabular-nums">{mappedDefects.length}</span>
       </div>
     </div>
   )

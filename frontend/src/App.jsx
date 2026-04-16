@@ -17,6 +17,9 @@ import Signup from './pages/Signup.jsx'
 import FindAccount from './pages/FindAccount.jsx'
 // //* [Modified Code] 직원 전용 진입 랜딩 (Interior Inspection Dashboard 목업)
 import EmployeeLanding from './pages/EmployeeLanding.jsx'
+import PreWork from './pages/employee/PreWork.jsx'
+import ReportsList from './pages/employee/ReportsList.jsx'
+import ReportDetail from './pages/employee/ReportDetail.jsx'
 import SessionLayout from './components/session/SessionLayout.jsx'
 import ProtectedSessionLayout from './components/session/ProtectedSessionLayout.jsx'
 import SessionSetup from './pages/session/SessionSetup.jsx'
@@ -75,8 +78,13 @@ export default function App() {
         <Route path="/signup" element={<Signup />} />
         <Route path="/find-account" element={<FindAccount />} />
 
-        {/* //* [Modified Code] 직원 전용 랜딩 — "직원 전용" 버튼 클릭 시 진입하는 Interior Inspection 허브 */}
+        {/* //* [Modified Code] 직원 전용 랜딩 — "직원 전용" 버튼 클릭 시 진입하는 허브 */}
         <Route path="/employee" element={<EmployeeLanding />} />
+        {/* //* [Modified Code] 사전 작업 — CAD/평면도 업로드 → Mock 3D 모델링 → preModelStore 저장 */}
+        <Route path="/employee/pre-work" element={<PreWork />} />
+        {/* //* [Modified Code] 리포트 아카이브 — 사무실 목록 + 재편집 상세 */}
+        <Route path="/employee/reports" element={<ReportsList />} />
+        <Route path="/employee/reports/:id" element={<ReportDetail />} />
 
         {/* //* [Modified Code] 세션 워크플로우 (Setup → Level → Modeling) */}
         <Route path="/session" element={<SessionLayout />}>

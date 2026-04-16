@@ -52,12 +52,6 @@ class SlamMapResponse(BaseModel):
         from_attributes = True
 
 
-class SlamMapListResponse(BaseModel):
-    """SLAM 맵 목록 응답 (이미지 제외, 메타데이터만)"""
-    items: list[SlamMapMetaResponse]
-    total: int
-
-
 class SlamMapMetaResponse(BaseModel):
     """SLAM 맵 메타데이터 응답 (목록 조회용, 이미지 제외)"""
     id: UUID
@@ -72,7 +66,6 @@ class SlamMapMetaResponse(BaseModel):
         from_attributes = True
 
 
-# forward ref 해결을 위해 재정의
 class SlamMapListResponse(BaseModel):
     """SLAM 맵 목록 응답 (이미지 제외, 메타데이터만)"""
     items: list[SlamMapMetaResponse]

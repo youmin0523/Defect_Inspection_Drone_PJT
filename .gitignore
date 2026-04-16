@@ -6,8 +6,10 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# Claude Code (개인 설정 — 팀원 공유 불필요)
-.claude/
+# Claude Code
+# - .claude/settings.json 및 .claude/hooks/ 는 팀 공용이므로 commit
+# - 개인 Notion 싱크 / API 키 등 personal override 는 settings.local.json 에 담아 gitignore
+.claude/settings.local.json
 
 # Python 캐시
 __pycache__/
