@@ -16,8 +16,11 @@ alembic
 psycopg2-binary
 
 # ── Validation ─────────────────────────────
-pydantic
+pydantic[email]
 pydantic-settings
+
+# ── Auth / Security ────────────────────────
+passlib[bcrypt]
 
 # ── Computer Vision / AI ───────────────────
 opencv-python

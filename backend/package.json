@@ -6,7 +6,7 @@
   "scripts": {
     "setup:python": "python -m venv venv && venv\\Scripts\\python.exe -m pip install --upgrade pip setuptools wheel && venv\\Scripts\\pip install -r requirements.txt",
     "postinstall": "npm run setup:python",
-    "dev": "venv\\Scripts\\uvicorn app.main:app --reload",
-    "start": "venv\\Scripts\\uvicorn app.main:app --reload"
+    "dev": "venv\\Scripts\\python.exe -m uvicorn app.main:app --reload",
+    "start": "venv\\Scripts\\python.exe -m uvicorn app.main:app --reload"
   }
 }

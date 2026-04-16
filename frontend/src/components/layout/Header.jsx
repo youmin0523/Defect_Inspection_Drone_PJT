@@ -1,17 +1,19 @@
 /**
  * components/layout/Header.jsx
- * 역할: 상단 헤더 컴포넌트
- *       - AeroInspect 로고 및 서비스명
- *       - WebSocket 연결 상태 배지 (connected/disconnected/error)
- *       - 드론 텔레메트리 요약 (고도, 배터리, 비행모드)
- *       - 현재 탐지 건수 요약 표시
+ * 역할: 상단 헤더 컴포넌트 (레퍼런스 톤 반영)
+ *       - 좌측: DRONE INSPECT 로고 + 브랜드
+ *       - 중앙: 검색바 (Global Search)
+ *       - 우측: 탐지 심각도 요약 + WebSocket 연결 상태 + 알림 + 프로필
+ *       - //! [Original Code] 기존: 드론 텔레메트리(고도/속도/배터리/모드)가 헤더에 있었음
+ *       - //* [Modified Code] 텔레메트리는 별도 컴포넌트(DroneStatusCard)로 이동 — 헤더는 가볍게
  */
 
+import { Search, Bell } from 'lucide-react'
 import useDroneStore from '../../store/droneStore.js'
 import useDefectStore from '../../store/defectStore.js'
 
 const STATUS_CONFIG = {
-  connected:    { label: '연결됨',    dotClass: 'bg-green-400 animate-pulse' },
+  connected:    { label: '연결됨',    dotClass: 'bg-accent-400 animate-pulse' },
   connecting:   { label: '연결 중...', dotClass: 'bg-yellow-400 animate-pulse' },
   disconnected: { label: '연결 끊김',  dotClass: 'bg-gray-400' },
   error:        { label: '오류',      dotClass: 'bg-red-400 animate-pulse' },
@@ -19,12 +21,8 @@ const STATUS_CONFIG = {
 
 export default function Header() {
   const connectionStatus = useDroneStore((s) => s.connectionStatus)
-  const telemetry = useDroneStore((s) => s.telemetry)
-  
-  // defects 배열의 레퍼런스만 구독
+
   const defects = useDefectStore((s) => s.defects)
-  
-  // 렌더링 시점에 심각도 카운트 계산
   const severityCounts = defects.reduce(
     (acc, d) => {
       acc[d.severity] = (acc[d.severity] || 0) + 1
@@ -36,50 +34,66 @@ export default function Header() {
   const status = STATUS_CONFIG[connectionStatus] ?? STATUS_CONFIG.disconnected
 
   return (
-    <header className="flex items-center justify-between h-14 px-4 border-b border-dashboard-border bg-dashboard-surface flex-shrink-0">
-      {/* 로고 */}
+    <header className="flex items-center justify-between h-14 px-5 border-b border-slate-700 bg-dashboard-surface shadow-lg flex-shrink-0">
+      {/* 좌측: 브랜드 */}
       <div className="flex items-center gap-2">
-        <span className="text-xl">🚁</span>
-        <span className="font-bold text-white tracking-wide">AeroInspect</span>
-        <span className="text-xs text-slate-500 ml-1">v1.3</span>
+        <div className="p-1.5 bg-accent-500 rounded-md">
+          <span className="text-white text-sm" aria-hidden>🚁</span>
+        </div>
+        <span className="font-extrabold text-white tracking-tight uppercase text-lg">
+          DRONE INSPECT
+        </span>
+        <span className="text-[10px] text-slate-500 ml-1 font-mono">v1.3</span>
       </div>
 
-      {/* 드론 텔레메트리 */}
-      <div className="flex items-center gap-4 text-xs text-slate-400">
-        <TelemetryItem label="고도" value={`${telemetry.z.toFixed(1)}m`} />
-        <TelemetryItem label="속도" value={`${telemetry.speed.toFixed(1)}m/s`} />
-        <TelemetryItem label="모드" value={telemetry.mode} />
-        <TelemetryItem
-          label="배터리"
-          value={`${telemetry.battery}%`}
-          valueClass={telemetry.battery < 20 ? 'text-red-400' : 'text-green-400'}
+      {/* 중앙: 검색바 */}
+      <div className="relative hidden md:block">
+        <Search
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+          size={16}
+        />
+        <input
+          type="text"
+          placeholder="Global Search..."
+          className="bg-dashboard-panel border border-slate-600 rounded-full py-1.5 pl-10 pr-4 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500 w-64"
         />
       </div>
 
-      {/* 탐지 요약 + 연결 상태 */}
+      {/* 우측: 심각도 요약 + 연결 상태 + 알림 + 프로필 */}
       <div className="flex items-center gap-3">
         {/* 심각도 카운터 */}
-        <div className="flex items-center gap-2 text-xs">
+        <div className="hidden lg:flex items-center gap-2 text-xs">
           <span className="badge-high">{severityCounts.HIGH} HIGH</span>
           <span className="badge-med">{severityCounts.MED} MED</span>
           <span className="badge-low">{severityCounts.LOW} LOW</span>
         </div>
 
         {/* WS 연결 상태 */}
-        <div className="flex items-center gap-1.5 text-xs text-slate-400">
+        <div className="flex items-center gap-1.5 text-xs text-slate-400 px-2">
           <span className={`w-2 h-2 rounded-full ${status.dotClass}`} />
           <span>{status.label}</span>
         </div>
+
+        {/* 알림 */}
+        <button
+          type="button"
+          className="icon-btn relative"
+          aria-label="알림"
+        >
+          <Bell size={18} />
+          {severityCounts.HIGH > 0 && (
+            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-dashboard-surface" />
+          )}
+        </button>
+
+        {/* 프로필 (TODO: 로그인 연동 시 실제 사용자 정보 바인딩) */}
+        <div
+          className="w-8 h-8 rounded-full bg-slate-600 border border-slate-500 flex items-center justify-center text-xs font-bold text-white"
+          title="프로필"
+        >
+          U
+        </div>
       </div>
     </header>
-  )
-}
-
-function TelemetryItem({ label, value, valueClass = 'text-slate-200' }) {
-  return (
-    <div className="flex flex-col items-center">
-      <span className="text-slate-500 text-[10px] uppercase">{label}</span>
-      <span className={`font-mono text-xs ${valueClass}`}>{value}</span>
-    </div>
   )
 }

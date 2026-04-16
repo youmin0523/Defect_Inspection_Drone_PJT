@@ -330,3 +330,87 @@ Dashboard (12-col grid)
   - 성함/연락처 그리드 `gap-6` → `gap-4`, 라벨 `mb-2` → `mb-1.5`, 인풋 `py-3` → `py-2`. 문의 내용 `rows={5}` → `rows={3}`로 축소(본문 입력은 유지). 제출 버튼 `py-5 text-xl` → `py-3 text-base`로 과한 히어로감 제거.
   - 고객 유형 옵션 배열의 라벨을 `개인 (입주민)` → `개인`, `사업자 / 법인` → `사업자 (개인/법인)`로 교체. Signup `SIGNUP_TABS`·Login 탭과 동일 표기 → 3개 진입점(로그인/회원가입/도입문의)의 고객 유형 언어가 완전히 정렬됨.
   - 결과: 사업자 섹션이 펼쳐진 상태에서도 헤더 + 고객유형 + 사업자등록번호 + 성함/연락처 + 문의 내용 + 제출 버튼이 92vh 안에 스크롤 없이 수납됨. `max-h-[92vh] overflow-y-auto`는 유지해 저해상도 뷰포트에서는 안전망 역할.
+
+#### ⏱ 2026-04-16 16:55 | Notion 라운드별 스크린샷 보완
+- **피드백**: `sync_notion_logs.py` 가 세션당 대표 스크린샷 1장만 찍어서, 하루에 라운드가 5개인데도 Notion에 이미지가 1장뿐이라 과소 표현됨. 라운드별로 해당 UI 상태를 캡쳐해서 덧붙여달라.
+- **반영**:
+  - `_capture_rounds_2026-04-16.py` 일회성 스크립트 작성 — `sync_notion_logs` 의 `upload_to_imgbb`/`find_daily_page`/`_notion_headers` 를 재사용하고 Playwright 로 5개 UI 상태를 순회 캡쳐.
+  - 라운드 정의: R1 `/find-account?tab=id`, R1' `/find-account?tab=pw`, R2 `/signup` + 사업자 탭 클릭, R3+R5 `/` + "도입 문의하기" CTA 클릭 + 사업자 라디오 선택, R4 `/find-account`.
+  - 첫 실행 시 ContactModal 사업자 라디오에서 `<input type="radio" class="opacity-0">` 가 pointer events 를 가로채 Playwright 클릭 30s 타임아웃 발생 → 로케이터를 `label:has-text("사업자 (개인/법인)")` 로 교체해 해당 라운드만 재캡쳐.
+  - imgBB 업로드 후 오늘 페이지 하단에 `📸 라운드별 스크린샷 (2026-04-16)` H2 섹션으로 묶어 "라운드 라벨(H3) + 이미지 블록" 쌍으로 append. Notion API 의 `PATCH /v1/blocks/{id}/children` 를 2회 호출해 초기 5장 + 재캡쳐 1장 총 6장 첨부.
+
+#### ⏱ 2026-04-16 15:19 | 랜딩 도입사례 배너에 "직원 전용 · DRONE INSPECT 진입" 임시 버튼 추가
+- **피드백**: 이미 구축된 DRONE INSPECT UI(`/dashboard`)를 랜딩 페이지 "도입사례" 섹션 우측에 `직원 전용` 임시 버튼으로 연결해달라.
+- **반영**:
+  - `components/landing/CasesSection.jsx` 상단에 `react-router-dom`의 `Link` import 추가. 기존 다크 배너 `<div>` 에 `relative` 포지셔닝을 부여하고, 우측 상단(`absolute top-6 right-6`)에 `<Link to="/dashboard">` 버튼을 배치.
+  - 스타일: 랜딩 전체 톤을 해치지 않도록 accent 컬러인 yellow-400 을 차용 — `border-yellow-400/60 bg-yellow-400/10 text-yellow-300` 기본 + hover 시 `bg-yellow-400 text-slate-900` 로 반전. 좌측에 1.5px LIVE 도트(`bg-yellow-300`)를 두고, 라벨은 "직원 전용 · DRONE INSPECT 진입"으로 목적(진입 경로)을 명시.
+  - `title` 속성에 "임시 진입 버튼 — 실제 배포 시 인증 게이트 적용 예정" 을 넣어 마우스 호버 시 운영 의도를 남김. 추후 로그인/권한 체크가 붙으면 이 버튼 자체가 `Link` → 권한 가드 래퍼로 교체될 예정.
+  - 기존 배너 카피(`DRONE INSPECT 현장 스케치` / 서브카피)는 `text-center` 그대로 유지 — 버튼은 절대 위치라 중앙 정렬을 흐트러뜨리지 않음.
+
+#### ⏱ 2026-04-16 15:21 | "직원 전용" 버튼 — 로그인 우회 임시 모드 명시화
+- **피드백**: 원래 직원 전용은 로그인 후에만 노출되어야 하지만, DB 미연결 단계이므로 임시로 로그인 없이 접근 가능하도록 해달라.
+- **조사**: `App.jsx` `<Route path="/dashboard">`에는 이미 인증 가드가 없고, 방금 추가한 `<Link to="/dashboard">` 도 권한 체크 없이 직행 — 기능적으로는 이미 로그인 없이 접근 가능한 상태. 다만 이 "임시 우회" 의도가 UI 상 드러나지 않아, 추후 누가 보더라도 "인증 붙이기 전 임시 단계"임을 인지할 수 있도록 가시화 보완.
+- **반영**:
+  - `components/landing/CasesSection.jsx` 버튼 내부에 `TEMP` 뱃지(`rounded-sm bg-yellow-400/30 text-[10px] font-bold tracking-wider`) 삽입 — hover 시 반전 스타일과 맞물려 slate 톤으로 전환. 버튼 라벨 끝에 붙여 클릭 없이도 임시 상태가 보이게 처리.
+  - 버튼 아래 `text-[10px] text-yellow-200/70` 서브 라벨로 **"DB 미연결 — 로그인 우회 중"** 문구 추가. `flex flex-col items-end gap-1` 컨테이너로 버튼 + 서브 라벨 수직 정렬.
+  - `title` 툴팁을 "임시 진입 버튼 — 실제 배포 시 인증 게이트 적용 예정" → **"DB 미연결 단계 — 로그인 없이 임시 접근. 실제 배포 시 인증 가드 적용 예정"** 으로 교체. 사유(DB 미연결)와 해소 시점(배포 전 가드 추가)을 명시.
+  - 컴포넌트 상단 주석에 NOTE 블록 추가 — AWS 프리티어 제약으로 DB 기동이 최종 단계인 점, 그 전까지는 로그인 우회 직행 링크로 운영한다는 팀 컨텍스트를 코드 근처에 남겨 이후 합류하는 개발자가 맥락 없이 이 링크를 "권한 누락 버그"로 오해하지 않도록 함.
+  - 결과: 기능은 변함없이 `/` 랜딩 → 버튼 클릭 → 로그인 화면을 거치지 않고 `/dashboard` 직행. 시각적으로는 "직원 전용 · DRONE INSPECT 진입 [TEMP] / DB 미연결 — 로그인 우회 중" 조합이 노출돼 임시 모드임이 즉시 인지됨. 향후 인증 붙을 때는 이 블록 전체를 `<RequireAuth role="staff">` 래퍼로 교체하고 TEMP 뱃지 / 서브 라벨만 제거하면 됨.
+
+#### ⏱ 2026-04-16 15:24 | "직원 전용" 버튼 위치 재조정 — 섹션 배너 → 상단 헤더 네비 우측
+- **피드백**: "그렇다고 하기엔 아직 직원전용 버튼이 안보이는데?" — 사용자가 랜딩 최상단을 보는데 버튼이 안 보였음. 원래 지시 "도입사례 우측에" 를 CasesSection 다크 배너 우측으로 해석했으나, 사용자의 실제 의도는 **헤더 네비의 "도입 사례" 링크 우측(= 항상 보이는 위치)** 이었던 것으로 재해석됨.
+- **반영**:
+  - `components/landing/CasesSection.jsx` — 앞 라운드에 추가했던 다크 배너 내부 `<Link to="/dashboard">` 블록 + `react-router-dom` import 전부 롤백. 원래 중앙 정렬 배너로 원복.
+  - `components/landing/LandingHeader.jsx` 우측 버튼 그룹 최좌측(= "도입 사례" 네비 바로 다음, 로그인 버튼 앞)에 `<Link to="/dashboard">` 신규 삽입.
+  - 스타일: 헤더가 스크롤 상태에 따라 투명 ↔ 흰 배경으로 바뀌므로 `isAtTop` 분기. 투명 모드에서는 `border-yellow-300/60 bg-yellow-300/10 text-yellow-200` (어두운 히어로 위에서 yellow accent 유지), 스크롤 후 흰 헤더에서는 `border-yellow-500/70 bg-yellow-50 text-yellow-800` 로 대비 확보. hover 시 두 상태 모두 `bg-yellow-*` 솔리드 + `text-slate-900` 로 반전. 좌측 LIVE 도트 + 우측 `TEMP` 뱃지(`text-[10px] font-bold tracking-wider`) 유지.
+  - 반응형: `hidden md:inline-flex` — 모바일(기존 네비 숨김 구간)에서는 함께 숨김. 로그인/도입 문의하기와 동일한 브레이크포인트 규칙.
+  - `title` 툴팁 "DB 미연결 단계 — 로그인 없이 임시 접근. 실제 배포 시 인증 가드 적용 예정" 은 그대로 유지. 코드 주석에도 AWS 프리티어 제약으로 DB 기동 전까지 로그인 우회 운영 중임을 기록.
+  - 결과: 랜딩 어느 스크롤 위치에서도 상단 고정 헤더에 `🟡 직원 전용 [TEMP]` 버튼이 보이며, 클릭 시 로그인 경유 없이 `/dashboard`(DRONE INSPECT UI) 로 직행. 사용자가 앞선 메시지에서 버튼을 못 봤던 이슈 해소.
+
+#### ⏱ 2026-04-16 15:36 | Dashboard 풀 리디자인 — 카드 그리드 → 풀스크린 HUD 관제실 톤 + DRONE↔카메라 연동
+- **피드백**: 사용자가 산업 플랜트 위성 맵 레퍼런스 이미지를 첨부하며 "UI가 너무 AI틱하다 — 이 레퍼런스처럼 맵이 풀스크린 배경이고 HUD 패널이 떠있는 관제실 톤으로 바꿔달라". 추가로 "현재 화면은 DRONE 01 = RGB 카메라, DRONE 02 클릭 시 열화상 카메라로 자동 전환" 규칙 요청.
+- **사전 조사**: Explore 에이전트로 store/컴포넌트/스타일 토큰 전수 파악 — `droneStore` 에 선택 드론 state 없음, `cameraMode` 는 rgb/thermal/blend 3단, `BuildingScene` 은 부모 높이 의존, `DashboardLayout` 이 Sidebar+Header+p-4 padding 으로 카드 그리드 전제, index.css 에 `.card`/`.card-accent`/`.badge-*` 컴포넌트 클래스 + tailwind 커스텀 색(`accent-*`, `dashboard-bg/surface/panel/border`) 존재.
+- **반영**:
+  - `store/droneStore.js` — `selectedDroneId: 'drone-01'` state 추가, `DRONE_CAMERA_MAP = { 'drone-01': 'rgb', 'drone-02': 'thermal' }` 상수 export, `setSelectedDrone(id)` 액션이 selectedDroneId + cameraMode 를 원자적으로 set (drone ↔ 카메라 1:1 매핑 내재화). 초기 reset 에도 selectedDroneId 포함.
+  - `App.jsx` — `DashboardLayout` 에서 `Header` import/렌더 제거, `main` 의 `p-4` 제거 + `relative overflow-hidden` 부여해 Dashboard 가 뷰포트 전체(Sidebar 제외)를 캔버스로 차지. Sidebar(w-14) 는 내비게이션 용도로 유지.
+  - `components/dashboard/DashboardTopBar.jsx` 신규 — 맵 위 플로팅 상단 바. 좌측: 브랜드 로고 + Global Search, 중앙: `Satellite Map` 토글(현재 UI only, 추후 Mapbox 도입 예정 주석), 우측: `Flightpaths` 버튼 + WS 상태(LIVE/SYNC/OFFLINE/ERROR) + 알림 벨(HIGH 카운트 > 0 시 붉은 점) + 프로필 U 박스. 전체 `pointer-events-none` 바탕에 자식만 `pointer-events-auto` 로 맵 클릭 방해 방지. `backdrop-blur-md` + `bg-slate-900/70` + `border-slate-700/60` 조합으로 "HUD" 질감.
+  - `components/dashboard/DronesPanel.jsx` 신규 — 좌하단(`absolute bottom-4 left-4`) 플로팅 카드. DRONE 01(RGB) / DRONE 02(THERMAL) 2열 그리드. 각 카드 클릭 시 `setSelectedDrone(id)` 호출 → cameraMode 자동 매핑. 선택된 카드는 accent(emerald) 글로우(`shadow-[0_0_12px_rgba(16,185,129,0.25)]`) + `ACTIVE` 뱃지, 비선택은 slate 톤 + `IDLE` 뱃지. 배터리 바는 DRONE 01 만 실 텔레메트리 연결, DRONE 02 는 데모값 83%(멀티 드론 API 도입 전).
+  - `pages/Dashboard.jsx` 풀 리라이트 — 루트가 `relative h-full w-full overflow-hidden`, `<BuildingScene>` 를 `absolute inset-0` 배경으로 깔고 `radial-gradient` 비네팅 오버레이 추가(패널 가독성 확보). 기존 12-col 그리드(영상/온도/3D/하자/보고서) 해체하고 4개 플로팅 aside 로 재배치:
+    - 상단: `<DashboardTopBar />`
+    - 좌상단(`top-20 left-4 w-[320px]`): LIVE Feed(`<LiveVideoFeed>`) + Thermal Trend(`<ThermalGraph>`). Live Feed 헤더에 "D01 · RGB · 일반 카메라" 처럼 **선택 드론 + 카메라 모드** 실시간 라벨링. 빨간 LIVE 도트(`animate-pulse`).
+    - 좌하단: `<DronesPanel />`
+    - 우측(`top-20 right-4 bottom-4 w-[360px]`): AI Defect Analysis 플로팅 카드. 헤더에 `<Activity />` 아이콘 + 타이틀 + 녹색 LIVE 도트 + "Real-time detection" 서브 라벨(레퍼런스 문구 그대로). 본문은 기존 `<DefectPanel />` 재사용.
+  - `components/map3d/BuildingScene.jsx` — 루트에 `relative` 부여(풀스크린 배경 시 범례 absolute 기준 필요). 범례를 `bottom-2 left-2` → `bottom-4 left-1/2 -translate-x-1/2` 로 이동(DronesPanel/AI 패널과 충돌 없는 bottom-center). `rounded-full` pill 형태에 `bg-slate-900/60 backdrop-blur-sm` 입혀 HUD 질감 통일. `pointer-events-none` 으로 맵 조작 방해 제거.
+  - `components/layout/Sidebar.jsx` — `NAV_ITEMS` 의 대시보드 링크 `to: '/'` → `to: '/dashboard'` 수정(랜딩/대시보드 라우트 분리 후 경로 오류 고침).
+- **제외 / 결정 사항**:
+  - `components/layout/Header.jsx` 파일은 보존하되 참조 없음 상태로 남김 — 추후 다른 레이아웃(예: Reports 페이지)에서 재사용 가능성.
+  - `DroneStatusCard.jsx` 도 보존하되 Dashboard 에서는 DronesPanel 로 대체. 두 컴포넌트의 책임이 겹치지만 DroneStatusCard 는 4칸 텔레메트리 상세(고도/속도/모드/배터리) 용, DronesPanel 은 드론 선택 + 카메라 매핑 용으로 목적이 다름.
+  - `ReportPanel` 은 이번 HUD 레이아웃에서 일단 제외 — 레퍼런스에 대응물 없고, 풀스크린 캔버스 철학과 어긋남. 추후 "리포트" 별도 탭/페이지로 분리 예정.
+  - **위성 이미지 베이스맵**(레퍼런스의 실제 아쉬워 보이는 요소)은 이번 라운드 제외 — 현재 R3F 기반 BuildingMesh 와 데이터 소스가 다르고 Mapbox/MapLibre 도입이 선행 필요. TopBar 의 "Satellite Map" 버튼은 자리만 잡아 둠.
+- **검증**: `npm run dev` → Vite 6.4.2 231ms 부팅(port 5174). Dashboard.jsx / DashboardTopBar.jsx / DronesPanel.jsx 모두 HMR transform 성공, 컴파일 에러 0건. lucide-react@1.8.0(실제 번들은 최신 아이콘 export 포함) 에서 `Search/Satellite/Route/Bell/Video/Activity` named export 존재 확인 후 import.
+- **결과**: 사용자가 "너무 AI틱"이라 한 "카드 카탈로그" 톤이 "풀스크린 위성 관제실" 톤으로 전환. DRONE 01/02 카드 클릭 → 좌상단 LIVE Feed 의 카메라 스트림(rgb/thermal MJPEG URL)이 즉시 전환되어 사용자가 제시한 "드론=카메라" 매핑 규칙이 UI 에 내재화됨.
+
+#### ⏱ 2026-04-16 15:42 | 3D 맵 강등 + LIVE 피드 승격 — 메인 캔버스 재편
+- **피드백**: 이전 라운드 결과 화면을 보고 "3D 맵이 주 화면처럼 나온다. 3D 맵(도면/평면도/시뮬레이션 모델링 용)은 우측 하단 미니맵이 맞고, 메인은 다른 것"이라 재정비 요청. 사용자가 일관되게 주장한 "DRONE 01 = 일반 카메라 / DRONE 02 = 열화상" 규칙과 맞물려, 메인 캔버스는 **선택 드론의 LIVE 카메라 피드**가 돼야 한다는 쪽으로 확정.
+- **반영**:
+  - `components/video/LiveVideoFeed.jsx` — `fill` prop 추가. fill=true 시 컨테이너 `w-full h-full`(16/9 강제 해제), `object-cover`(16/9 박스 꽉 채움). No-Signal 플레이스홀더도 fill 모드 전용으로 개편: `radial-gradient` 다크 배경 + 8% opacity 그린 그리드 오버레이(레이더 톤) + "Signal Standby" 모노스페이스 라벨 + 현재 카메라 모드 서브 라벨. 기존 top-2 모드 뱃지/LIVE 점멸 마커는 fill 모드에서 숨김(상위 Dashboard HUD 에서 처리).
+  - `pages/Dashboard.jsx` 재배치 — 기존 `<BuildingScene>` 풀스크린 배경 구조 폐기. 메인 영역에 `<LiveVideoFeed fill />` 를 16/9 박스로 렌더링. 좌상단 Live Feed PIP 도 제거(메인으로 승격되어 중복).
+  - 3D 맵은 우하단 300×200 카드 (`3D Mini Map` 타이틀 + "floor plan · sim" 서브 라벨)로 강등. `<BuildingScene>` 는 이 카드 안에 삽입.
+  - AI Defect Analysis 패널은 미니맵과 수직 겹침 방지 위해 `bottom: MINIMAP_H + 24` offset 적용.
+  - `components/map3d/BuildingScene.jsx` 의 범례 pill 은 그대로 유지(미니맵 bottom-center 안에 자연스럽게 앉음).
+- **결과**: 메인 캔버스가 "선택된 드론의 시점 영상" 이 되고, 3D 시뮬레이션/평면도 모델링은 우하단 미니맵으로 내려가 "맵은 부가 정보" 의 위계 확립.
+
+#### ⏱ 2026-04-16 15:45 | LIVE 피드 16:9 비율 유지 + 패널/미니맵 겹침 방지
+- **피드백**: "16:9 카메라 비율 유지하면서 AI DEFECT ANALYSIS랑 3D MINIMAP 구간에 안 겹치게 해줄 수 있을까?"  — 앞 라운드에서 LiveVideoFeed `fill` 모드가 `object-cover + w-full h-full` 이어서 피드가 뷰포트 전체를 덮고 우측 HUD 패널들 뒤로 깔려 있었음. 원본 영상 비율(16:9) 유지하면서 패널·미니맵 바깥으로만 확장되게 해달라는 요청.
+- **반영**:
+  - `pages/Dashboard.jsx` 에 `SAFE = { top:100, bottom:150, left:316, right:400 }` 상수 정의. 각 값은 주변 HUD 패널 폭/높이 + margin + gap 기준:
+    - `top: 100` → DashboardTopBar(56px) + 여백(44)
+    - `bottom: 150` → DronesPanel(≈134) + gap. 우하단 Minimap(h=200) 은 horizontal 로 이미 오른쪽에 치우쳐 수평 분리되므로 vertical offset 은 DronesPanel 기준만 반영.
+    - `left: 316` → Thermal Trend(w=280) + margin(4) + gap(32)
+    - `right: 400` → AI Defect Analysis(w=360) + margin(4) + gap(36). 미니맵(w=300) 은 이미 이 범위 안에 들어오므로 별도 고려 불필요.
+  - 기존 "absolute inset-0 + LiveVideoFeed fill" 구조를 `absolute { top, bottom, left, right } = SAFE` + `flex items-center justify-center` 래퍼로 교체. 내부 16/9 박스는 `{ aspectRatio: '16 / 9', width: '100%', maxHeight: '100%' }` 조합으로 safe zone 안에서 자동 피팅 — 화면 비율에 따라 가로/세로 기준 중 하나로 맞춰짐.
+  - 피드 박스에 `bg-black rounded-xl border border-slate-700/60 shadow-2xl` 로 letterbox 영역을 자연스럽게 처리. 박스 바깥(safe zone 안의 여백)은 `bg-dashboard-bg` 가 비침.
+  - 기존 상단 중앙에 따로 떠있던 "드론·카메라 컨텍스트 뱃지" 는 피드 박스 좌상단(`absolute top-3 left-3`) 으로 이동 — 피드 자체의 HUD 로 자리 잡음.
+- **검증**: Vite dev 재기동 328ms, Dashboard.jsx / LiveVideoFeed.jsx transform 모두 성공. 컴파일 에러 0.
+- **결과**: LIVE 피드가 16:9 letterbox 박스로 가운데 정렬되고, AI Defect Analysis(우상단) + 3D Mini Map(우하단) + Thermal Trend(좌상단) + Drones(좌하단) 네 개 HUD 카드와 어떤 화면 비율에서도 겹치지 않음. 사용자가 지목한 "사각지대" 영역이 해소됨.
+  - 결과: 한 세션에 대표 스크린샷 1장 + 라운드별 세부 캡쳐 6장이 함께 보이는 구조. 향후 sync 스크립트 자체에 "세션 내 `#### ⏱` 라운드 스캐너 + prepare 훅" 을 정식 기능으로 편입할지는 별건으로 둠(현재는 일회성 보완).

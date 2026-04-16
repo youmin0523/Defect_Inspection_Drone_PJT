@@ -21,13 +21,20 @@ export default function DefectCard({ defect }) {
 
   const areaInfo = DEFECT_AREAS[defect.area]
 
+  // //* [Modified Code] 심각도별 border 색상 (레퍼런스 톤: red/amber/gray 강조)
+  const severityBorder = {
+    HIGH: 'border-red-500/30 hover:border-red-500/60',
+    MED:  'border-amber-500/30 hover:border-amber-500/60',
+    LOW:  'border-slate-600 hover:border-slate-500',
+  }[defect.severity] ?? 'border-slate-700 hover:border-slate-500'
+
   return (
     <button
       onClick={() => selectDefect(isSelected ? null : defect)}
-      className={`w-full text-left p-3 rounded-lg border transition-all ${
+      className={`w-full text-left p-3 rounded-xl border bg-dashboard-panel shadow-lg transition-all group ${
         isSelected
-          ? 'border-brand-500 bg-brand-600/10'
-          : 'border-dashboard-border hover:border-slate-500 bg-dashboard-bg/50'
+          ? 'border-accent-500 bg-accent-500/5 shadow-accent-900/20'
+          : severityBorder
       }`}
     >
       <div className="flex items-start gap-3">
@@ -36,10 +43,10 @@ export default function DefectCard({ defect }) {
           <img
             src={defect.image_crop}
             alt="하자 크롭"
-            className="w-12 h-12 object-cover rounded flex-shrink-0 border border-dashboard-border"
+            className="w-14 h-14 object-cover rounded-lg flex-shrink-0 border border-slate-600 group-hover:border-slate-500"
           />
         ) : (
-          <div className="w-12 h-12 bg-dashboard-border rounded flex-shrink-0 flex items-center justify-center text-slate-500 text-xs">
+          <div className="w-14 h-14 bg-slate-700 rounded-lg flex-shrink-0 flex items-center justify-center text-slate-500 text-xs border border-slate-600">
             없음
           </div>
         )}

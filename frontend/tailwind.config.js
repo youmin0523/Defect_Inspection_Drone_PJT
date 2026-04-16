@@ -15,7 +15,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // AeroInspect 브랜드 컬러
+        // DRONE INSPECT 브랜드 컬러 (기존 blue 계열은 보조용으로 유지)
         brand: {
           50:  '#eff6ff',
           100: '#dbeafe',
@@ -24,16 +24,25 @@ export default {
           700: '#1d4ed8',
           900: '#1e3a8a',
         },
+        // //* [Modified Code] 대시보드 주 강조색 = emerald 계열 (레퍼런스 톤)
+        accent: {
+          50:  '#ecfdf5',
+          400: '#34d399',
+          500: '#10b981',
+          600: '#059669',
+          700: '#047857',
+        },
         // 심각도별 컬러
         severity: {
           high: '#ef4444',     // red-500
           med:  '#f97316',     // orange-500
           low:  '#eab308',     // yellow-500
         },
-        // 다크 대시보드 배경
+        // //* [Modified Code] 다크 대시보드 배경 — 레퍼런스 톤 (더 진한 네이비 + 중간톤 surface)
         dashboard: {
-          bg:      '#0f172a',  // slate-900
-          surface: '#1e293b',  // slate-800
+          bg:      '#0b1120',  // 레퍼런스 메인 배경
+          surface: '#111827',  // 레퍼런스 헤더/사이드 surface
+          panel:   '#1f2937',  // 카드 내부 패널
           border:  '#334155',  // slate-700
         },
       },

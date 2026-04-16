@@ -7,7 +7,6 @@
  */
 
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import Header from './components/layout/Header.jsx'
 import Sidebar from './components/layout/Sidebar.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Landing from './pages/Landing.jsx'
@@ -34,24 +33,22 @@ import useWebSocket from './hooks/useWebSocket.js'
 //   )
 // }
 
-// //* [Modified Code] DashboardLayout으로 이름 변경 + /dashboard 전용 레이아웃으로 분리
-// (랜딩 페이지에서는 Sidebar/Header/WebSocket이 필요 없으므로 격리)
+// //* [Modified Code] 풀스크린 HUD 레이아웃 — 레퍼런스 "위성 관제실" 톤 적용 라운드.
+// Header 제거(검색·WS 상태·알림·프로필은 Dashboard 내부 상단 HUD 바로 흡수), main 의 p-4 제거하여
+// BuildingScene 이 뷰포트 전체를 캔버스로 쓰도록 변경. Sidebar(w-14)는 내비게이션 용도로 유지.
 function DashboardLayout() {
   // 대시보드 진입 시에만 WebSocket 연결 초기화
   useWebSocket()
 
   return (
     <div className="flex h-screen overflow-hidden bg-dashboard-bg">
-      {/* 좌측 사이드바 */}
+      {/* 좌측 사이드바 (얇은 아이콘 내비) */}
       <Sidebar />
 
-      {/* 우측 메인 영역 */}
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-auto p-4">
-          <Dashboard />
-        </main>
-      </div>
+      {/* 우측 메인: 전체를 Dashboard 컨트롤 — HUD + 풀스크린 맵 */}
+      <main className="flex-1 relative overflow-hidden">
+        <Dashboard />
+      </main>
     </div>
   )
 }

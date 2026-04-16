@@ -7,9 +7,16 @@
 
 from fastapi import APIRouter
 
-from app.api import defects, stream, websocket, report
+from app.api import auth, defects, stream, websocket, report
 
 api_router = APIRouter()
+
+# 인증 / 회원가입
+api_router.include_router(
+    auth.router,
+    prefix="/auth",
+    tags=["Auth"],
+)
 
 # 하자 탐지 로그 CRUD
 api_router.include_router(
