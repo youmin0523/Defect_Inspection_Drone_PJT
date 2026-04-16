@@ -11,6 +11,9 @@ import Header from './components/layout/Header.jsx'
 import Sidebar from './components/layout/Sidebar.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Landing from './pages/Landing.jsx'
+import Login from './pages/Login.jsx'
+import Signup from './pages/Signup.jsx'
+import FindAccount from './pages/FindAccount.jsx'
 import useWebSocket from './hooks/useWebSocket.js'
 
 // //! [Original Code] 기존 AppLayout: 단일 라우트 `/` = Dashboard + WebSocket 최상단 초기화
@@ -59,6 +62,10 @@ export default function App() {
       <Routes>
         {/* //* [Modified Code] 루트는 랜딩 페이지로 변경 */}
         <Route path="/" element={<Landing />} />
+        {/* 로그인 / 회원가입 / 계정 찾기 */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/find-account" element={<FindAccount />} />
         {/* //* [Modified Code] 기존 대시보드는 /dashboard 경로로 이동 */}
         <Route path="/dashboard" element={<DashboardLayout />} />
       </Routes>

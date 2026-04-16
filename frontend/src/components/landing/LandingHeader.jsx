@@ -100,18 +100,33 @@ export default function LandingHeader() {
         ))}
       </nav>
 
-      {/* CTA: 최상단에서는 살짝 투명 처리, 스크롤 후엔 솔리드 */}
-      <button
-        type="button"
-        onClick={() => setIsContactOpen(true)}
-        className={`px-5 py-2.5 rounded-md font-semibold transition shadow-md focus:outline-none focus:ring-2 focus:ring-blue-400 ${
-          isAtTop
-            ? 'bg-blue-600/90 hover:bg-blue-600 text-white backdrop-blur-sm'
-            : 'bg-blue-600 hover:bg-blue-700 text-white'
-        }`}
-      >
-        도입 문의하기
-      </button>
+      {/* 우측 버튼 그룹 */}
+      <div className="flex items-center gap-3">
+        {/* 로그인 버튼 */}
+        <Link
+          to="/login"
+          className={`hidden md:inline-block px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+            isAtTop
+              ? 'text-white/90 hover:text-white hover:bg-white/10'
+              : 'text-gray-600 hover:text-blue-600 hover:bg-gray-100'
+          }`}
+        >
+          로그인
+        </Link>
+
+        {/* CTA: 최상단에서는 살짝 투명 처리, 스크롤 후엔 솔리드 */}
+        <button
+          type="button"
+          onClick={() => setIsContactOpen(true)}
+          className={`px-5 py-2.5 rounded-md font-semibold transition shadow-md focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+            isAtTop
+              ? 'bg-blue-600/90 hover:bg-blue-600 text-white backdrop-blur-sm'
+              : 'bg-blue-600 hover:bg-blue-700 text-white'
+          }`}
+        >
+          도입 문의하기
+        </button>
+      </div>
 
       <ContactModal
         isOpen={isContactOpen}

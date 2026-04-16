@@ -289,3 +289,44 @@ Dashboard (12-col grid)
 - **피드백**: Hero `<h1>` 첫 줄 "도면이 없어도 완벽한 3D 모델링," 중 "모델링,"만 다음 줄로 밀려 어색하다. 한 줄로 붙여달라.
 - **원인**: 뷰포트 md 구간에서 `text-6xl`(60px) × 한글 18자 ≈ 1080px가 컨테이너 `max-w-4xl`(896px)을 초과해 공백 기준으로 자동 줄바꿈.
 - **반영**: `HeroSection.jsx`의 h1 폰트 스케일을 `text-4xl md:text-6xl` → `text-4xl md:text-5xl lg:text-6xl`로 단계화. md 구간은 `text-5xl`(48px)로 낮춰 한 줄에 수용. 컨테이너도 `max-w-4xl` → `max-w-4xl lg:max-w-5xl`로 lg 이상에서 폭 여유 확보. 추가 안전장치로 해당 문구를 `<span className="md:whitespace-nowrap">`로 감싸 md 이상에서는 강제 한 줄 유지(모바일은 기본 줄바꿈 허용).
+
+#### ⏱ 2026-04-16 14:03 | 계정 찾기 페이지 신규 추가 (아이디/비밀번호 찾기)
+- **피드백**: 백엔드(Node.js/Express)에서 `POST /api/find-id`(type/name/email/bizNumber) 와 `POST /api/find-pw`(type/userId/email/bizNumber) 를 Nodemailer 기반으로 구현 중. 이에 맞춰 프론트에 계정 찾기 UI를 추가하고, 사용자가 첨부한 HTML 목업(탭 2개 + 개인/사업자 토글 + 사업자번호 조건부 노출)을 프로젝트 톤에 맞춰 포팅해달라.
+- **반영**:
+  - `pages/FindAccount.jsx` 신규 생성. 상단 탭(`아이디 찾기` / `비밀번호 찾기`)은 Login/Signup 과 동일한 폰트·색 컨벤션을 따르되 목업의 "border-bottom 2px accent" 스타일을 유지. 탭 하부에 개인/사업자 세그먼트 컨트롤(선택 시 `bg-blue-50 border-blue-200 text-blue-700`) 배치, `isBusiness` 시에만 사업자등록번호 input 노출(숫자만 10자리, 자동 필터링).
+  - 아이디 찾기 모드: `이름`(사업자 시 `담당자명`으로 라벨 변경) + 이메일. 비밀번호 찾기 모드: `아이디` + 이메일. 제출 버튼 컬러도 모드별로 분기(`slate-900` vs `blue-600`)해 시각적으로 모드 인지 가능.
+  - 제출 payload 를 백엔드 스펙과 정렬: `{ type, email, bizNumber?, (name | userId) }`. 현재 단계에서는 실제 fetch 대신 `console.log` + 600ms 지연 mock 으로 남겨두고(주석 처리된 fetch 블록 포함), 상태(`idle / loading / success / error`)에 따라 상태 메시지 색상(slate/green/red) 표시.
+  - URL 쿼리 `?tab=id|pw` 로 초기 탭 지정 + `handleModeChange` 시 `navigate('/find-account?tab=...', { replace: true })` 로 동기화해 북마크·뒤로가기 일관성 확보. `useEffect([location.search])` 로 외부에서 쿼리만 바뀌어도 탭이 따라오도록 처리.
+  - `App.jsx` 에 `<Route path="/find-account" element={<FindAccount />} />` 추가(로그인/회원가입 그룹에 합침). `Login.jsx` 하단의 `<a href="#">아이디 찾기 | 비밀번호 찾기</a>` 를 `<Link to="/find-account?tab=id">`, `<Link to="/find-account?tab=pw">` 로 교체 — 클릭 시 해당 탭으로 바로 진입.
+  - 타이틀 헤더는 Login 과 동일한 3분할 레이아웃(좌측 로고 / 중앙 제목 "계정 찾기" + 서브카피 "잃어버린 계정 정보를 안전하게 찾아드립니다." / 우측 "로그인으로..")로 통일. 하단에도 "로그인 화면으로 돌아가기" 언더라인 링크 유지.
+
+#### ⏱ 2026-04-16 15:10 | 회원가입 사업자 진위 확인 — 국세청(odcloud.kr) API 실연동
+- **피드백**: 사용자가 Node.js + axios 기반 공공데이터포털 "사업자등록정보 진위확인 및 상태조회" 샘플 코드를 제시하며, Signup.jsx 의 `verifyBusiness` 시뮬레이션(`setTimeout` mock)을 실제 API 연동으로 교체 요청. API 키는 `.env` 에 양식만 만들어두면 본인이 입력하겠다고 지정.
+- **반영**:
+  - `frontend/src/api/businessVerifyApi.js` 신규 생성. `checkBusinessStatus(b_no)` 함수가 `POST /api/nts-businessman/v1/status` 에 `{ b_no: [번호] }` 페이로드로 호출하고 `data[0]` 결과 객체 반환. `interpretStatus(result)` 헬퍼로 `b_stt_cd`(01 계속 / 02 휴업 / 03 폐업)에 따라 `{ ok, message }` 로 정규화 — 01 이면 과세유형을 포함한 성공 메시지, 02/03 은 상태별 한글 안내(폐업 시 `end_dt` 부착), 빈 응답이면 미등록 사업자 처리.
+  - CORS 우회: `vite.config.js` `server.proxy` 에 `/odcloud → https://api.odcloud.kr`(rewrite 로 prefix 제거) 추가. dev 환경에서는 `import.meta.env.DEV` 체크해 `/odcloud/api/nts-businessman/v1` 경유, prod 는 직접 호출(필요 시 백엔드 프록시 전환 전제).
+  - 키 관리: `.env.example` / `.env` 에 `VITE_ODCLOUD_SERVICE_KEY=` 항목 추가. 공공데이터포털 발급 "Decoding" 키를 그대로 붙여넣기. 키 미설정 시 API 함수가 즉시 Error throw 해 "환경변수 미설정" 메시지 노출. `VITE_` 접두사 env 는 번들에 노출됨을 주석에 경고로 기재.
+  - `Signup.jsx` 상단에 `checkBusinessStatus, interpretStatus` import. 기존 `verifyBusiness`(1초 setTimeout mock → `bizNum === '0000000000'` 만 실패 처리하던 로직)를 async 함수로 교체. 유효성 체크(10자리 숫자 + 대표자명) 통과 시 `status: 'loading'` 세팅 → `checkBusinessStatus(bizNum)` 호출 → `interpretStatus(result).ok` 여부로 `success`/`error` 분기. catch 블록에서 `err.response.data.msg`/`message`/`err.message` 우선순위로 서버 오류 메시지 추출해 "조회 실패: ..." 포맷으로 표시.
+  - 폼 필드는 그대로 유지(`bizNumber`/`bizCeoName`). status 엔드포인트 자체는 대표자명을 사용하지 않지만, 가입 레코드/회원 DB 저장용으로 계속 수집. (향후 `/validate` 엔드포인트로 전환 시 개업일자 입력 필드 추가 필요 — 현재는 사용자 UX 단순화를 위해 status 엔드포인트 유지.)
+
+#### ⏱ 2026-04-16 15:22 | 사업자 진위확인 API — 랜딩 "도입 문의하기" 모달에도 확산 적용
+- **피드백**: "현재 프로젝트에 관련된 사업자 진위여부 조회가 필요한 구간에 다 적용해줘" — 신규 구축한 `businessVerifyApi` 를 프로젝트 전반으로 확산 요청.
+- **조사**: 프로젝트 내 `bizNumber`/`사업자`/`진위` 키워드 매치 5개 파일 전수 검토 — `Signup.jsx`(방금 연동 완료), `ContactModal.jsx`(진위 확인 버튼 + setTimeout mock 보유), `Login.jsx`(로그인 식별자로만 사용, 진위 확인 버튼 없음), `FindAccount.jsx`(계정 찾기 식별자로만 사용, 진위 확인 버튼 없음). 후자 2개는 이미 가입 단계에서 진위 검증이 끝난 사업자번호를 식별자로 쓰는 위치라 DB lookup 영역으로 판단 → 실제 진위확인 API 호출이 필요한 구간은 Signup + ContactModal 두 곳으로 확정.
+- **반영**:
+  - `components/landing/ContactModal.jsx` 상단에 `../../api/businessVerifyApi` 상대경로로 `checkBusinessStatus`, `interpretStatus` import.
+  - `verifyBusiness` 를 async 로 전환. `setTimeout(1000) + bizNum === '0000000000'` 분기 mock 을 제거하고 `checkBusinessStatus(bizNum)` 호출 → `interpretStatus(result)` 로 `{ ok, message }` 정규화 → `ok ? '✅' : '❌'` 이모지 프리픽스 유지(기존 모달 UI 톤 보존)하며 상태 세팅. catch 블록에서 `err.response.data.msg`/`message`/`err.message` 순으로 서버 오류 추출해 "❌ 조회 실패: ..." 포맷으로 표시. 10자리 숫자 검증 로직은 유지(네트워크 호출 전 조기 실패).
+  - Login/FindAccount 는 **의도적으로 제외** — 로그인·계정 찾기는 "이미 등록된 회원인지" 확인하는 단계지 "국세청에 존재하는지"를 확인하는 단계가 아님. 여기서 국세청 API 를 호출하면 DB 에 없는 사업자번호도 국세청 존재하면 통과시키는 의미 충돌이 생김. 포맷(10자리 숫자) 검증만 유지하고 실제 진위확인은 회원가입·도입문의 두 진입점에 한정.
+  - 결과: 프로젝트 내 "사업자 진위 확인 버튼을 가진 모든 폼"이 단일 `businessVerifyApi` 모듈을 통해 odcloud.kr 에 직접 호출하는 구조로 통일. 키·엔드포인트·상태 코드 해석이 한 파일에 수렴해 향후 백엔드 프록시로 전환할 때 `BASE_URL` 한 곳만 바꾸면 됨.
+
+#### ⏱ 2026-04-16 15:30 | 계정 찾기 헤더 서브카피 제거
+- **피드백**: 계정 찾기 페이지 헤더의 "잃어버린 계정 정보를 안전하게 찾아드립니다." 서브카피를 빼달라 — 페이지 제목 "계정 찾기"만으로도 목적이 충분히 전달됨.
+- **반영**: `FindAccount.jsx` 헤더 중앙 컬럼의 `<p className="text-gray-500 mt-1 text-xs">...</p>` 문단을 제거. h1 "계정 찾기"만 남기고 좌측 로고 / 중앙 타이틀 / 우측 "로그인으로.." 3분할 레이아웃은 유지 — Login/Signup 과의 헤더 구조 일관성은 그대로. 상단 여백이 소폭 줄어드는 대신 탭(아이디/비밀번호) 영역과의 시각적 거리가 자연스러워짐.
+
+#### ⏱ 2026-04-16 16:10 | 도입 문의 모달 — 한 화면 수납 + 고객 유형 라벨 정합
+- **피드백**: 사업자 탭에서 사업자등록번호 영역이 열리면 모달 하단 "상담 신청하기" 버튼이 뷰포트 밖으로 밀려 잘린다. 한 페이지에 모두 들어오도록 배치를 수정하고, 고객 유형 라벨도 로그인/회원가입에서 쓰는 `개인` / `사업자 (개인/법인)` 표기로 통일해달라.
+- **반영**:
+  - `components/landing/ContactModal.jsx` 레이아웃 밀도 상향. 컨테이너 `max-w-3xl max-h-[90vh]` → `max-w-2xl max-h-[92vh]`로 세로 여유 확보. 헤더 `py-10 px-8` → `py-5 px-6`, 제목 `text-3xl mb-2` → `text-2xl mb-1`, 서브카피 `text-sm` → `text-xs`로 상단 블록을 컴팩트하게 축소.
+  - 폼 `p-8 md:p-10 space-y-8` → `p-6 md:p-7 space-y-4`. 라디오 카드 `p-4 gap-4` → `px-3 py-2.5 gap-3`, 라벨 폰트에 `text-sm` 추가. 사업자 섹션 `p-6 space-y-4` → `p-4 space-y-2`, 내부 인풋 `py-3` → `py-2`, "진위 확인" 버튼 `px-6 py-3` → `px-5 py-2 text-sm`.
+  - 성함/연락처 그리드 `gap-6` → `gap-4`, 라벨 `mb-2` → `mb-1.5`, 인풋 `py-3` → `py-2`. 문의 내용 `rows={5}` → `rows={3}`로 축소(본문 입력은 유지). 제출 버튼 `py-5 text-xl` → `py-3 text-base`로 과한 히어로감 제거.
+  - 고객 유형 옵션 배열의 라벨을 `개인 (입주민)` → `개인`, `사업자 / 법인` → `사업자 (개인/법인)`로 교체. Signup `SIGNUP_TABS`·Login 탭과 동일 표기 → 3개 진입점(로그인/회원가입/도입문의)의 고객 유형 언어가 완전히 정렬됨.
+  - 결과: 사업자 섹션이 펼쳐진 상태에서도 헤더 + 고객유형 + 사업자등록번호 + 성함/연락처 + 문의 내용 + 제출 버튼이 92vh 안에 스크롤 없이 수납됨. `max-h-[92vh] overflow-y-auto`는 유지해 저해상도 뷰포트에서는 안전망 역할.

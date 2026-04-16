@@ -30,6 +30,13 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      // 국세청 사업자 상태조회 API (odcloud.kr) CORS 우회용 프록시
+      '/odcloud': {
+        target: 'https://api.odcloud.kr',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/odcloud/, ''),
+      },
     },
   },
   build: {
