@@ -8,6 +8,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+import { checkBusinessStatus, interpretStatus } from '../../api/businessVerifyApi'
+
 const INITIAL_FORM = {
   customerType: 'personal',
   bizNumber: '',
@@ -52,21 +54,29 @@ export default function ContactModal({ isOpen, onClose }) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  const verifyBusiness = () => {
+  const verifyBusiness = async () => {
     const bizNum = form.bizNumber.trim()
     if (bizNum.length !== 10 || Number.isNaN(Number(bizNum))) {
       setVerifyState({ status: 'error', message: '⚠️ 유효한 10자리 사업자등록번호를 입력해주세요.' })
       return
     }
     setVerifyState({ status: 'loading', message: '⏳ 국세청 데이터 조회 중...' })
-    // //* [Simulated] 실제로는 국세청 API 호출 지점
-    setTimeout(() => {
-      if (bizNum === '0000000000') {
-        setVerifyState({ status: 'error', message: '❌ 휴업 또는 폐업된 사업자입니다.' })
-      } else {
-        setVerifyState({ status: 'success', message: '✅ 확인 완료: 정상 운영 중인 사업자입니다.' })
-      }
-    }, 1000)
+
+    try {
+      const result = await checkBusinessStatus(bizNum)
+      const { ok, message } = interpretStatus(result)
+      setVerifyState({
+        status: ok ? 'success' : 'error',
+        message: `${ok ? '✅' : '❌'} ${message}`,
+      })
+    } catch (err) {
+      const serverMsg =
+        err?.response?.data?.msg ||
+        err?.response?.data?.message ||
+        err?.message ||
+        '알 수 없는 오류'
+      setVerifyState({ status: 'error', message: `❌ 조회 실패: ${serverMsg}` })
+    }
   }
 
   const handleSubmit = (e) => {
@@ -103,43 +113,43 @@ export default function ContactModal({ isOpen, onClose }) {
       {/* 모달 본체 */}
       <div
         ref={dialogRef}
-        className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl"
+        className="relative w-full max-w-2xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl shadow-2xl"
       >
         {/* 헤더 */}
-        <div className="bg-slate-900 text-white py-10 px-8 text-center rounded-t-2xl relative">
+        <div className="bg-slate-900 text-white py-5 px-6 text-center rounded-t-2xl relative">
           <button
             type="button"
             onClick={onClose}
             aria-label="닫기"
-            className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition"
+            className="absolute top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition"
           >
             <span className="text-2xl leading-none">×</span>
           </button>
-          <h1 id="contact-modal-title" className="text-3xl font-bold mb-2">
+          <h1 id="contact-modal-title" className="text-2xl font-bold mb-1">
             DRONE INSPECT 도입 문의
           </h1>
-          <p className="text-gray-400 text-sm">
+          <p className="text-gray-400 text-xs">
             신뢰할 수 있는 비즈니스 파트너십을 위해 사업자 정보를 확인합니다.
           </p>
         </div>
 
         {/* 폼 */}
-        <form onSubmit={handleSubmit} className="p-8 md:p-10 space-y-8">
+        <form onSubmit={handleSubmit} className="p-6 md:p-7 space-y-4">
           {/* 고객 유형 */}
           <div>
-            <label className="block text-sm font-bold text-gray-700 mb-4">
+            <label className="block text-sm font-bold text-gray-700 mb-2">
               고객 유형 선택 <span className="text-red-500">*</span>
             </label>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               {[
-                { value: 'personal', label: '개인 (입주민)' },
-                { value: 'business', label: '사업자 / 법인' },
+                { value: 'personal', label: '개인' },
+                { value: 'business', label: '사업자 (개인/법인)' },
               ].map((opt) => {
                 const selected = form.customerType === opt.value
                 return (
                   <label
                     key={opt.value}
-                    className={`relative flex items-center justify-center p-4 border rounded-xl cursor-pointer transition ${
+                    className={`relative flex items-center justify-center px-3 py-2.5 border rounded-xl cursor-pointer transition ${
                       selected
                         ? 'border-blue-600 bg-blue-50'
                         : 'border-gray-300 hover:bg-gray-50'
@@ -156,7 +166,7 @@ export default function ContactModal({ isOpen, onClose }) {
                       }}
                       className="absolute opacity-0"
                     />
-                    <span className={`font-bold ${selected ? 'text-blue-700' : 'text-gray-600'}`}>
+                    <span className={`font-bold text-sm ${selected ? 'text-blue-700' : 'text-gray-600'}`}>
                       {opt.label}
                     </span>
                   </label>
@@ -167,7 +177,7 @@ export default function ContactModal({ isOpen, onClose }) {
 
           {/* 사업자 섹션 */}
           {isBusiness && (
-            <div className="space-y-4 p-6 bg-slate-50 rounded-xl border border-slate-200">
+            <div className="space-y-2 p-4 bg-slate-50 rounded-xl border border-slate-200">
               <label htmlFor="bizNumber" className="block text-sm font-bold text-slate-700">
                 사업자등록번호 <span className="text-red-500">*</span>
               </label>
@@ -179,12 +189,12 @@ export default function ContactModal({ isOpen, onClose }) {
                   onChange={(e) => updateField('bizNumber', e.target.value)}
                   placeholder="'-' 제외 10자리 입력"
                   maxLength={10}
-                  className="flex-grow px-4 py-3 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-600"
+                  className="flex-grow px-3 py-2 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-600"
                 />
                 <button
                   type="button"
                   onClick={verifyBusiness}
-                  className="px-6 py-3 bg-slate-700 text-white font-bold rounded-lg hover:bg-slate-800 transition whitespace-nowrap"
+                  className="px-5 py-2 bg-slate-700 text-white font-bold rounded-lg hover:bg-slate-800 transition whitespace-nowrap text-sm"
                 >
                   진위 확인
                 </button>
@@ -196,9 +206,9 @@ export default function ContactModal({ isOpen, onClose }) {
           )}
 
           {/* 성함 / 연락처 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="name" className="block text-sm font-bold text-gray-700 mb-2">
+              <label htmlFor="name" className="block text-sm font-bold text-gray-700 mb-1.5">
                 성함 / 담당자명 <span className="text-red-500">*</span>
               </label>
               <input
@@ -207,11 +217,11 @@ export default function ContactModal({ isOpen, onClose }) {
                 required
                 value={form.name}
                 onChange={(e) => updateField('name', e.target.value)}
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-600"
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
             <div>
-              <label htmlFor="phone" className="block text-sm font-bold text-gray-700 mb-2">
+              <label htmlFor="phone" className="block text-sm font-bold text-gray-700 mb-1.5">
                 연락처 <span className="text-red-500">*</span>
               </label>
               <input
@@ -221,29 +231,29 @@ export default function ContactModal({ isOpen, onClose }) {
                 placeholder="010-0000-0000"
                 value={form.phone}
                 onChange={(e) => updateField('phone', e.target.value)}
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-600"
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
           </div>
 
           {/* 문의 내용 */}
           <div>
-            <label htmlFor="message" className="block text-sm font-bold text-gray-700 mb-2">
+            <label htmlFor="message" className="block text-sm font-bold text-gray-700 mb-1.5">
               문의 내용 <span className="text-red-500">*</span>
             </label>
             <textarea
               id="message"
-              rows={5}
+              rows={3}
               required
               value={form.message}
               onChange={(e) => updateField('message', e.target.value)}
-              className="w-full px-4 py-3 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-600 resize-none"
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-600 resize-none"
             />
           </div>
 
           <button
             type="submit"
-            className="w-full bg-blue-700 text-white font-bold text-xl py-5 rounded-xl hover:bg-blue-800 transition shadow-lg"
+            className="w-full bg-blue-700 text-white font-bold text-base py-3 rounded-xl hover:bg-blue-800 transition shadow-lg"
           >
             상담 신청하기
           </button>
