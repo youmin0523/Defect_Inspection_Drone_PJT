@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI):
     yolo_service.load_model()
     print("[AeroInspect] YOLOv8 모델 로드 완료")
 
-    print("[AeroInspect] 서버 준비 완료 ✓")
+    print("[AeroInspect] 서버 준비 완료")
 
     yield  # 앱 실행 중
 
