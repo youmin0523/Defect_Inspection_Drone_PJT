@@ -495,3 +495,62 @@ Dashboard (12-col grid)
 - **검증**: 기존 Vite(5176) HMR transform 성공. 로고 파일 경로(`assets/logo/logo_white.png`) 실존 확인.
 - **결과**: 사이드바가 "로고 + 5개 내비 + 로그아웃" 3단 구조로 정돈됨. 대시보드만 활성이라 현재 기능은 변동 없고, 추후 페이지가 추가되면 `disabled: false` + `to: '/xxx'` 로 한 줄씩 풀면 됨.
   - 결과: 한 세션에 대표 스크린샷 1장 + 라운드별 세부 캡쳐 6장이 함께 보이는 구조. 향후 sync 스크립트 자체에 "세션 내 `#### ⏱` 라운드 스캐너 + prepare 훅" 을 정식 기능으로 편입할지는 별건으로 둠(현재는 일회성 보완).
+
+---
+
+## 6️⃣ 추가 피드백 & 반영 — 직원 전용 랜딩(Interior Inspection) 분리
+
+#### ⏱ 2026-04-16 17:20 | 직원 전용 버튼 → Interior Inspection Dashboard 랜딩 신설
+- **피드백**: 사용자가 Interior Inspection Dashboard 목업 JSX(SkyCheck Interior — 실내 평면도 + 핀 + Drone-Mini HUD + 결함 분석 패널)를 첨부하며 "직원 전용 버튼을 눌러 들어가면 직원 전용 랜딩페이지가 뜨도록 구현해줘. 이 목업을 업데이트 기준으로 써줘".
+- **설계 결정**:
+  - 기존 플로우(Landing → 직원 전용 → `/session/setup`) 를 **Landing → 직원 전용 → `/employee` → `/session/setup`** 으로 한 단계 전치. 세션 워크플로우(v5 라운드에서 도입)는 `/employee` 화면 내부의 "점검 세션 시작 →" 버튼으로 이어가 기존 기능 100% 보존.
+  - 랜딩 자체는 **라우트만 공개**, 로그인/권한 가드는 DB 연결 단계에서 추가(AWS 프리티어 제약 — `project_aws_free_tier.md` 원칙 준수).
+  - Floor Plan 네비는 현 페이지 자신을 가리키므로 활성 언더라인 표시만 유지. Defect List / AI Analysis / Inspection Log / Report 는 목업 버튼으로 둠(후속 라운드에서 라우팅 연결).
+  - 원본 목업에는 없던 2개 실용 링크 추가: ① 우하단 "점검 세션 시작 →" → `/session/setup`, ② 우측 패널 "내부 전용 점검 리포트 생성" → `/dashboard/report` nested overlay(기존 ReportModal 재사용).
+- **신규 파일**:
+  - `src/pages/EmployeeLanding.jsx` — 상단 HUD 네비 + 실내 평면도 목업(하자 핀 2종: Critical/Medium 호버 툴팁) + Drone-Mini HUD(배터리 82%) + 우측 결함 분석 패널. 중복 JSX(창호·천장 결함 카드) 는 `DefectCard` 서브 컴포넌트로 1회 정의 후 props 로 재사용(DRY, Rule 6-1 자동 리팩토링).
+- **수정 파일**:
+  - `src/App.jsx` — `import EmployeeLanding` 추가 + `<Route path="/employee" element={<EmployeeLanding />} />` 공개 라우트 등록. 세션/대시보드 라우트 구조는 **그대로 유지**(Rule 3-6 보존 원칙).
+  - `src/components/landing/LandingHeader.jsx` — "직원 전용" `<Link>` 의 `to` 를 `/session/setup` → `/employee` 로 교체. 기존 값은 `// //! [Original Code]` 로 주석 보존, 신규 값은 `// //* [Modified Code]` 선행 주석으로 명시(Rule 3-2).
+- **아이콘 처리**: 원본 목업의 `Layout / Map as MapIcon / AlertTriangle / LayoutDashboard / Layers` 는 JSX 내 미사용 — 주석으로 흔적 남기고 import 에서 제외해 번들 사이즈/린트 경고 해소. 실제 사용 아이콘만 유지: `Search, Bell, Activity, ClipboardCheck, Drone`.
+- **반응형 대응(Rule 7-2)**:
+  - 모바일(`<640px`): 상단 네비 그룹을 `flex-col`로 세로 적층, 주 메뉴 숨김(`hidden md:flex`), 검색 입력 `w-44`, 본문 평면도/결함 패널은 lg 미만에서 세로 스택(`flex-col lg:flex-row`), 결함 패널이 아래로 밀림.
+  - 태블릿(768~1023px): 네비 수평 전환(`md:flex-row`), 주 메뉴 노출, 검색 `md:w-64`. 본문은 여전히 세로(2열 레이아웃은 `lg:` 이상에서만).
+  - 데스크탑(≥1024px): 중앙 평면도 + 우측 결함 패널(`w-96`) 2열 레이아웃.
+- **잔여 한계**:
+  - `/employee` 는 현재 **미가드 공개 라우트**. 운영 배포 전 `ProtectedEmployeeLayout`(세션 토큰 + 직원 role 체크) 필요.
+  - 평면도/핀/Drone-Mini 는 **정적 목업 데이터**. 실시간 연동은 백엔드 WebSocket + 실내 SLAM 데이터 파이프라인이 갖춰진 뒤 진행.
+  - 네비 항목(Defect List / AI Analysis / Inspection Log / Report) 은 라우트 미연결. 다음 라운드에서 각 화면의 목업/실구현 여부 결정 후 페이지 신설 예정.
+
+#### ⏱ 2026-04-16 17:45 | UX 경계 재정의 — 직원 전용 랜딩을 "사무실 허브"로 전면 교체 (v1 → v2)
+- **피드백**: 사용자 — *"지금 (v1)은 바로 현장 업무에 착수해야 될 느낌인데, 직원 전용 랜딩은 사무실에서 도면 업로드 및 사전 작업, 보고서 작성, 현장 관리 등을 해야 되는 화면이고, `/session/setup` 은 실제 현장에 나갔을 때 하자점검을 하기 위함"*. v1 에서 이식한 "Interior Inspection Dashboard" (실시간 드론 HUD + 평면도 핀 + 결함 사이드패널) 은 **현장 작업용 UI** 라 `/employee` 목적(사무실 허브)과 방향이 반대였음.
+- **UX 경계선 확정** (메모리 저장 `project_ux_boundary_employee_vs_session.md`):
+  - `/employee` = **사무실 허브** (pre/post 현장: 사전 작업·관리·보고서)
+  - `/session/setup → … → /dashboard` = **현장 실무** (in-the-field: 실시간 드론 관제)
+  - 두 영역 간 UI 요소는 섞지 않음. 얇은 링크(`점검 세션 시작 →`, `리포트 조회`) 로만 연결.
+- **추가 요구**:
+  - KPI 섹션 — "가진 데이터로 구성 가능한 수준" 으로. 이번 달 누적치는 목업 허용, 현재 세션 수치는 실데이터.
+  - 알림/공지 섹션 · 팀원 현황 및 담당 현장 할당 섹션 신설.
+  - 톤 — 랜딩(`/`) 과 **톤온톤**.
+- **설계 결정**:
+  - 랜딩 톤 분석: `bg-gray-50` 전체 + `bg-slate-900` 다크 배너(점무늬 `#fbbf24` 닷) + 흰 카드 `rounded-xl shadow-md` + 상단 `border-t-4` accent + blue-600/yellow-500/green-600 3색 악센트.
+  - `EmployeeLanding` 구조 (상→하): `EmployeeHeader`(sticky 흰색) → `WelcomeBanner`(slate-900 점무늬 + 개인화 인사 + `SummaryPill` 2개) → `QuickActionsSection`(4 카드) → `KPISection`(4 카드) → 2열(`TodayScheduleSection` + `NotificationsSection`) → `TeamAssignmentsSection`(테이블) → `RecentActivitySection`(타임라인).
+  - **데이터 이원화**: 실데이터 훅(`useSessionStore`/`useDefectStore`/`useDroneStore`) + 파일 상단 `MOCK_*` 상수. DB 연결 시 `MOCK_*` 를 API 훅 호출로 교체하도록 키·타입 고정.
+  - **KPI 4종**: ① 이번 달 점검 완료(MOCK) ② 현재 세션 하자 검출(LIVE — `defects.length`) ③ 심각(HIGH) 하자(LIVE — `severityCounts.HIGH`) ④ 비행 시간(현재 세션 진행 중이면 LIVE `missionStartedAt~now`, 없으면 MOCK 이번 달 평균). 각 카드에 `LIVE`/`MOCK` 뱃지 명시 — 데이터 출처 혼동 방지.
+  - **퀵 액션 4종**: "현장 점검 시작"(primary, RECOMMENDED) → `/session/setup` · "도면 업로드" → `/session/level` · "보고서 작성/조회" → `/dashboard/report` · "현장 관리"(disabled, SOON). disabled 카드는 `<div>` 로 렌더 + `cursor-not-allowed`.
+  - **팀원 테이블** 상태 3종(office/field/standby) + 재배정 액션 placeholder + 모바일에선 `팀` 컬럼 숨김(`hidden md:table-cell`) + 모바일용 team 표기는 이름 아래 작은 글씨로.
+  - **알림 타입 3종**(notice/alert/system) + `PINNED` 강조.
+  - **로고 클릭 / "메인으로" 링크** 로 `/` 복귀 경로 확보.
+- **신규 아이콘**: `lucide-react` 에서 `Building/CheckCircle/Clock/LogOut/MapPin/Megaphone/TrendingUp/UserCheck/Users` 추가 활용. 전부 v1.8 번들 내 존재 확인 후 import.
+- **v1 원본 보존**: 파일 상단 Purpose 주석에 `// //! [Original Code]` 로 교체 사실 명시 + 원본 전체는 이 Vibe 로그 `⏱ 2026-04-16 17:20` 라운드 블록에 아카이브. 필요 시 `/dashboard/indoor` 같은 "실내 현장" 라우트 신설 시 재활용.
+- **수정 파일**:
+  - `src/pages/EmployeeLanding.jsx` — v1 Interior HUD(150줄) → v2 사무실 허브(약 600줄, 9개 서브 컴포넌트: `EmployeeHeader`/`WelcomeBanner`/`SummaryPill`/`QuickActionsSection`/`KPISection`/`KPICard`/`TodayScheduleSection`/`NotificationsSection`/`TeamAssignmentsSection`/`RecentActivitySection`/`SectionHeader`). 단일 파일 유지 — 외부 재사용 없는 로컬 컴포넌트.
+  - `App.jsx` · `LandingHeader.jsx` — 변경 없음 (라우트 구조 유지).
+- **반응형**:
+  - Mobile(`<640px`): 헤더 프로필 이름 숨김(`hidden md:flex`), 배너 2단 수직, 퀵 액션 1열, KPI 1열, 일정/알림 1열 스택, 테이블 팀 컬럼 숨김.
+  - Tablet(`md`): 퀵 액션 2열, KPI 2열, 팀 컬럼 노출, 일정/알림 여전히 1열(공간 확보).
+  - Desktop(`lg+`): 퀵 액션 4열, KPI 4열, 일정/알림 2열.
+- **잔여 한계**:
+  - `MOCK_MONTHLY_KPI` · `MOCK_TODAY_SCHEDULE` · `MOCK_NOTIFICATIONS` · `MOCK_TEAM_MEMBERS` · `MOCK_RECENT_ACTIVITIES` 는 하드코딩 상수. 백엔드 API 연결 후 점진 교체(각 섹션이 독립적이라 부분 교체 가능).
+  - `LIVE` KPI 는 persist 된 **현재 세션 단위 스냅샷** — 이번 달 누적은 BE 집계 필요.
+  - 팀원 재배정 · 현장 관리는 권한 기반 API 가 필요해 SOON/placeholder 유지.

@@ -15,6 +15,8 @@ import Landing from './pages/Landing.jsx'
 import Login from './pages/Login.jsx'
 import Signup from './pages/Signup.jsx'
 import FindAccount from './pages/FindAccount.jsx'
+// //* [Modified Code] 직원 전용 진입 랜딩 (Interior Inspection Dashboard 목업)
+import EmployeeLanding from './pages/EmployeeLanding.jsx'
 import SessionLayout from './components/session/SessionLayout.jsx'
 import ProtectedSessionLayout from './components/session/ProtectedSessionLayout.jsx'
 import SessionSetup from './pages/session/SessionSetup.jsx'
@@ -72,6 +74,9 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/find-account" element={<FindAccount />} />
+
+        {/* //* [Modified Code] 직원 전용 랜딩 — "직원 전용" 버튼 클릭 시 진입하는 Interior Inspection 허브 */}
+        <Route path="/employee" element={<EmployeeLanding />} />
 
         {/* //* [Modified Code] 세션 워크플로우 (Setup → Level → Modeling) */}
         <Route path="/session" element={<SessionLayout />}>
