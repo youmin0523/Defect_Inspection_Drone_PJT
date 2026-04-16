@@ -12,10 +12,15 @@ import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { Suspense } from 'react'
 import BuildingMesh from './BuildingMesh.jsx'
 import DefectMarker from './DefectMarker.jsx'
+import DroneMarker from './DroneMarker.jsx'
 import useDefectStore from '../../store/defectStore.js'
+import useSessionStore from '../../store/sessionStore.js'
 
 export default function BuildingScene() {
   const defects = useDefectStore((s) => s.defects)
+  // //* [Modified Code] 세션 level + L2 이미지 URL 구독 — BuildingMesh 에 전달
+  const level = useSessionStore((s) => s.level)
+  const imageUrl = useSessionStore((s) => s.uploadedImageDataUrl)
 
   // LiDAR 좌표가 있는 하자만 마커 표시
   const mappedDefects = defects.filter(
@@ -41,13 +46,16 @@ export default function BuildingScene() {
         <directionalLight position={[5, 10, 5]} intensity={0.8} castShadow />
 
         <Suspense fallback={null}>
-          {/* 건물 구조 */}
-          <BuildingMesh />
+          {/* //* [Modified Code] 세션 level 기반 건물 구조 렌더 (L1/L2/L3 분기) */}
+          <BuildingMesh level={level} imageUrl={imageUrl} />
 
           {/* 하자 마커 */}
           {mappedDefects.map((defect) => (
             <DefectMarker key={defect.id} defect={defect} />
           ))}
+
+          {/* //* [Modified Code] 드론 실시간 위치 마커 */}
+          <DroneMarker />
         </Suspense>
       </Canvas>
 

@@ -413,4 +413,85 @@ Dashboard (12-col grid)
   - 기존 상단 중앙에 따로 떠있던 "드론·카메라 컨텍스트 뱃지" 는 피드 박스 좌상단(`absolute top-3 left-3`) 으로 이동 — 피드 자체의 HUD 로 자리 잡음.
 - **검증**: Vite dev 재기동 328ms, Dashboard.jsx / LiveVideoFeed.jsx transform 모두 성공. 컴파일 에러 0.
 - **결과**: LIVE 피드가 16:9 letterbox 박스로 가운데 정렬되고, AI Defect Analysis(우상단) + 3D Mini Map(우하단) + Thermal Trend(좌상단) + Drones(좌하단) 네 개 HUD 카드와 어떤 화면 비율에서도 겹치지 않음. 사용자가 지목한 "사각지대" 영역이 해소됨.
+
+#### ⏱ 2026-04-16 15:54 | Thermal Trend 를 피드 박스 내부 우하단 오버레이로 이관 — 메인 피드 확장
+- **피드백**: "THERMAL TREND가 현재는 옆에 별도로 빠져있는데 카메라 화면 우측 하단에 오버레이 될 수 있도록 해줘. 그렇게 되면 메인 카메라 화면이 조금 더 커질 수 있을 것 같아."  — 좌상단 Thermal Trend 별도 aside 가 피드 좌측 safe zone 을 316px 나 잡아먹어 메인 피드가 과도하게 수평 압축되던 문제.
+- **반영**:
+  - `pages/Dashboard.jsx` 에서 좌상단 Thermal Trend `<aside>` 블록 삭제. 동일 섹션을 16:9 피드 박스 내부 `absolute bottom-3 right-3 w-[260px]` 로 이관 — `rounded-lg bg-slate-900/80 border border-slate-700/60 backdrop-blur-md shadow-lg` 조합으로 피드 위에 떠있는 HUD 오버레이 질감. 내부 그래프 높이 110px → 88px 로 축소해 오버레이가 피드를 과도하게 가리지 않도록 조정.
+  - `SAFE.left` 를 **316 → 16** 로 축소. 좌상단에 Thermal Trend 가 사라졌고 DronesPanel 은 bottom 영역 전용이라 수평 safe 확보 불필요. 피드가 사이드바 직후부터 수평 확장됨(가용 폭이 약 300px 늘어남).
+  - Dashboard.jsx 상단 JSDoc 레이아웃 스케치도 새 구조로 업데이트.
+- **충돌 점검**: 피드 박스 내부 좌상단(드론/카메라 HUD 뱃지) + 우하단(Thermal Trend 오버레이) 는 대각선 반대쪽이라 시각적 간섭 없음. 피드 중앙의 "Signal Standby" / "No Signal" 플레이스홀더와도 분리됨.
+- **검증**: 기존 Vite 서버가 HMR 로 Dashboard.jsx transform 수용. 컴파일 에러 0.
+- **결과**: 메인 피드 박스가 수평으로 약 300px 더 넓어지면서, Thermal Trend 정보는 그대로 피드 컨텍스트 안에 유지됨(드론의 "실시간 온도 추이" 가 그 드론이 보는 장면 위에 overlay 되는 논리적 정합성도 향상).
+
+#### ⏱ 2026-04-16 16:01 | Thermal Trend 오버레이 → 반대 드론 카메라 PIP 로 교체 (의도 재해석)
+- **피드백**: "열화상 데이터(Thermal Trend)도 16:9 아니야?" 질문으로 사용자의 원 의도가 드러남 — **"Thermal Trend" 라 라벨된 오버레이를 사실은 DRONE 02 카메라 화면으로 알고 있었고, 두 드론 뷰를 동시에 보여주려던 것**. 앞 라운드까지 내가 recharts 꺾은선 그래프(max/avg/min 온도 시계열)를 거기 넣었던 게 의도 불일치였음. 정답은 "메인 = 선택 드론 카메라 / PIP = 반대 드론 카메라".
+- **반영**:
+  - `components/video/LiveVideoFeed.jsx` — `mode` prop 추가. 기존 `useDroneStore(s.cameraMode)` 단독 사용 구조를 `mode ?? storeCameraMode` 로 바꿔 props override 허용. 이렇게 해야 같은 화면에 메인(store 기반 rgb) + PIP(명시 thermal) 두 인스턴스를 독립적으로 렌더링 가능. 두 인스턴스 모두 `useState(hasError)` 가 컴포넌트 로컬이라 에러/로딩 상태도 독립.
+  - `pages/Dashboard.jsx` —
+    - `ThermalGraph` import 제거(Dashboard 에서 미사용). 파일 자체는 보존 — 추후 별도 리포트/분석 페이지에서 재사용 가능성.
+    - `DRONE_CAMERA_MAP` 을 droneStore 에서 import. `otherDroneId(id)` 헬퍼 추가(두 드론 전제 → `id === 'drone-01' ? 'drone-02' : 'drone-01'`). 확장 시 drones[] 배열 순회로 교체 예정이라 주석 남김.
+    - 컴포넌트에서 `pipDroneId = otherDroneId(selectedDroneId)`, `pipMode = DRONE_CAMERA_MAP[pipDroneId]` 유도.
+    - 기존 우하단 Thermal Trend `<section>` 블록을 `<button>` 기반 PIP 로 교체. `w-[260px] aspect-video`(16:9 유지) + `<LiveVideoFeed fill mode={pipMode} />`. 상단 좌측에 `D02 · THERMAL` 등 라벨 뱃지, 상단 우측에 `<ArrowLeftRight />` 아이콘 + `SWAP` 텍스트로 상호작용 힌트. hover 시 border/뱃지 accent 컬러로 강조.
+    - 클릭 시 `setSelectedDrone(pipDroneId)` 호출 → 기존 `DRONE_CAMERA_MAP` 규칙이 cameraMode 까지 원자적으로 갱신하므로 메인·PIP 이 즉시 스왑. 사용자 관점에서 "메인 / PIP 토글" 이 한 번의 클릭으로 완료.
+    - Dashboard JSDoc 상단 스케치도 "D02 · THERMAL (반대 드론 PIP) SWAP" 구조로 업데이트.
+- **부수 효과**: "Thermal Trend" 라벨이 혼동을 낳았던 부분 완전 제거. 사용자가 관제실 톤에서 기대하는 자연스러운 "메인 뷰 + PIP 뷰" 패턴으로 수렴. 두 드론 시점을 동시에 모니터링 가능해져 사용성도 상승.
+- **검증**: 기존 Vite(5176) HMR transform 성공, Dashboard.jsx + LiveVideoFeed.jsx 컴파일 에러 0.
+- **남은 한계**: 현재는 드론이 물리적으로 2대 고정 전제. 멀티 드론으로 확장되면 `otherDroneId` 헬퍼 + DronesPanel 의 2열 그리드 + DRONE_CAMERA_MAP 상수 모두 배열 기반으로 리팩토링 필요. 주석에 해당 전환 시점 힌트 남겨둠.
+
+#### ⏱ 2026-04-16 16:03 | 3D Mini Map 과 AI Defect Analysis 가로 폭 정렬
+- **피드백**: "3d mini map 과 AI DETECT ANALYSIS 가로 폭이 달라서 보기 불편해" — AI 패널은 `w-[360px]`, 미니맵은 `MINIMAP_W = 300` 이라 우측 세로 정렬이 어긋나 시각적으로 계단 형태가 됨.
+- **반영**: `pages/Dashboard.jsx` 의 `MINIMAP_W` 300 → 360 으로 변경. AI 패널과 동일 폭 + 동일 `right-4` offset 이므로 두 카드의 좌·우 엣지가 완전 일치. `SAFE.right=400` 은 원래부터 AI 패널 기준(360+gap)이라 그대로 유효.
+- **결과**: 우측 세로 라인이 깔끔하게 정렬됨. 미니맵 내부 3D 씬의 카메라 프레이밍에는 영향 없음(BuildingScene 은 부모 크기에 맞춰 리사이즈됨).
+
+#### ⏱ 2026-04-16 16:40 | 세션 기반 워크플로우 도입 — Setup → Level → Modeling → Dashboard → Report
+- **피드백**: 사용자가 전체 프로세스 재정의. 직원 전용 → 바로 대시보드가 아니라 **① 현장명/운용자/날짜 입력 → ② Level(CAD/평면도/자율비행) 선택 → ③ 모델링 시작 → ④ 대시보드 관제(검출 하자 기록 + 3D 미니맵에 모델·드론 위치·하자 마킹) → ⑤ 비행 종료 시 REPORT 자동 작성** 순서로 재설계 요청. Level 1/2/3 은 원래 정의(L1=CAD, L2=평면도, L3=자율비행)이며 이번 라운드는 **세 Level 모두 프로토타입으로 동작 완성**(백엔드 파싱은 전부 Mock), 시각적 폴리시는 L3 에 약간 더 비중.
+- **설계 결정** (plan agent 및 사용자 확인 통해 확정):
+  - 라우트: `/session/setup`, `/session/level`, `/session/modeling` 독립 nested route (SessionLayout + Outlet), `/dashboard/report` 도 nested overlay route (DashboardLayout 부모 유지로 WebSocket 끊김 방지)
+  - 스토어 분리: `sessionStore`(세션 메타 + 모델링 상태) 신규, `droneStore` 에 `missionStatus`('idle'|'flying'|'ended') 추가. 책임 경계 명확화
+  - persist: `zustand/middleware` persist + `partialize` 로 File 객체/런타임 러너 ref 제외. L2 이미지만 base64 저장(쿼터 5MB 내 가정)
+  - Mock 모델링: `requestAnimationFrame` 기반 프로시저럴 러너 (`utils/mockModeling.js`). L1/L2 는 7초, L3 는 11초. 4단계 스테이지 텍스트(Level 별 다름)
+  - 가드: `ProtectedSessionLayout` 레이아웃 최상위에서 조건부 `<Navigate replace />` 반환 (useEffect 기반 redirect 대신 사용 — Dashboard 가 잠깐 마운트되며 WebSocket 연결되는 현상 방지)
+- **신규 파일** (12개):
+  - `store/sessionStore.js` — persist Zustand, `startModeling/cancelModeling/finish/reset` 액션
+  - `utils/mockModeling.js` — `runMockModeling({ level, onTick, onComplete })` + `STAGES_BY_LEVEL`, `DURATION_BY_LEVEL` export
+  - `pages/session/SessionSetup.jsx` — 3 필드 폼(현장명/운용자/날짜) + 유효성 + 상위 단계 복원(이미 입력한 값 편집 가능)
+  - `pages/session/SessionLevel.jsx` — `LevelCard` 3개, L3 `recommended` 뱃지 + 기본 포커스
+  - `pages/session/SessionModeling.jsx` — Level 별 분기 UI(L1/L2 = FileDropzone, L3 = 시뮬레이션 안내 박스) + ModelingProgress 인라인. 완료 후 1.8s 뒤 자동 `/dashboard` 이동
+  - `components/session/SessionLayout.jsx` — 상단 진척도 바(1/2/3 + Check 아이콘) + 간이 내부 가드(이전 단계 미완료 시 해당 단계로 redirect)
+  - `components/session/ProtectedSessionLayout.jsx` — 대시보드 진입 게이트
+  - `components/session/LevelCard.jsx` — L1/L2/L3 카드 UI (icon/title/subtitle/bullets/selected/recommended)
+  - `components/session/FileDropzone.jsx` — 드래그&드롭 + 클릭 input + 썸네일(L2) + 파일 메타 표시
+  - `components/session/ModelingProgress.jsx` — 프로그레스 바 + 스테이지 텍스트 + 완료 `onComplete` 콜백
+  - `components/map3d/DroneMarker.jsx` — telemetry 기반 R3F 드론 아이콘 (cone + 4 props + 고도 라인 + Billboard ID 라벨)
+  - `components/dashboard/MissionControl.jsx` — START/END 토글 (경과 시간 1초 틱)
+  - `components/report/ReportModal.jsx` — `/dashboard/report` nested overlay, 세션 요약 + 심각도 카운트 + 기존 ReportPanel 재사용 + "새 점검 시작"
+- **수정 파일**:
+  - `store/droneStore.js` — `missionStatus`, `missionStartedAt`, `missionEndedAt` + `startMission/endMission` 액션, reset 에 포함
+  - `App.jsx` — `/session/*` + `/dashboard/*` nested 라우트 구조, `<Outlet />` import, `ProtectedSessionLayout` 래핑
+  - `components/landing/LandingHeader.jsx` — 직원 전용 `to="/dashboard"` → `to="/session/setup"` + title 문구 갱신
+  - `components/map3d/BuildingMesh.jsx` — 단일 박스 메시에서 L1(4면 박스 벽 + Html 치수 라벨) / L2 텍스처(`useTexture`)·폴백 분리 / L3 5000점 point cloud / 폴백 4 분기. `WIDTH/DEPTH/HEIGHT` export 로 DroneMarker/DefectMarker 가 공유
+  - `components/map3d/BuildingScene.jsx` — `useSessionStore` 로 level/imageUrl 구독, `<BuildingMesh level imageUrl />` 전달, `<DroneMarker />` 포함
+  - `components/dashboard/DashboardTopBar.jsx` — 좌측 브랜드 옆 세션 컨텍스트 라벨("현장 · 운용자 · L?"), 중앙에 `<MissionControl onEnd={onMissionEnd} />` 삽입. `onMissionEnd` prop 으로 부모가 navigate 주입
+  - `pages/Dashboard.jsx` — `useNavigate` + `handleMissionEnd` 콜백(`navigate('/dashboard/report')`) → TopBar 에 전달
+- **Hooks 규칙 버그 잡음**: L2 `useTexture` 를 조건부 호출했다가 React 훅 규칙 위반 발견 → `LevelTwoMeshTextured` / `LevelTwoMeshFallback` 두 컴포넌트로 분리 후 상위에서 imageUrl 유무로 분기. 동일한 이유로 useTexture 는 항상 호출되는 컴포넌트에서만 사용.
+- **검증**: 기존 Vite(port 5176) HMR 상에 전체 20개 파일 curl 스캔 → 모두 OK, Pre-transform error 없음. 수동 플로우 테스트 체크리스트는 `plans/delegated-popping-boole.md` 의 Verification 섹션 참조(Landing → 직원 전용 → Setup → Level(L3) → Modeling → Dashboard → MissionControl → Report → 새 점검 시작).
+- **잔여 한계**:
+  - L2 이미지 base64 persist 는 5MB 쿼터 주의(큰 평면도 업로드 시 터질 수 있음, 데모용 권장 크기 1MB 미만)
+  - 드론 텔레메트리는 WebSocket 미연결 시 x=0,y=0,z=0 고정이라 DroneMarker 가 원점에 정적 표시 — 실제 WS 붙으면 자연스럽게 움직임
+  - CAD 파싱(.dwg/.dxf/.ifc) · 평면도→3D · SLAM 은 전부 Mock. 실제 백엔드 연결 시 `runMockModeling` 호출부를 API 호출 + polling/streaming 으로 교체하면 됨(stateful 계약은 동일)
+  - `useWebSocket` 은 여전히 Dashboard 마운트 시 즉시 연결 — `missionStatus === 'idle'` 동안도 텔레메트리 수신. 이 동작이 의도한 바인지는 추후 확인 필요(현재 사용자 의도 기본 채택)
+
+#### ⏱ 2026-04-16 16:06 | Sidebar — 에메랄드 🚁 박스 → 실제 로고 + 내비 메뉴 확장
+- **피드백**: 사용자가 사이드바 두 아이콘(에메랄드 🚁 로고 + 📊 대시보드)의 의미를 물음. 설명 후 "에메랄드 박스는 우리 로고로 변경 + 메뉴 몇 개 더 깔아줘" 요청.
+- **반영**:
+  - `components/layout/Sidebar.jsx` 상단 로고 박스를 `<div className="bg-accent-500"><span>🚁</span></div>` 에서 `<img src={logoWhite} className="w-11 h-11 object-contain" />` 로 교체. `logo_white.png` 를 이미 랜딩 헤더가 다크 배경에서 쓰고 있어 재사용 — 사이드바 `bg-dashboard-surface`(다크) 에도 자연스럽게 맞음. 상단 `h-14 border-b` 프레임은 그대로.
+  - `NAV_ITEMS` 확장: **대시보드(활성)** / 하자 리포트 / 비행 경로 / 드론 관리 / 설정. placeholder 는 `disabled: true` 플래그로 분기. `📊` 이모지 → `LayoutDashboard` lucide 아이콘으로 교체해 나머지 아이콘과 시각 언어 통일(`FileText`, `Map`, `Plane`, `Settings`, `LogOut`).
+  - 렌더 분기:
+    - `disabled: true` → `<button>` + `title="... 준비 중"` + `opacity-60 cursor-not-allowed text-slate-600` — 클릭해도 무동작. `aria-disabled`.
+    - 활성 항목 → 기존 `<NavLink>` + isActive emerald glow 유지.
+  - 하단에 `border-t border-slate-700 pt-3` 로 구분된 로그아웃 섹션 추가. `LogOut` 아이콘 + `title="로그아웃 — 세션 연동 전 임시 버튼"`. 실제 세션 로직은 DB 연결 후 구현.
+- **결정 사항**: placeholder 메뉴는 실제 라우트를 파지 않음(`to: '#'` + disabled). 방문 시 `<Routes>` 에 404 페이지가 없는 구조라 placeholder 를 클릭 가능한 링크로 만들면 화면이 빈 대시보드 레이아웃으로 남아 더 혼란스러울 수 있어 buttons 로 유지.
+- **검증**: 기존 Vite(5176) HMR transform 성공. 로고 파일 경로(`assets/logo/logo_white.png`) 실존 확인.
+- **결과**: 사이드바가 "로고 + 5개 내비 + 로그아웃" 3단 구조로 정돈됨. 대시보드만 활성이라 현재 기능은 변동 없고, 추후 페이지가 추가되면 `disabled: false` + `to: '/xxx'` 로 한 줄씩 풀면 됨.
   - 결과: 한 세션에 대표 스크린샷 1장 + 라운드별 세부 캡쳐 6장이 함께 보이는 구조. 향후 sync 스크립트 자체에 "세션 내 `#### ⏱` 라운드 스캐너 + prepare 훅" 을 정식 기능으로 편입할지는 별건으로 둠(현재는 일회성 보완).

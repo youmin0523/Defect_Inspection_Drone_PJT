@@ -10,6 +10,8 @@
 import { Search, Satellite, Route, Bell } from 'lucide-react'
 import useDroneStore from '../../store/droneStore.js'
 import useDefectStore from '../../store/defectStore.js'
+import useSessionStore from '../../store/sessionStore.js'
+import MissionControl from './MissionControl.jsx'
 
 const STATUS_CONFIG = {
   connected:    { label: 'LIVE',     dotClass: 'bg-accent-400 animate-pulse' },
@@ -18,15 +20,21 @@ const STATUS_CONFIG = {
   error:        { label: 'ERROR',    dotClass: 'bg-red-400 animate-pulse' },
 }
 
-export default function DashboardTopBar() {
+// //* [Modified Code] onMissionEnd prop — Dashboard 가 /dashboard/report 네비게이션을 주입
+export default function DashboardTopBar({ onMissionEnd }) {
   const connectionStatus = useDroneStore((s) => s.connectionStatus)
   const defects = useDefectStore((s) => s.defects)
   const highCount = defects.filter((d) => d.severity === 'HIGH').length
   const status = STATUS_CONFIG[connectionStatus] ?? STATUS_CONFIG.disconnected
 
+  // //* [Modified Code] 세션 컨텍스트 구독 — 좌측 브랜드 옆에 "현장 · 운용자 · Lv" 라벨
+  const siteName = useSessionStore((s) => s.siteName)
+  const operatorName = useSessionStore((s) => s.operatorName)
+  const level = useSessionStore((s) => s.level)
+
   return (
     <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between gap-3 px-5 py-3 pointer-events-none">
-      {/* 좌측: 브랜드 + 검색 */}
+      {/* 좌측: 브랜드 + 세션 컨텍스트 + 검색 */}
       <div className="flex items-center gap-3 pointer-events-auto">
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/70 border border-slate-700/60 backdrop-blur-md shadow-lg">
           <div className="p-1 bg-accent-500 rounded-md">
@@ -36,6 +44,19 @@ export default function DashboardTopBar() {
             DRONE INSPECT
           </span>
         </div>
+
+        {/* //* [Modified Code] 세션 컨텍스트 라벨 */}
+        {siteName && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/70 border border-accent-500/30 backdrop-blur-md shadow-lg">
+            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Session</span>
+            <span className="text-xs text-white font-semibold truncate max-w-[240px]">{siteName}</span>
+            <span className="text-[10px] text-slate-500">·</span>
+            <span className="text-xs text-slate-300">{operatorName}</span>
+            <span className="text-[10px] font-mono text-accent-300 px-1.5 py-0.5 rounded bg-accent-500/10 border border-accent-500/40">
+              L{level}
+            </span>
+          </div>
+        )}
 
         <div className="relative">
           <Search
@@ -50,8 +71,9 @@ export default function DashboardTopBar() {
         </div>
       </div>
 
-      {/* 중앙: Satellite Map 토글 (UI only) */}
+      {/* //* [Modified Code] 중앙: MissionControl (START/END) + Satellite Map 토글 */}
       <div className="flex items-center gap-2 pointer-events-auto">
+        <MissionControl onEnd={onMissionEnd} />
         <button
           type="button"
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900/70 border border-accent-500/40 backdrop-blur-md text-xs text-accent-300 font-semibold shadow-lg hover:bg-accent-500/10 transition"

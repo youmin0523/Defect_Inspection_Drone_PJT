@@ -106,8 +106,8 @@ export default function LandingHeader() {
         {/* NOTE: 원래 로그인/권한 검사 후에만 노출되어야 하지만, DB 미연결 단계(AWS 프리티어 제약)라
                   임시로 로그인 없이 /dashboard 로 직행. 운영 배포 시 인증 가드로 교체 예정. */}
         <Link
-          to="/dashboard"
-          title="DB 미연결 단계 — 로그인 없이 임시 접근. 실제 배포 시 인증 가드 적용 예정"
+          to="/session/setup"
+          title="DB 미연결 단계 — 로그인 없이 임시 접근. 세션 셋업 → 모델링 → 대시보드 순으로 진입"
           className={`group hidden md:inline-flex items-center gap-2 px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-yellow-400 ${
             isAtTop
               ? 'border border-yellow-300/60 bg-yellow-300/10 text-yellow-200 hover:bg-yellow-300 hover:text-slate-900'

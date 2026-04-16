@@ -1,18 +1,26 @@
 /**
  * App.jsx
  * 역할: 루트 라우팅 컴포넌트
- *       - `/`         → Landing (마케팅 메인 페이지)
- *       - `/dashboard` → Dashboard (관제 대시보드 — Sidebar + Header + 메인)
- *       - WebSocket 연결은 DashboardLayout 내부에서만 초기화하여 랜딩에서는 비용 발생 없음
+ *       - `/`         → Landing
+ *       - `/login`, `/signup`, `/find-account` → 공개 계정 페이지
+ *       - `/session/*` → SessionLayout (setup / level / modeling) — 직원 진입 전 워크플로우
+ *       - `/dashboard` → ProtectedSessionLayout 가드 + DashboardLayout (+ nested `/report`)
+ *       - WebSocket 연결은 DashboardLayout 내부에서만 초기화하여 랜딩/세션 페이지에서는 비용 발생 없음
  */
 
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Outlet } from 'react-router-dom'
 import Sidebar from './components/layout/Sidebar.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Landing from './pages/Landing.jsx'
 import Login from './pages/Login.jsx'
 import Signup from './pages/Signup.jsx'
 import FindAccount from './pages/FindAccount.jsx'
+import SessionLayout from './components/session/SessionLayout.jsx'
+import ProtectedSessionLayout from './components/session/ProtectedSessionLayout.jsx'
+import SessionSetup from './pages/session/SessionSetup.jsx'
+import SessionLevel from './pages/session/SessionLevel.jsx'
+import SessionModeling from './pages/session/SessionModeling.jsx'
+import ReportModal from './components/report/ReportModal.jsx'
 import useWebSocket from './hooks/useWebSocket.js'
 
 // //! [Original Code] 기존 AppLayout: 단일 라우트 `/` = Dashboard + WebSocket 최상단 초기화
@@ -48,6 +56,8 @@ function DashboardLayout() {
       {/* 우측 메인: 전체를 Dashboard 컨트롤 — HUD + 풀스크린 맵 */}
       <main className="flex-1 relative overflow-hidden">
         <Dashboard />
+        {/* //* [Modified Code] nested route — /dashboard/report 진입 시 ReportModal 오버레이 렌더 */}
+        <Outlet />
       </main>
     </div>
   )
@@ -57,14 +67,25 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* //* [Modified Code] 루트는 랜딩 페이지로 변경 */}
+        {/* 공개 라우트 */}
         <Route path="/" element={<Landing />} />
-        {/* 로그인 / 회원가입 / 계정 찾기 */}
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/find-account" element={<FindAccount />} />
-        {/* //* [Modified Code] 기존 대시보드는 /dashboard 경로로 이동 */}
-        <Route path="/dashboard" element={<DashboardLayout />} />
+
+        {/* //* [Modified Code] 세션 워크플로우 (Setup → Level → Modeling) */}
+        <Route path="/session" element={<SessionLayout />}>
+          <Route path="setup"    element={<SessionSetup />} />
+          <Route path="level"    element={<SessionLevel />} />
+          <Route path="modeling" element={<SessionModeling />} />
+        </Route>
+
+        {/* //* [Modified Code] 대시보드 — 세션 완료 가드 + nested report 모달 */}
+        <Route element={<ProtectedSessionLayout />}>
+          <Route path="/dashboard" element={<DashboardLayout />}>
+            <Route path="report" element={<ReportModal />} />
+          </Route>
+        </Route>
       </Routes>
     </BrowserRouter>
   )
