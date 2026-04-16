@@ -111,3 +111,49 @@ def _blend_frames(rgb: np.ndarray, thermal: np.ndarray, alpha: float) -> np.ndar
 - **MJPEG 팬아웃**: 구독자별 `asyncio.Queue(maxsize=2)` 유지로 슬로우 클라이언트가 빠른 클라이언트를 차단하지 않도록 설계
 - **단일 워커 제약**: WS 매니저 싱글톤은 `--workers 1` 강제 필요, 수평 확장 시 Redis pub/sub 백엔드 교체 필요
 - **열화상 좌표 매핑**: IRC-256CA 16bit ADC 값 → 섭씨 변환: `temp = (raw_value / 100.0) - 273.15`
+
+---
+
+## 4️⃣ 추가 피드백 & 반영 — 회원가입 DB 설계 라운드
+> **착수 시각**: 2026-04-16 14:30
+> **목표**: 프론트엔드 회원가입 폼(`Signup.jsx`)을 백엔드 DB에 연결하기 위한 모델 설계.
+> **전제(사용자 요청)**: AWS 프리티어 만료 임박 → DB 실제 기동은 최종 단계에서 한 번만. 그 전에는 모델·스키마·해싱·엔드포인트 코드만 먼저 완성.
+
+### ⏱ 14:30 | "지금 회원가입을 위한 DB를 연결하고자 해"
+→ 현재 상태 점검(PostgreSQL+asyncpg+SQLAlchemy 기반 이미 구성, User 모델 부재) 후 스키마 범위·DB 선택지·해싱 방식 확정 질의.
+
+### ⏱ 14:35 | "테이블 먼저 구성하자"
+→ 단일 `users` 테이블 초안 제안 (개인/사업자 account_type 컬럼으로 통합, 사업자 필드 nullable).
+
+### ⏱ 14:38 | "DB 연결은 … 다 구현하고 마지막에 연결할게. 아마존 무료 기간이 얼마 남지 않아서"
+→ 프로젝트 메모리 `project_aws_free_tier.md` 등록. 작업 순서 확정: 테이블 → 스키마 → 해싱 → 엔드포인트 → (최후) DB 연결.
+
+### ⏱ 14:42 | "테이블 분리에 대해서는 제1정규화 ~ 제3정규화 고려해서 작성해줘"
+→ 단일 테이블 초안 폐기. 3NF 기준으로 4 테이블 재설계:
+- `users` — 공통 회원 정보 (account_type, email, username, password_hash, name, phone)
+- `business_profiles` — 사업자 1:1 분리 (user_id PK=FK, biz_number UNIQUE, ceo_name, verified_at) → `account_type → biz_*` 이행 종속 제거
+- `terms` — 약관 마스터 (code, is_required, version) → 약관 추가 시 스키마 불변
+- `user_term_agreements` — 동의 이력 M:N 연결 (user_id + term_id 복합 PK, version 스냅샷, agreed_at) → 1NF 반복그룹 제거
+
+### ⏱ 14:46 | "응 구현해줘"
+→ 4개 ORM 모델 파일 신규 작성:
+- `app/models/user.py` (UUID PK, account_type ENUM, unique email/username, relationships)
+- `app/models/business_profile.py` (user_id PK/FK CASCADE, biz_number UNIQUE)
+- `app/models/term.py` (SERIAL PK, code UNIQUE, is_required/version)
+- `app/models/user_term_agreement.py` (복합 PK, version 스냅샷)
+- `app/models/__init__.py` — 신규 4개 모델 포함시켜 `Base.metadata` 자동 등록
+- `app/db/init_db.py` — 신규 모델 임포트 추가
+
+### ⏱ 14:50 | "DB 연결을 python으로 해야돼? Node.js로 하면 되지 않아?"
+→ Python 유지 권장 (판단 근거):
+- 기존 FastAPI 백엔드가 DefectLog/WebSocket/MJPEG/LiDAR 전부 Python SQLAlchemy 세션 공유 중
+- AI 파이프라인(YOLOv8/anomalib/OpenCV/pyserial) Python 전용 → Node 이식 불가
+- 서버 2개 운영 시 AWS 프리티어 시간 2배 소진 (이번 라운드 제약 직접 위반)
+
+### ⏱ 14:52 | "너 말대로 진행해줘"
+→ Python 확정. 다음 라운드: Pydantic 스키마(`app/schemas/user.py`) → 비밀번호 해싱 유틸(`app/core/security.py` + `passlib[bcrypt]`) → 회원가입/중복확인 엔드포인트 → 최종 DB 연결.
+
+### 📐 3NF 설계 근거 요약
+- **1NF**: 약관 동의를 M:N 연결 테이블로 원자화, 컬럼 기반 반복그룹 제거
+- **2NF**: 단일 PK 테이블은 자동 충족. 연결 테이블의 version/agreed_at 도 복합 PK 전체에 종속
+- **3NF**: 사업자 속성(`biz_number → ceo_name` 등) 분리, `account_type`에 대한 이행 종속 제거

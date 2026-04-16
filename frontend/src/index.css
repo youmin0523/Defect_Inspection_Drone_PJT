@@ -31,7 +31,7 @@ body {
   @apply bg-slate-500;
 }
 
-/* 심각도 뱃지 공통 스타일 */
+/* //* [Modified Code] 심각도 뱃지 + 카드 스타일 — 레퍼런스 톤(rounded-xl, shadow, hover) 반영 */
 @layer components {
   .badge-high {
     @apply bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-0.5 rounded text-xs font-semibold;
@@ -42,7 +42,25 @@ body {
   .badge-low {
     @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded text-xs font-semibold;
   }
+  /* 기본 카드 — 레퍼런스 디자인 톤: rounded-xl, shadow, slate-700 border, 부드러운 hover */
   .card {
-    @apply bg-dashboard-surface border border-dashboard-border rounded-lg p-4;
+    @apply bg-dashboard-surface border border-slate-700 rounded-xl p-4 shadow-lg;
+    @apply transition-colors duration-200;
+  }
+  /* emerald 강조 카드 (활성 드론 / 강조 패널) */
+  .card-accent {
+    @apply bg-dashboard-surface border border-accent-500/30 rounded-xl p-4 shadow-2xl;
+    @apply hover:border-accent-500/60 transition-colors duration-200;
+  }
+  /* 상단 네비 아이콘 버튼 */
+  .icon-btn {
+    @apply p-2 text-slate-300 hover:text-white hover:bg-slate-700/60 rounded-full transition-colors;
+  }
+  /* 드론 상태 "ACTIVE" 뱃지 */
+  .badge-active {
+    @apply text-[10px] bg-accent-500/20 text-accent-400 border border-accent-500/40 px-2 py-0.5 rounded font-semibold uppercase tracking-wider;
+  }
+  .badge-idle {
+    @apply text-[10px] bg-slate-700 text-slate-400 border border-slate-600 px-2 py-0.5 rounded font-semibold uppercase tracking-wider;
   }
 }

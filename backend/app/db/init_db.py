@@ -9,8 +9,15 @@
 
 from app.db.base import engine, Base
 
-# ORM 모델을 Base에 등록하기 위해 모델 모듈 임포트
-from app.models import defect  # noqa: F401 (임포트만으로 Base에 등록됨)
+# ORM 모델을 Base에 등록하기 위해 모델 패키지 임포트
+# (app/models/__init__.py 에서 모든 모델을 일괄 임포트해 메타데이터에 등록)
+from app.models import (  # noqa: F401
+    defect,
+    user,
+    business_profile,
+    term,
+    user_term_agreement,
+)
 
 
 async def init_db() -> None:

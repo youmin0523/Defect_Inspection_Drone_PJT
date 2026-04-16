@@ -8,19 +8,22 @@
 
 import { NavLink } from 'react-router-dom'
 
+// //* [Modified Code] 라우팅 분리 후 `/`는 랜딩 페이지. 대시보드는 `/dashboard` 경로로 이동.
 const NAV_ITEMS = [
-  { to: '/', icon: '📊', label: '대시보드' },
+  { to: '/dashboard', icon: '📊', label: '대시보드' },
 ]
 
 export default function Sidebar() {
   return (
-    <aside className="flex flex-col w-14 bg-dashboard-surface border-r border-dashboard-border flex-shrink-0">
-      {/* 로고 아이콘 */}
-      <div className="flex items-center justify-center h-14 border-b border-dashboard-border">
-        <span className="text-lg">🚁</span>
+    <aside className="flex flex-col w-14 bg-dashboard-surface border-r border-slate-700 flex-shrink-0">
+      {/* 로고 아이콘 (emerald accent 박스) */}
+      <div className="flex items-center justify-center h-14 border-b border-slate-700">
+        <div className="p-1.5 bg-accent-500 rounded-md shadow-md shadow-accent-900/30">
+          <span className="text-white text-sm" aria-hidden>🚁</span>
+        </div>
       </div>
 
-      {/* 내비게이션 */}
+      {/* 내비게이션 (active: emerald accent) */}
       <nav className="flex flex-col items-center gap-1 pt-3">
         {NAV_ITEMS.map((item) => (
           <NavLink
@@ -30,8 +33,8 @@ export default function Sidebar() {
             className={({ isActive }) =>
               `flex items-center justify-center w-10 h-10 rounded-lg text-lg transition-colors ${
                 isActive
-                  ? 'bg-brand-600 text-white'
-                  : 'text-slate-400 hover:bg-dashboard-border hover:text-white'
+                  ? 'bg-accent-500/20 text-accent-400 border border-accent-500/40 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
+                  : 'text-slate-400 hover:bg-slate-700/60 hover:text-white'
               }`
             }
           >

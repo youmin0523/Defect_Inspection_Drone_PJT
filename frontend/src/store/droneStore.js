@@ -4,12 +4,22 @@
  *       - telemetry: 드론 위치·자세·배터리 실시간 데이터
  *       - connectionStatus: WebSocket 연결 상태
  *       - cameraMode: 현재 활성 카메라 모드 (rgb/thermal/blend)
- *       - setCameraMode: 카메라 모드 전환 (CameraToggle에서 호출)
+ *       - selectedDroneId: 관제 중인 드론(화면/카메라 소스 결정)
+ *       - setSelectedDrone: 드론 선택 시 cameraMode 자동 매핑
+ *         (drone-01 → rgb, drone-02 → thermal)
  */
 
 import { create } from 'zustand'
 
-const useDroneStore = create((set) => ({
+// //* [Modified Code] 드론별 고정 카메라 매핑 — 풀스크린 HUD 레이아웃 도입 라운드에서 추가.
+// DB 미연결 단계에서 "드론 선택 = 카메라 모드" 규칙을 UI에 내재화하기 위한 장치.
+// 추후 드론별 카메라 구성이 가변이 되면 drones 배열에 cameraMode 필드로 이관.
+export const DRONE_CAMERA_MAP = {
+  'drone-01': 'rgb',
+  'drone-02': 'thermal',
+}
+
+const useDroneStore = create((set, get) => ({
   // ── 연결 상태 ────────────────────────────
   connectionStatus: 'disconnected', // 'connecting' | 'connected' | 'disconnected' | 'error'
 
@@ -34,6 +44,10 @@ const useDroneStore = create((set) => ({
   // 'blend': RGB + 열화상 합성
   cameraMode: 'rgb',
 
+  // ── 선택된 드론 ──────────────────────────
+  // 풀스크린 HUD에서 "현재 관제 중"인 드론 ID. 카메라 모드와 1:1 연동.
+  selectedDroneId: 'drone-01',
+
   // ── Actions ─────────────────────────────
 
   /** WebSocket 연결 상태 업데이트 */
@@ -57,6 +71,19 @@ const useDroneStore = create((set) => ({
   /** WS "camera.mode_changed" 이벤트 수신 시 동기화 */
   syncCameraMode: (mode) => set({ cameraMode: mode }),
 
+  /**
+   * 선택 드론 전환 + 카메라 모드 자동 매핑.
+   * DronesPanel 에서 호출. DRONE_CAMERA_MAP 기반으로 cameraMode 도 함께 set.
+   */
+  setSelectedDrone: (id) => {
+    if (!DRONE_CAMERA_MAP[id]) return
+    if (get().selectedDroneId === id) return
+    set({
+      selectedDroneId: id,
+      cameraMode: DRONE_CAMERA_MAP[id],
+    })
+  },
+
   /** 전체 초기화 */
   reset: () =>
     set({
@@ -68,6 +95,7 @@ const useDroneStore = create((set) => ({
         distance: null, armed: false, mode: 'MANUAL',
       },
       cameraMode: 'rgb',
+      selectedDroneId: 'drone-01',
     }),
 }))
 

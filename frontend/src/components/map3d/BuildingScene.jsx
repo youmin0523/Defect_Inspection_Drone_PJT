@@ -23,7 +23,8 @@ export default function BuildingScene() {
   )
 
   return (
-    <div className="w-full h-full rounded overflow-hidden">
+    // //* [Modified Code] relative 부여 — 범례 absolute 기준 + 풀스크린 HUD 레이아웃에서 안전 배치
+    <div className="relative w-full h-full overflow-hidden">
       <Canvas shadows>
         <PerspectiveCamera makeDefault position={[8, 6, 8]} fov={50} />
         <OrbitControls
@@ -50,12 +51,12 @@ export default function BuildingScene() {
         </Suspense>
       </Canvas>
 
-      {/* 범례 */}
-      <div className="absolute bottom-2 left-2 flex items-center gap-3 text-[10px] text-slate-500">
+      {/* //* [Modified Code] 범례 — HUD 레이아웃에서 DronesPanel 과 겹치지 않도록 bottom-center 로 이동 */}
+      <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 text-[10px] text-slate-400 px-3 py-1.5 rounded-full bg-slate-900/60 border border-slate-700/60 backdrop-blur-sm">
         <LegendItem color="#ef4444" label="HIGH" />
         <LegendItem color="#f97316" label="MED" />
         <LegendItem color="#eab308" label="LOW" />
-        <span className="ml-2">{mappedDefects.length}개 마커</span>
+        <span className="ml-1 font-mono text-slate-500">{mappedDefects.length} markers</span>
       </div>
     </div>
   )
