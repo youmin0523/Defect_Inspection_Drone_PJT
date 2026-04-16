@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, defects, stream, websocket, report
+from app.api import auth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook
 
 api_router = APIRouter()
 
@@ -39,9 +39,37 @@ api_router.include_router(
     tags=["WebSocket"],
 )
 
-# LLM 하자 점검 보고서 생성
+# LLM 하자 점검 보고서 생성/저장/조회/다운로드
 api_router.include_router(
     report.router,
     prefix="/report",
     tags=["Report"],
+)
+
+# 드론 텔레메트리 (좌표/센서/배터리)
+api_router.include_router(
+    telemetry.router,
+    prefix="/telemetry",
+    tags=["Telemetry"],
+)
+
+# SLAM 맵 데이터
+api_router.include_router(
+    slam.router,
+    prefix="/slam",
+    tags=["SLAM"],
+)
+
+# 평면도 업로드 & 처리
+api_router.include_router(
+    floorplan.router,
+    prefix="/floorplan",
+    tags=["Floorplan"],
+)
+
+# AI 서버 연동 웹훅 (탐지 이벤트 수신)
+api_router.include_router(
+    ai_webhook.router,
+    prefix="/ai",
+    tags=["AI Webhook"],
 )

@@ -58,3 +58,41 @@ class ReportResponse(BaseModel):
     """
     content: str            # 마크다운 형식 보고서 본문
     metadata: ReportMetadata
+
+
+# ── 보고서 저장/조회 스키마 ──────────────────
+class ReportSaveRequest(BaseModel):
+    """생성된 보고서 DB 저장 요청"""
+    title: Optional[str] = Field(None, max_length=200)
+    building_name: Optional[str] = Field(None, max_length=200)
+    inspector_name: Optional[str] = Field(None, max_length=100)
+    provider: str = Field(default="claude", pattern="^(claude|gemini)$")
+    content: str = Field(..., description="마크다운 보고서 본문")
+    defect_count: int = 0
+    high_count: int = 0
+    med_count: int = 0
+    low_count: int = 0
+
+
+class ReportSavedResponse(BaseModel):
+    """저장된 보고서 응답"""
+    id: str
+    title: Optional[str]
+    building_name: Optional[str]
+    inspector_name: Optional[str]
+    provider: Optional[str]
+    content: str
+    defect_count: int
+    high_count: int
+    med_count: int
+    low_count: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ReportListResponse(BaseModel):
+    """보고서 목록 응답"""
+    items: List[ReportSavedResponse]
+    total: int
