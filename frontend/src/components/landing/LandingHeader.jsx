@@ -102,12 +102,15 @@ export default function LandingHeader() {
 
       {/* 우측 버튼 그룹 */}
       <div className="flex items-center gap-3">
-        {/* //* [Modified Code] 직원 전용 임시 진입 버튼 — "도입 사례" 네비 우측 */}
-        {/* NOTE: 원래 로그인/권한 검사 후에만 노출되어야 하지만, DB 미연결 단계(AWS 프리티어 제약)라
-                  임시로 로그인 없이 /dashboard 로 직행. 운영 배포 시 인증 가드로 교체 예정. */}
+        {/* //! [Original Code] 직원 전용 버튼이 세션 셋업으로 직행하던 기존 동작
+            <Link to="/session/setup" title="DB 미연결 단계 — 로그인 없이 임시 접근. 세션 셋업 → 모델링 → 대시보드 순으로 진입"> */}
+
+        {/* //* [Modified Code] 직원 전용 진입 랜딩(/employee)을 거치도록 변경
+            - 기존 세션 셋업 플로우는 /employee 화면 내 "점검 세션 시작 →" 버튼에서 이어짐
+            - NOTE: 로그인/권한 가드는 DB 연결 단계에서 추가 예정 (AWS 프리티어 제약) */}
         <Link
-          to="/dashboard"
-          title="DB 미연결 단계 — 로그인 없이 임시 접근. 실제 배포 시 인증 가드 적용 예정"
+          to="/employee"
+          title="DB 미연결 단계 — 로그인 없이 임시 접근. 직원 랜딩 → 세션 셋업 → 모델링 → 대시보드 순으로 진입"
           className={`group hidden md:inline-flex items-center gap-2 px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-yellow-400 ${
             isAtTop
               ? 'border border-yellow-300/60 bg-yellow-300/10 text-yellow-200 hover:bg-yellow-300 hover:text-slate-900'

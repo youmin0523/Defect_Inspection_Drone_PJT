@@ -7,7 +7,8 @@
  *         'blend'  → VITE_STREAM_BLEND_URL
  *       - 브라우저의 <img> 태그가 multipart/x-mixed-replace MJPEG를 네이티브 지원
  *       - 연결 오류 시 "No Signal" 플레이스홀더 표시
- *       - //* [Modified Code] fill prop: 풀스크린 배경(object-cover, 16/9 강제 해제)으로 사용
+ *       - //* [Modified Code] fill prop: 풀스크린/16:9 부모를 꽉 채움 모드
+ *       - //* [Modified Code] mode prop: store 의 cameraMode 대신 명시 모드 사용 (PIP 멀티 피드용)
  */
 
 import { useState } from 'react'
@@ -25,8 +26,10 @@ const MODE_LABELS = {
   blend:   '블렌드',
 }
 
-export default function LiveVideoFeed({ fill = false }) {
-  const cameraMode = useDroneStore((s) => s.cameraMode)
+export default function LiveVideoFeed({ fill = false, mode }) {
+  const storeCameraMode = useDroneStore((s) => s.cameraMode)
+  // mode prop 이 주어지면 store 무시 — 멀티 피드(메인 + PIP 다른 드론) 렌더링 용도.
+  const cameraMode = mode ?? storeCameraMode
   const [hasError, setHasError] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
 

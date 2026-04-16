@@ -48,6 +48,13 @@ const useDroneStore = create((set, get) => ({
   // 풀스크린 HUD에서 "현재 관제 중"인 드론 ID. 카메라 모드와 1:1 연동.
   selectedDroneId: 'drone-01',
 
+  // ── 미션 상태 ──────────────────────────
+  // 풀 워크플로우(세션 → 모델링 → 대시보드 → 비행) 중 "비행 단계" 상태.
+  // 'idle': 아직 START 안 함 / 'flying': 비행 중 / 'ended': 종료 후 리포트 대기
+  missionStatus: 'idle',
+  missionStartedAt: null,
+  missionEndedAt: null,
+
   // ── Actions ─────────────────────────────
 
   /** WebSocket 연결 상태 업데이트 */
@@ -84,6 +91,18 @@ const useDroneStore = create((set, get) => ({
     })
   },
 
+  /** 비행 시작 — MissionControl(START) 에서 호출 */
+  startMission: () => {
+    if (get().missionStatus === 'flying') return
+    set({ missionStatus: 'flying', missionStartedAt: Date.now(), missionEndedAt: null })
+  },
+
+  /** 비행 종료 — MissionControl(END) 에서 호출 → 리포트 오버레이 트리거 */
+  endMission: () => {
+    if (get().missionStatus !== 'flying') return
+    set({ missionStatus: 'ended', missionEndedAt: Date.now() })
+  },
+
   /** 전체 초기화 */
   reset: () =>
     set({
@@ -96,6 +115,9 @@ const useDroneStore = create((set, get) => ({
       },
       cameraMode: 'rgb',
       selectedDroneId: 'drone-01',
+      missionStatus: 'idle',
+      missionStartedAt: null,
+      missionEndedAt: null,
     }),
 }))
 

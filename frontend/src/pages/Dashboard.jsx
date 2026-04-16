@@ -10,30 +10,34 @@
  *   ┌─────────────────────────────────────────────────────────────────┐
  *   │  [DashboardTopBar]                                               │
  *   ├─────────────────────────────────────────────────────────────────┤
- *   │ ┌───────────┐                                   ┌─────────────┐ │
- *   │ │ THERMAL   │   <LiveVideoFeed fill> 풀스크린    │ AI DEFECT   │ │
- *   │ │ TREND PIP │   (선택 드론 카메라 = RGB/열화상)   │ ANALYSIS    │ │
- *   │ └───────────┘   ─ 상단 중앙 HUD 뱃지(드론/모드/LIVE) ─│            │ │
- *   │                                                    │             │ │
- *   │ ┌────────────┐                    ┌──────────────┐ └─────────────┘ │
- *   │ │ DRONES     │                    │ 3D MINI MAP  │                 │
- *   │ │ (01 / 02)  │                    │ (BuildingScene)│               │
- *   │ └────────────┘                    └──────────────┘                 │
+ *   │                                                   ┌─────────────┐ │
+ *   │   ┌─ [D01·RGB·LIVE]  ─ <Main 16:9 카메라> ────┐   │ AI DEFECT   │ │
+ *   │   │                                            │   │ ANALYSIS    │ │
+ *   │   │                     ┌───── D02·THERMAL ──┐ │   │             │ │
+ *   │   │                     │  (반대 드론 PIP) SWAP│ │   │             │ │
+ *   │   └─────────────────────└────────────────────┘─┘   └─────────────┘ │
+ *   │ ┌────────────┐                     ┌──────────────┐                │
+ *   │ │ DRONES     │                     │ 3D MINI MAP  │                │
+ *   │ │ (01 / 02)  │                     │ (BuildingScene)│              │
+ *   │ └────────────┘                     └──────────────┘                │
  *   └─────────────────────────────────────────────────────────────────┘
+ *
+ *   PIP 는 "선택되지 않은 드론" 카메라를 실시간 표시. 클릭 시 메인 ↔ PIP 스왑.
  *
  * 드론 ↔ 카메라 연동:
  *   DRONE 01 클릭 → cameraMode='rgb'     → 메인 배경이 RGB 스트림
  *   DRONE 02 클릭 → cameraMode='thermal' → 메인 배경이 열화상 스트림
  */
 
-import { Activity, Video } from 'lucide-react'
+import { useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Activity, Video, ArrowLeftRight } from 'lucide-react'
 import BuildingScene from '../components/map3d/BuildingScene.jsx'
 import LiveVideoFeed from '../components/video/LiveVideoFeed.jsx'
-import ThermalGraph from '../components/charts/ThermalGraph.jsx'
 import DefectPanel from '../components/defects/DefectPanel.jsx'
 import DashboardTopBar from '../components/dashboard/DashboardTopBar.jsx'
 import DronesPanel from '../components/dashboard/DronesPanel.jsx'
-import useDroneStore from '../store/droneStore.js'
+import useDroneStore, { DRONE_CAMERA_MAP } from '../store/droneStore.js'
 
 const CAMERA_LABEL = {
   rgb: 'RGB · 일반 카메라',
@@ -41,27 +45,50 @@ const CAMERA_LABEL = {
   blend: 'BLEND · 합성',
 }
 
+const CAMERA_LABEL_SHORT = {
+  rgb: 'RGB',
+  thermal: 'THERMAL',
+  blend: 'BLEND',
+}
+
+// 두 드론만 존재하는 현재 구조에서 "다른 드론" 을 반환. 확장 시 drones[] 배열 순회로 교체 예정.
+const otherDroneId = (id) => (id === 'drone-01' ? 'drone-02' : 'drone-01')
+
 // HUD 구역 치수 — 중앙 LIVE 피드 박스가 피해야 할 좌/우/상/하 safe zone (px).
-// 값은 각 패널(Thermal Trend·DronesPanel·AI Analysis·Minimap) 폭/높이 + gap 기준.
+// 값은 각 패널(DronesPanel·AI Analysis·Minimap) 폭/높이 + gap 기준.
+// //* [Modified Code] Thermal Trend 를 피드 박스 내부 오버레이로 이관 → SAFE.left 대폭 축소(316 → 16).
+// (DronesPanel 은 bottom 영역에만 있어 수평 충돌 없음, 이미 SAFE.bottom 으로 수직 분리됨)
 const SAFE = {
   top: 100,    // TopBar(56) + 여백(44)
   bottom: 150, // DronesPanel(≈134) + gap
-  left: 316,   // Thermal Trend(280) + margin(4) + gap(32)
+  left: 16,    // 사이드바 이후 기본 margin — 좌측 상단이 비어 피드 확장 가능
   right: 400,  // AI Analysis(360) + margin(4) + gap(36)
 }
 
 // 우하단 3D 미니맵 크기 — AI 패널의 하단 offset 산정에 사용.
-const MINIMAP_W = 300
+// //* [Modified Code] MINIMAP_W 를 AI 패널(w-[360px]) 과 동일하게 맞춰 세로 정렬 — 사용자 피드백
+const MINIMAP_W = 360
 const MINIMAP_H = 200
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const selectedDroneId = useDroneStore((s) => s.selectedDroneId)
   const cameraMode = useDroneStore((s) => s.cameraMode)
+  const setSelectedDrone = useDroneStore((s) => s.setSelectedDrone)
+
+  // PIP 에 표시할 반대편 드론 정보 (선택되지 않은 쪽)
+  const pipDroneId = otherDroneId(selectedDroneId)
+  const pipMode = DRONE_CAMERA_MAP[pipDroneId]
+
+  // //* [Modified Code] MissionControl END 클릭 → /dashboard/report 오버레이 진입 (nested route)
+  const handleMissionEnd = useCallback(() => {
+    navigate('/dashboard/report')
+  }, [navigate])
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-dashboard-bg">
       {/* ── 상단 HUD 바 ─────────────────────────────────────── */}
-      <DashboardTopBar />
+      <DashboardTopBar onMissionEnd={handleMissionEnd} />
 
       {/* ── 중앙: LIVE 카메라 피드 (16:9 유지, safe zone 안에 중앙 배치) ── */}
       {/* //* [Modified Code] 풀스크린 object-cover → 16:9 박스로 변경, 다른 HUD 패널과 겹치지 않도록
@@ -96,23 +123,38 @@ export default function Dashboard() {
               <span className="text-[10px] font-mono text-slate-500">LIVE</span>
             </div>
           </div>
+
+          {/* //* [Modified Code] 피드 우하단: 반대편 드론 카메라 PIP — 두 드론의 뷰를 동시에 모니터링.
+               클릭 시 setSelectedDrone(반대드론) 호출 → 메인 ↔ PIP 가 스왑됨(카메라 모드도 함께 전환).
+               이전의 Thermal Trend(꺾은선 그래프) 오버레이는 사용자 의도와 맞지 않아 제거. */}
+          <button
+            type="button"
+            onClick={() => setSelectedDrone(pipDroneId)}
+            title={`${pipDroneId.replace('drone-0', 'DRONE ')} 시점으로 전환`}
+            className="group absolute bottom-3 right-3 z-10 w-[260px] aspect-video rounded-lg bg-black border border-slate-700/60 backdrop-blur-md shadow-xl overflow-hidden hover:border-accent-500/70 transition pointer-events-auto"
+          >
+            <LiveVideoFeed fill mode={pipMode} />
+
+            {/* PIP 상단: 드론/카메라 라벨 */}
+            <div className="absolute top-1.5 left-1.5 pointer-events-none">
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-900/80 border border-slate-700/60 backdrop-blur-sm">
+                <span className="w-1 h-1 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-[9px] font-mono tracking-wider text-slate-200">
+                  {pipDroneId.replace('drone-0', 'D')} · {CAMERA_LABEL_SHORT[pipMode]}
+                </span>
+              </div>
+            </div>
+
+            {/* PIP 우상단: 스왑 힌트 아이콘 (hover 시 강조) */}
+            <div className="absolute top-1.5 right-1.5 pointer-events-none">
+              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-900/60 text-slate-400 group-hover:bg-accent-500/20 group-hover:text-accent-300 transition">
+                <ArrowLeftRight size={10} />
+                <span className="text-[9px] font-mono tracking-wider">SWAP</span>
+              </div>
+            </div>
+          </button>
         </div>
       </div>
-
-      {/* ── 좌상단: Thermal Trend PIP (Live Feed PIP 은 메인으로 승격되어 제거됨) ── */}
-      <aside className="absolute top-20 left-4 z-20 w-[280px] pointer-events-auto">
-        <section className="rounded-xl bg-slate-900/80 border border-slate-700/60 backdrop-blur-md shadow-2xl px-3 py-2.5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-white">
-              Thermal Trend
-            </span>
-            <span className="text-[9px] font-mono text-slate-500">last 60s</span>
-          </div>
-          <div className="h-[110px]">
-            <ThermalGraph />
-          </div>
-        </section>
-      </aside>
 
       {/* ── 좌하단: Drones 패널 (DRONE 01/02 선택) ───────────── */}
       <DronesPanel />
