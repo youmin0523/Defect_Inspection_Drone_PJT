@@ -1,8 +1,8 @@
 /**
  * pages/employee/PreWork.jsx
  * 역할: 사무실 사전 작업 — `/employee/pre-work`
- *       - 현장 라벨 입력 → Level 선택(L1 CAD / L2 평면도) → 파일 업로드 → Mock 3D 모델링
- *       - 완료 시 preModelStore 라이브러리에 저장, 후속 세션(/session/level) 에서 로드 가능
+ *       - 현장 라벨 입력 → Level 선택(L1 CAD / L2 평면도) → 파일 업로드
+ *       - L2: 백엔드 OpenCV 벽체 추출 → 3D 프리뷰 표시 → preModelStore 라이브러리에 저장
  *       - 직원 랜딩(`/employee`) 의 "도면 업로드 · 사전 작업" 카드가 여기로 진입
  *
  *   UX 경계선 (memory: project_ux_boundary_employee_vs_session):
@@ -10,8 +10,10 @@
  *     `/employee` 랜딩과 같은 톤(흰 배경 + blue/yellow accent + 카드 레이아웃) 유지.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Canvas } from '@react-three/fiber'
+import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import {
   ArrowLeft,
   Building,
@@ -22,9 +24,10 @@ import {
   CheckCircle2,
   Loader2,
   Trash2,
+  Eye,
 } from 'lucide-react'
 import FileDropzone from '../../components/session/FileDropzone.jsx'
-import { runMockModeling } from '../../utils/mockModeling.js'
+import BuildingMesh from '../../components/map3d/BuildingMesh.jsx'
 import usePreModelStore from '../../store/preModelStore.js'
 
 const LEVEL_CHOICES = [
@@ -53,28 +56,28 @@ export default function PreWork() {
   const removePreModel = usePreModelStore((s) => s.removePreModel)
 
   const [siteLabel, setSiteLabel] = useState('')
-  const [level, setLevel] = useState(1)
+  const [level, setLevel] = useState(2) // 기본: 평면도 이미지
   const [fileMeta, setFileMeta] = useState(null) // { name, size, imageDataUrl }
   const [status, setStatus] = useState('pending') // pending | modeling | ready
   const [progress, setProgress] = useState(0)
   const [stage, setStage] = useState('')
   const [error, setError] = useState(null)
+  const [wallsData, setWallsData] = useState(null) // 추출된 벽체 좌표
+  const [outline, setOutline] = useState(null)     // 건물 외곽 다각형
 
-  const cancelRef = useRef(null)
+  // 실제 File 객체 보관 (API 전송용 — state 에 넣으면 직렬화 문제)
+  const fileObjRef = useRef(null)
 
-  useEffect(() => () => {
-    cancelRef.current?.()
-    cancelRef.current = null
-  }, [])
-
-  const cfg = LEVEL_CHOICES.find((c) => c.level === level) ?? LEVEL_CHOICES[0]
+  const cfg = LEVEL_CHOICES.find((c) => c.level === level) ?? LEVEL_CHOICES[1]
   const canStart = siteLabel.trim().length >= 2 && fileMeta && status === 'pending'
 
   const handleFile = async (file) => {
     if (!file) {
       setFileMeta(null)
+      fileObjRef.current = null
       return
     }
+    fileObjRef.current = file
     const isImage = file.type?.startsWith('image/')
     let imageDataUrl = null
     if (isImage) {
@@ -92,54 +95,105 @@ export default function PreWork() {
     if (status === 'modeling') return
     setLevel(lv)
     setFileMeta(null)
+    fileObjRef.current = null
     setError(null)
+    setWallsData(null)
+    setOutline(null)
   }
 
-  const handleStart = () => {
+  /** 모델링 시작 — L2: 백엔드 OpenCV 벽체 추출 API 호출 */
+  const handleStart = async () => {
     if (!canStart) return
     setStatus('modeling')
-    setProgress(0)
-    setStage('초기화...')
+    setProgress(10)
+    setStage('파일 업로드 중...')
     setError(null)
+    setWallsData(null)
+    setOutline(null)
 
-    cancelRef.current = runMockModeling({
-      level,
-      onTick: ({ progress, stage }) => {
-        setProgress(progress)
-        setStage(stage)
-      },
-      onComplete: () => {
-        cancelRef.current = null
-        // preModelStore 에 저장
+    try {
+      if (level === 2 && fileObjRef.current) {
+        // L2: 실제 백엔드 OpenCV 벽체 추출
+        const formData = new FormData()
+        formData.append('file', fileObjRef.current)
+
+        setProgress(25)
+        setStage('서버로 전송 중...')
+
+        const response = await fetch('/api/v1/floorplan/analyze', {
+          method: 'POST',
+          body: formData,
+        })
+
+        setProgress(60)
+        setStage('OpenCV 벽체 추출 중...')
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}))
+          throw new Error(err.detail || `서버 오류 (${response.status})`)
+        }
+
+        const data = await response.json()
+
+        setProgress(90)
+        setStage('3D 모델 생성 중...')
+
+        await new Promise((r) => setTimeout(r, 500))
+
+        setWallsData(data.walls)
+        setOutline(data.outline)
+
         addPreModel({
           siteName: siteLabel.trim(),
           level,
           fileName: fileMeta.name,
           fileSize: fileMeta.size,
           imageDataUrl: fileMeta.imageDataUrl,
+          wallsData: data.walls,
+          outline: data.outline,
+        })
+
+        setProgress(100)
+        setStage(`완료 — ${data.wall_count}개 벽체 + 외곽 윤곽선 추출`)
+        setStatus('ready')
+      } else {
+        // L1(CAD) 은 아직 mock — 향후 백엔드 파서 연결
+        setStage('도면 파싱 중... (데모)')
+        await new Promise((r) => setTimeout(r, 2000))
+        setProgress(100)
+        setStage('완료')
+
+        addPreModel({
+          siteName: siteLabel.trim(),
+          level,
+          fileName: fileMeta.name,
+          fileSize: fileMeta.size,
+          imageDataUrl: fileMeta.imageDataUrl,
+          wallsData: null,
+          outline: null,
         })
         setStatus('ready')
-      },
-    })
-  }
-
-  const handleCancel = () => {
-    cancelRef.current?.()
-    cancelRef.current = null
-    setStatus('pending')
-    setProgress(0)
-    setStage('')
+      }
+    } catch (err) {
+      console.error('[PreWork] 벽체 추출 실패:', err)
+      setError(err.message || '벽체 추출에 실패했습니다. 백엔드 서버가 실행 중인지 확인하세요.')
+      setStatus('pending')
+      setProgress(0)
+      setStage('')
+    }
   }
 
   const handleNewEntry = () => {
-    // 동일 페이지에서 다른 현장/파일로 추가 모델 생성
     setSiteLabel('')
     setFileMeta(null)
+    fileObjRef.current = null
     setStatus('pending')
     setProgress(0)
     setStage('')
     setError(null)
-    setLevel(1)
+    setWallsData(null)
+    setOutline(null)
+    setLevel(2)
   }
 
   return (
@@ -250,7 +304,7 @@ export default function PreWork() {
                 file={fileMeta ? { name: fileMeta.name, size: fileMeta.size } : null}
                 previewUrl={fileMeta?.imageDataUrl}
                 onFile={handleFile}
-                onClear={() => setFileMeta(null)}
+                onClear={() => { setFileMeta(null); fileObjRef.current = null }}
               />
             </div>
           )}
@@ -275,7 +329,7 @@ export default function PreWork() {
                   <div className="text-[11px] text-gray-500 font-mono">
                     {status === 'ready'
                       ? '세션 Level 선택 화면에서 이 현장 라벨을 입력하면 자동 노출됩니다'
-                      : '브라우저 탭을 유지해주세요'}
+                      : '백엔드에서 벽체를 추출 중입니다...'}
                   </div>
                 </div>
               </div>
@@ -293,13 +347,48 @@ export default function PreWork() {
             </div>
           )}
 
+          {/* 5) 3D 프리뷰 — 벽체 추출 완료 시 */}
+          {status === 'ready' && wallsData && wallsData.length > 0 && (
+            <div className="mb-6 rounded-xl border border-gray-200 bg-slate-900 overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 border-b border-slate-700">
+                <Eye size={14} className="text-blue-400" />
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  3D 프리뷰 — {wallsData.length}개 벽체
+                </span>
+              </div>
+              <div className="h-72 md:h-80">
+                <Canvas shadows>
+                  <PerspectiveCamera makeDefault position={[8, 6, 8]} fov={50} />
+                  <OrbitControls
+                    enablePan
+                    enableZoom
+                    enableRotate
+                    maxPolarAngle={Math.PI / 2}
+                    minDistance={2}
+                    maxDistance={30}
+                  />
+                  <ambientLight intensity={0.4} />
+                  <directionalLight position={[5, 10, 5]} intensity={0.8} castShadow />
+                  <Suspense fallback={null}>
+                    <BuildingMesh
+                      level={2}
+                      imageUrl={fileMeta?.imageDataUrl}
+                      wallsData={wallsData}
+                      outline={outline}
+                    />
+                  </Suspense>
+                </Canvas>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="mb-4 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
               {error}
             </div>
           )}
 
-          {/* 5) 액션 버튼 */}
+          {/* 6) 액션 버튼 */}
           <div className="flex items-center justify-between">
             <button
               type="button"
@@ -321,13 +410,7 @@ export default function PreWork() {
             )}
 
             {status === 'modeling' && (
-              <button
-                type="button"
-                onClick={handleCancel}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-md border border-red-300 text-red-700 text-sm hover:bg-red-50 transition"
-              >
-                취소
-              </button>
+              <div className="text-xs text-gray-400 font-mono">처리 중...</div>
             )}
 
             {status === 'ready' && (
@@ -367,7 +450,9 @@ export default function PreWork() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-slate-800 truncate break-keep">{m.siteName}</p>
                     <p className="text-xs text-gray-500 mt-0.5 font-mono truncate">
-                      L{m.level} · {m.fileName} · {new Date(m.createdAt).toLocaleString('ko-KR')}
+                      L{m.level} · {m.fileName}
+                      {m.wallsData ? ` · ${m.wallsData.length}벽체` : ''}
+                      {' · '}{new Date(m.createdAt).toLocaleString('ko-KR')}
                     </p>
                   </div>
                   <button

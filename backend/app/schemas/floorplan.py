@@ -32,6 +32,15 @@ class FloorplanProcessResponse(BaseModel):
     gazebo_world: Optional[str] = Field(None, description="생성된 .world 파일 경로")
 
 
+class FloorplanAnalyzeResponse(BaseModel):
+    """벽체 추출 분석 결과 (Stateless — DB 불필요)"""
+    walls: list[dict] = Field(default_factory=list, description="벽체 좌표 [{x1,y1,x2,y2}, ...] (0-1 정규화)")
+    outline: list[dict] = Field(default_factory=list, description="건물 외곽 다각형 [{x,y}, ...] (0-1 정규화, 닫힘)")
+    image_width: int
+    image_height: int
+    wall_count: int
+
+
 class FloorplanListResponse(BaseModel):
     """평면도 목록 응답"""
     items: list[FloorplanUploadResponse]

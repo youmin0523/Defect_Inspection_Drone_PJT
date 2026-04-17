@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     MJPEG_JPEG_QUALITY: int = 80
     THERMAL_BLEND_ALPHA: float = 0.5
 
+    # ── Recording ────────────────────────────
+    RECORDING_OUTPUT_DIR: str = "./recordings"
+    RECORDING_FPS: float = 30.0
+    RECORDING_CODEC: str = "mp4v"
+
     # ── CORS ─────────────────────────────────
     CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
 

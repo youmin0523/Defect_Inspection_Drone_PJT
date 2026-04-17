@@ -702,3 +702,53 @@ Dashboard (12-col grid)
   - After: 레이더 스캔 + crosshair + context tiers, 선택된 드론에 발광, 미니맵 accent rail, 배경에 도트 그리드 + 상단 glow, 피드 박스에 HUD 코너 브래킷 → "관제실 콘솔" 톤
 - **검증**: Vite(5176) HMR — 5개 폴리시 파일 전부 transform 성공, 컴파일 에러 0. lucide 신규 아이콘(Camera / Thermometer / Radio) 번들 존재 확인
 - **잔여**: 실제 드론 스트림/텔레메트리 연결 전엔 여전히 "대기 상태" 가 주로 보일 것 — 그래도 그 대기 상태 자체가 폴리시 됨. WS 연결 후 실제 데이터 흐르면 더 "live" 해 보임
+
+---
+
+### 5️⃣ UI "AI틱한 느낌" 제거 리팩토링
+
+#### ⏱ 2026-04-17 — 전체 서비스 페이지 디자인 톤 전면 개편
+
+- **피드백**: 랜딩페이지는 깔끔한데, 서비스 진입 후(세션 셋업, 레벨 선택, 모델링, 대시보드) UI가 "AI가 만들어준 게 너무 티난다." 네이비 배경 + 네온그린 액센트 + HUD 장식 + 모노스페이스 남발이 주요 원인.
+
+#### ⏱ 2026-04-17 — Phase 1: AI 패턴 제거 (장식/타이포 정리)
+- **반영** (11파일):
+  - `tailwind.config.js` — `pulse-fast` 커스텀 애니메이션 삭제
+  - `index.css` — `.badge-active/.badge-idle`에서 `uppercase tracking-wider` 제거, `.card-accent` `shadow-2xl` → `shadow-lg`
+  - `SessionSetup.jsx` — `SectionLabel` 컴포넌트 좌우 장식선 삭제 → 단순 텍스트, `Field` 라벨 `uppercase tracking-wider` 제거, 입력 `bg-slate-950/60` → `bg-slate-800/80`, 컨테이너 `backdrop-blur-md` 삭제
+  - `SessionLevel.jsx` — 선택 카드 네온 글로우 `shadow-[0_0_18px_rgba(...)]` → `ring-2 ring-accent-500/30`, 섹션 헤더 `uppercase tracking-[0.15em]` 삭제, 레벨 뱃지 `font-mono` 삭제
+  - `SessionModeling.jsx` — 컨테이너 `backdrop-blur-md` 삭제, 영문 라벨 한글화
+  - `ModelingProgress.jsx` — 프로그레스 바 글로우 삭제, 하단 상태 `font-mono uppercase tracking-wider` 삭제
+  - `Dashboard.jsx` — **도트 그리드 배경 삭제**, **비네팅 글로우 삭제**, **CornerBracket(HUD L자 모서리) 컴포넌트 및 4개 호출 삭제**, 피드 뱃지 `tracking-wider` 삭제 + "LIVE" 통합, 미니맵 헤더 단순화 (`tracking-[0.2em]` 삭제, "FLOOR·SIM" pill 삭제), AI 패널 `uppercase` 삭제 + "Real-time detection" → "실시간 하자 탐지"
+  - `DashboardTopBar.jsx` — 모든 pill `backdrop-blur-md` → `backdrop-blur-sm`, `shadow-lg` → `shadow-md`, 세션 라벨 `font-mono uppercase tracking-wider` 삭제
+  - `DronesPanel.jsx` — 패널 `shadow-2xl` → `shadow-lg`, `ring-1` 삭제, 헤더 `tracking-[0.25em] uppercase` 삭제, 선택 카드 글로우 삭제 → `ring-2`, 상단 그라디언트 라인 → 솔리드, ACTIVE/IDLE 대소문자 정상화, 배터리 바 글로우 삭제
+  - `DefectPanel.jsx` — 3중 동심원 펄스 링 삭제 → `Search` 아이콘 + 회색 원 교체, `uppercase tracking-wider` 삭제
+  - `Sidebar.jsx`, `DroneStatusCard.jsx`, `LevelCard.jsx` — 하드코딩 에메랄드 `rgba(16,185,129,...)` 글로우 3곳 삭제
+
+#### ⏱ 2026-04-17 — Phase 2: 컬러 팔레트 전면 교체
+- **피드백**: "네이비 배경 + 네온그린 조합이 AI 대시보드의 상징"
+- **반영**:
+  - `tailwind.config.js` — 배경 네이비(`#0b1120`) → 중성 다크 그레이(`#121212`), surface(`#111827` → `#1a1a1a`), panel(`#1f2937` → `#262626`), border(`#334155` → `#333333`)
+  - `tailwind.config.js` — 액센트 에메랄드 → sky blue → **최종 indigo(`#6366f1`)** (사용자 피드백 3라운드: 에메랄드→sky blue→indigo)
+  - 16개 서비스 파일 — `bg-slate-*` / `border-slate-*`(파란 틴트) → `bg-neutral-*` / `border-neutral-*`(순수 회색) 일괄 교체
+  - 8개 파일 — 버튼 텍스트 `text-slate-900` → `text-white` (블루/인디고 배경 가독성)
+  - `LiveVideoFeed.jsx` — No Signal 격자 하드코딩 rgba 에메랄드 → 인디고로 동기화
+  - `backend/app/services/camera.py` — 더미 프레임 "No Signal" 텍스트 초록(`0,255,0`) → 차분한 회색(`80,80,80`)
+
+#### ⏱ 2026-04-17 — Phase 3: 세션 페이지 라이트 테마 전환
+- **피드백**: "배경을 흰색으로 바꿀까 ... 로그인/회원가입처럼" → 세션 페이지만 라이트
+- **반영** (5파일):
+  - `SessionLayout.jsx` — `bg-dashboard-bg text-white` → `bg-gray-50 text-gray-800`, 헤더 `bg-white border-gray-200 shadow-sm`, 로고 `logoWhite` → `logoDark`, 진척도 바 다크→라이트 색상 전환
+  - `SessionSetup.jsx` — 폼 `bg-white border-gray-200`, 입력 `bg-gray-50 border-gray-300 text-gray-800`, 라벨 `text-gray-600`, 에러 `bg-red-50 text-red-600`
+  - `SessionLevel.jsx` — 카드 `bg-white border-gray-200`, 선택 시 `bg-accent-50 border-accent-500`, 빈 상태 `bg-gray-50`, 이전 버튼 `border-gray-300 text-gray-600`
+  - `SessionModeling.jsx` — 동일 라이트 톤, 안내 박스 `bg-gray-50`, 프로그레스 `lightMode` prop 전달
+  - `ModelingProgress.jsx` — `lightMode` prop 추가: 프로그레스 바 `bg-gray-200`, 텍스트 `text-gray-600`
+
+#### ⏱ 2026-04-17 — Phase 4: Start Mission 버튼 컬러 분리
+- **피드백**: Start Mission이 액센트와 같은 색이면 구분이 안 됨
+- **반영**: `MissionControl.jsx` — Start Mission `bg-accent-500` → `bg-emerald-500` (초록=시작, 빨강=종료)
+
+- **검증**: `vite build` 성공 (에러 0). 세션 플로우 3단계 + 대시보드 전체 브라우저 확인
+- **시각 비교**:
+  - Before: 네이비 배경 + 네온그린 + HUD 코너 + 도트그리드 + 모노스페이스/트래킹 남발 → "AI 해커 터미널"
+  - After: 세션=흰 배경 클린 폼, 대시보드=중성 다크그레이 + 인디고 + 초록 Start Mission → 일반 SaaS 제품 톤

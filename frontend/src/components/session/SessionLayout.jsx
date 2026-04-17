@@ -3,13 +3,13 @@
  * 역할: 세션 셋업 플로우 공통 레이아웃
  *       - 상단 진척도 바 (1. 현장 정보 / 2. Level 선택 / 3. 모델링)
  *       - 중앙 `<Outlet />` 으로 각 단계 페이지 렌더
- *       - 좌측 사이드바/상단 Header 없이 풀스크린 다크 배경
+ *       - 라이트 테마 (흰 배경, 어두운 텍스트)
  *       - 라우팅 가드(setup 없이 level/modeling 진입 방지)는 내부 `<Navigate />` 로 처리
  */
 
 import { NavLink, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { Check } from 'lucide-react'
-import logoWhite from '../../assets/logo/logo_white.png'
+import logoDark from '../../assets/logo/logo_transparent-removebg-preview.png'
 import useSessionStore from '../../store/sessionStore.js'
 
 const STEPS = [
@@ -33,12 +33,12 @@ export default function SessionLayout() {
   const currentIndex = STEPS.findIndex((s) => s.path === location.pathname)
 
   return (
-    <div className="min-h-screen bg-dashboard-bg text-white flex flex-col">
-      {/* 상단 바: 로고 + 진척도 */}
-      <header className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+    <div className="min-h-screen bg-gray-50 text-gray-800 flex flex-col">
+      {/* 상단 바 */}
+      <header className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200 shadow-sm">
         <NavLink to="/" className="flex items-center gap-2" title="홈으로">
-          <img src={logoWhite} alt="DRONE INSPECT" className="w-10 h-10 object-contain" />
-          <span className="font-extrabold tracking-tight uppercase text-white">
+          <img src={logoDark} alt="DRONE INSPECT" className="w-10 h-10 object-contain" />
+          <span className="font-extrabold tracking-tight uppercase text-gray-800">
             DRONE INSPECT
           </span>
         </NavLink>
@@ -53,32 +53,32 @@ export default function SessionLayout() {
                 <div
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold transition ${
                     isCurrent
-                      ? 'bg-accent-500/15 border-accent-500/60 text-accent-200'
+                      ? 'bg-accent-500/10 border-accent-500 text-accent-600'
                       : isDone
-                        ? 'bg-slate-800 border-slate-700 text-slate-300'
-                        : 'bg-slate-900 border-slate-800 text-slate-500'
+                        ? 'bg-gray-100 border-gray-300 text-gray-600'
+                        : 'bg-white border-gray-200 text-gray-400'
                   }`}
                 >
                   <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
                     isCurrent
-                      ? 'bg-accent-500 text-slate-900'
+                      ? 'bg-accent-500 text-white'
                       : isDone
-                        ? 'bg-slate-600 text-slate-200'
-                        : 'bg-slate-800 text-slate-500'
+                        ? 'bg-gray-400 text-white'
+                        : 'bg-gray-200 text-gray-400'
                   }`}>
                     {isDone ? <Check size={12} /> : step.n}
                   </span>
                   <span>{step.label}</span>
                 </div>
                 {idx < STEPS.length - 1 && (
-                  <span className={`w-6 h-px ${idx < currentIndex ? 'bg-accent-500/60' : 'bg-slate-700'}`} />
+                  <span className={`w-6 h-px ${idx < currentIndex ? 'bg-accent-500/60' : 'bg-gray-300'}`} />
                 )}
               </li>
             )
           })}
         </ol>
 
-        <div className="w-[200px]" aria-hidden>{/* 진척도 중앙 정렬용 여백 */}</div>
+        <div className="w-[200px]" aria-hidden />
       </header>
 
       {/* 단계 별 컨텐츠 */}

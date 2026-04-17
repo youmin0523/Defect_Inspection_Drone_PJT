@@ -25,8 +25,8 @@ export default function DefectCard({ defect }) {
   const severityBorder = {
     HIGH: 'border-red-500/30 hover:border-red-500/60',
     MED:  'border-amber-500/30 hover:border-amber-500/60',
-    LOW:  'border-slate-600 hover:border-slate-500',
-  }[defect.severity] ?? 'border-slate-700 hover:border-slate-500'
+    LOW:  'border-neutral-600 hover:border-neutral-500',
+  }[defect.severity] ?? 'border-neutral-700 hover:border-neutral-500'
 
   return (
     <button
@@ -43,10 +43,10 @@ export default function DefectCard({ defect }) {
           <img
             src={defect.image_crop}
             alt="하자 크롭"
-            className="w-14 h-14 object-cover rounded-lg flex-shrink-0 border border-slate-600 group-hover:border-slate-500"
+            className="w-14 h-14 object-cover rounded-lg flex-shrink-0 border border-neutral-600 group-hover:border-neutral-500"
           />
         ) : (
-          <div className="w-14 h-14 bg-slate-700 rounded-lg flex-shrink-0 flex items-center justify-center text-slate-500 text-xs border border-slate-600">
+          <div className="w-14 h-14 bg-neutral-700 rounded-lg flex-shrink-0 flex items-center justify-center text-slate-500 text-xs border border-neutral-600">
             없음
           </div>
         )}

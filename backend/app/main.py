@@ -16,6 +16,7 @@ from app.config import settings
 from app.db.init_db import init_db
 from app.api.router import api_router
 from app.services.camera import rgb_camera_service, thermal_camera_service
+from app.services.recording import recording_service
 from app.services.yolo_inference import yolo_service
 
 
@@ -53,6 +54,12 @@ async def lifespan(app: FastAPI):
 
     # ── 종료 ─────────────────────────────────
     print("[AeroInspect] 서버 종료 중...")
+
+    # 녹화 중이면 안전하게 중지
+    if recording_service.is_recording:
+        await recording_service.stop()
+        print("[AeroInspect] 녹화 중지 완료")
+
     await rgb_camera_service.release()
     await thermal_camera_service.release()
     print("[AeroInspect] 카메라 자원 해제 완료")

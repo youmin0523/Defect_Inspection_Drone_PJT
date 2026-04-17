@@ -24,15 +24,25 @@ const useSessionStore = create(
   persist(
     (set, get) => ({
       // ── Setup 단계 ──────────────────────────
-      siteName: '',
-      operatorName: '',
+      siteName: '',           // 현장명 (아파트명)
+      siteUnit: '',           // 동·호수 ("102동 1501호")
+      operatorName: '',       // 점검자
       inspectionDate: todayISO(),
+      inspectionType: '',     // 점검구분: '사전점검' | '입주점검' | '정기'
+      inspectionArea: '',     // 점검면적 (예: "84㎡")
+      department: '',         // 소속
+      position: '',           // 직책
+      phoneNumber: '',        // 연락처
+      witness: '',            // 입회자
+      confirmer: '',          // 확인자 (리포트 편집 시 기입)
 
       // ── Level & Modeling 단계 ──────────────
       level: null, // 1 | 2 | 3 | null
       uploadedFileName: null,
       uploadedFileSize: null,
       uploadedImageDataUrl: null, // L2 전용: BuildingMesh 텍스처용 base64 (persist)
+      wallsData: null,            // 벽체 좌표 [{x1,y1,x2,y2}, ...] (0-1 정규화)
+      outline: null,              // 건물 외곽 다각형 [{x,y}, ...] (0-1 정규화, 닫힘)
       modelStatus: 'pending', // 'pending' | 'modeling' | 'ready'
       modelProgress: 0,
       modelStage: '',
@@ -50,9 +60,23 @@ const useSessionStore = create(
 
       // ── Actions ───────────────────────────
 
-      /** Setup 단계: 현장·운용자·날짜 커밋 */
-      setSessionInfo: ({ siteName, operatorName, inspectionDate }) =>
-        set({ siteName, operatorName, inspectionDate }),
+      /** Setup 단계: 현장·운용자·날짜·부가 정보 커밋 */
+      setSessionInfo: (info) =>
+        set({
+          siteName: info.siteName ?? '',
+          siteUnit: info.siteUnit ?? '',
+          operatorName: info.operatorName ?? '',
+          inspectionDate: info.inspectionDate ?? todayISO(),
+          inspectionType: info.inspectionType ?? '',
+          inspectionArea: info.inspectionArea ?? '',
+          department: info.department ?? '',
+          position: info.position ?? '',
+          phoneNumber: info.phoneNumber ?? '',
+          witness: info.witness ?? '',
+        }),
+
+      /** 확인자 — 리포트 편집기에서 별도 기입 */
+      setConfirmer: (name) => set({ confirmer: name }),
 
       /** Level 변경 시 업로드/모델 상태 리셋 (이전 Level 흔적 제거) */
       setLevel: (level) =>
@@ -61,6 +85,8 @@ const useSessionStore = create(
           uploadedFileName: null,
           uploadedFileSize: null,
           uploadedImageDataUrl: null,
+          wallsData: null,
+          outline: null,
           modelStatus: 'pending',
           modelProgress: 0,
           modelStage: '',
@@ -70,8 +96,7 @@ const useSessionStore = create(
 
       /**
        * 사전 모델 선택 — /session/level 에서 pre-made model 클릭 시.
-       * preModel: { id, level, fileName, imageDataUrl } — preModelStore 에서 꺼낸 엔트리
-       * /session/modeling 은 modelSource='premodel' 감지 시 짧은 "로드 중" 애니메이션 후 ready 처리.
+       * preModel: { id, level, fileName, imageDataUrl, wallsData, outline }
        */
       selectPreModel: (preModel) =>
         set({
@@ -81,6 +106,8 @@ const useSessionStore = create(
           uploadedFileName: preModel.fileName,
           uploadedFileSize: preModel.fileSize ?? 0,
           uploadedImageDataUrl: preModel.imageDataUrl ?? null,
+          wallsData: preModel.wallsData ?? null,
+          outline: preModel.outline ?? null,
           modelStatus: 'pending',
           modelProgress: 0,
           modelStage: '',
@@ -95,6 +122,8 @@ const useSessionStore = create(
           uploadedFileName: null,
           uploadedFileSize: null,
           uploadedImageDataUrl: null,
+          wallsData: null,
+          outline: null,
           modelStatus: 'pending',
           modelProgress: 0,
           modelStage: '',
@@ -107,6 +136,8 @@ const useSessionStore = create(
             uploadedFileName: null,
             uploadedFileSize: null,
             uploadedImageDataUrl: null,
+            wallsData: null,
+            outline: null,
           })
           return
         }
@@ -161,12 +192,22 @@ const useSessionStore = create(
         cancelRunner = null
         set({
           siteName: '',
+          siteUnit: '',
           operatorName: '',
           inspectionDate: todayISO(),
+          inspectionType: '',
+          inspectionArea: '',
+          department: '',
+          position: '',
+          phoneNumber: '',
+          witness: '',
+          confirmer: '',
           level: null,
           uploadedFileName: null,
           uploadedFileSize: null,
           uploadedImageDataUrl: null,
+          wallsData: null,
+          outline: null,
           modelStatus: 'pending',
           modelProgress: 0,
           modelStage: '',
@@ -183,12 +224,22 @@ const useSessionStore = create(
       // File 객체/러너 취소 클로저/런타임 전용 필드 제외
       partialize: (state) => ({
         siteName: state.siteName,
+        siteUnit: state.siteUnit,
         operatorName: state.operatorName,
         inspectionDate: state.inspectionDate,
+        inspectionType: state.inspectionType,
+        inspectionArea: state.inspectionArea,
+        department: state.department,
+        position: state.position,
+        phoneNumber: state.phoneNumber,
+        witness: state.witness,
+        confirmer: state.confirmer,
         level: state.level,
         uploadedFileName: state.uploadedFileName,
         uploadedFileSize: state.uploadedFileSize,
         uploadedImageDataUrl: state.uploadedImageDataUrl,
+        wallsData: state.wallsData,
+        outline: state.outline,
         modelStatus: state.modelStatus,
         modelSource: state.modelSource,
         loadedPreModelId: state.loadedPreModelId,

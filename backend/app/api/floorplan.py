@@ -22,8 +22,10 @@ from app.models.floorplan import Floorplan
 from app.schemas.floorplan import (
     FloorplanUploadResponse,
     FloorplanProcessResponse,
+    FloorplanAnalyzeResponse,
     FloorplanListResponse,
 )
+from app.services.floorplan_processor import extract_walls_from_bytes
 
 router = APIRouter()
 
@@ -151,6 +153,29 @@ async def process_floorplan(
         walls=fp.walls_data,
         gazebo_world=fp.gazebo_world_path,
     )
+
+
+@router.post("/analyze", response_model=FloorplanAnalyzeResponse)
+async def analyze_floorplan(file: UploadFile = File(...)):
+    """
+    평면도 이미지에서 벽체 라인 추출 (Stateless — DB 불필요).
+    JPG/PNG/WEBP 이미지를 받아 OpenCV로 처리 후 정규화 벽체 좌표 JSON 반환.
+    프론트엔드 /employee/pre-work 에서 호출.
+    """
+    if file.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"이미지 파일만 지원합니다 (JPG/PNG/WEBP): {file.content_type}",
+        )
+
+    content = await file.read()
+
+    try:
+        result = extract_walls_from_bytes(content)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"이미지 처리 실패: {str(e)}")
+
+    return FloorplanAnalyzeResponse(**result)
 
 
 @router.delete("/{floorplan_id}", status_code=204)

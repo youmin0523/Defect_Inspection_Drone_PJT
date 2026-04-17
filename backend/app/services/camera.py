@@ -110,14 +110,17 @@ class CameraService:
     def _dummy_frame(width: int = 640, height: int = 480) -> np.ndarray:
         """
         카메라 미연결 시 표시할 더미 프레임.
-        검정 배경에 "No Signal" 텍스트 표시.
+        어두운 배경에 차분한 회색 텍스트.
         """
-        frame = np.zeros((height, width, 3), dtype=np.uint8)
-        cv2.putText(
-            frame, "No Signal",
-            (width // 2 - 80, height // 2),
-            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2,
-        )
+        frame = np.full((height, width, 3), 18, dtype=np.uint8)  # 짙은 다크그레이 배경
+        text = "No Signal"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 0.8
+        thickness = 1
+        text_size = cv2.getTextSize(text, font, scale, thickness)[0]
+        x = (width - text_size[0]) // 2
+        y = (height + text_size[1]) // 2
+        cv2.putText(frame, text, (x, y), font, scale, (80, 80, 80), thickness)
         return frame
 
 

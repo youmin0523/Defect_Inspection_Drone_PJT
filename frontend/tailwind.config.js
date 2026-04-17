@@ -24,13 +24,13 @@ export default {
           700: '#1d4ed8',
           900: '#1e3a8a',
         },
-        // //* [Modified Code] 대시보드 주 강조색 = emerald 계열 (레퍼런스 톤)
+        // 대시보드 주 강조색 = indigo 계열 (모던/프리미엄 톤)
         accent: {
-          50:  '#ecfdf5',
-          400: '#34d399',
-          500: '#10b981',
-          600: '#059669',
-          700: '#047857',
+          50:  '#eef2ff',
+          400: '#818cf8',
+          500: '#6366f1',
+          600: '#4f46e5',
+          700: '#4338ca',
         },
         // 심각도별 컬러
         severity: {
@@ -38,21 +38,19 @@ export default {
           med:  '#f97316',     // orange-500
           low:  '#eab308',     // yellow-500
         },
-        // //* [Modified Code] 다크 대시보드 배경 — 레퍼런스 톤 (더 진한 네이비 + 중간톤 surface)
+        // 다크 대시보드 배경 — 중성 다크 그레이 (네이비 제거)
         dashboard: {
-          bg:      '#0b1120',  // 레퍼런스 메인 배경
-          surface: '#111827',  // 레퍼런스 헤더/사이드 surface
-          panel:   '#1f2937',  // 카드 내부 패널
-          border:  '#334155',  // slate-700
+          bg:      '#121212',  // 중성 다크 그레이
+          surface: '#1a1a1a',  // 카드/헤더 surface
+          panel:   '#262626',  // 카드 내부 패널
+          border:  '#333333',  // 중성 보더
         },
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
       },
-      animation: {
-        'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-      },
+      animation: {},
     },
   },
   plugins: [],
