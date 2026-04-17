@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook
+from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook
 
 api_router = APIRouter()
 
@@ -16,6 +16,13 @@ api_router.include_router(
     auth.router,
     prefix="/auth",
     tags=["Auth"],
+)
+
+# OAuth 소셜 로그인 (Google / Kakao / Naver)
+api_router.include_router(
+    oauth.router,
+    prefix="/oauth",
+    tags=["OAuth"],
 )
 
 # 하자 탐지 로그 CRUD
