@@ -31,7 +31,7 @@
 
 import { useCallback, useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, Video, ArrowLeftRight, Circle, Square } from 'lucide-react'
+import { Activity, Video, ArrowLeftRight, Circle, Square, Maximize2, Minimize2 } from 'lucide-react'
 import BuildingScene from '../components/map3d/BuildingScene.jsx'
 import LiveVideoFeed from '../components/video/LiveVideoFeed.jsx'
 import DefectPanel from '../components/defects/DefectPanel.jsx'
@@ -84,6 +84,9 @@ export default function Dashboard() {
   const selectedDroneId = useDroneStore((s) => s.selectedDroneId)
   const cameraMode = useDroneStore((s) => s.cameraMode)
   const setSelectedDrone = useDroneStore((s) => s.setSelectedDrone)
+
+  // ── 미니맵 확장 상태 ─────────────────────────
+  const [minimapExpanded, setMinimapExpanded] = useState(false)
 
   // ── 녹화 상태 ─────────────────────────────
   const [isRecording, setIsRecording] = useState(false)
@@ -239,18 +242,31 @@ export default function Dashboard() {
 
       {/* ── 우하단: 3D 미니맵 (도면/평면도/시뮬레이션 모델링 용) ── */}
       <aside
-        className="absolute right-4 bottom-4 z-20 pointer-events-auto"
-        style={{ width: MINIMAP_W, height: MINIMAP_H }}
+        className="absolute right-4 bottom-4 z-20 pointer-events-auto transition-all duration-300 ease-in-out"
+        style={{
+          width:  minimapExpanded ? MINIMAP_W * 2 : MINIMAP_W,
+          height: minimapExpanded ? MINIMAP_H * 2 : MINIMAP_H,
+        }}
       >
         <div className="relative flex flex-col h-full rounded-xl bg-neutral-900/90 border border-neutral-700/60 backdrop-blur-sm shadow-lg overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-700/60 flex-shrink-0">
             <span className="text-xs font-semibold text-slate-100">
               3D Mini Map
             </span>
-            <span className="flex items-center gap-1 text-xs text-accent-300">
-              <span className="w-1 h-1 rounded-full bg-accent-400 animate-pulse" />
-              LIVE
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1 text-xs text-accent-300">
+                <span className="w-1 h-1 rounded-full bg-accent-400 animate-pulse" />
+                LIVE
+              </span>
+              <button
+                type="button"
+                onClick={() => setMinimapExpanded((v) => !v)}
+                title={minimapExpanded ? '축소' : '확대'}
+                className="p-1.5 rounded bg-slate-700/80 text-slate-200 hover:text-white hover:bg-accent-500/30 transition border border-slate-600"
+              >
+                {minimapExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
+            </div>
           </div>
           <div className="flex-1 relative">
             <BuildingScene />
@@ -260,8 +276,8 @@ export default function Dashboard() {
 
       {/* ── 우측: AI Defect Analysis (미니맵과 겹치지 않도록 bottom offset) ── */}
       <aside
-        className="absolute top-20 right-4 z-20 w-[360px] pointer-events-auto"
-        style={{ bottom: MINIMAP_H + 24 /* minimap(200) + gap(16) + safety(8) */ }}
+        className="absolute top-20 right-4 z-20 w-[360px] pointer-events-auto transition-all duration-300"
+        style={{ bottom: (minimapExpanded ? MINIMAP_H * 2 : MINIMAP_H) + 24 }}
       >
         <div className="flex flex-col h-full rounded-xl bg-neutral-900/90 border border-accent-500/30 backdrop-blur-sm shadow-lg overflow-hidden">
           <div className="px-4 py-3 border-b border-neutral-700/60 flex-shrink-0">
