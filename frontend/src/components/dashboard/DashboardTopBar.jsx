@@ -16,7 +16,7 @@ import MissionControl from './MissionControl.jsx'
 const STATUS_CONFIG = {
   connected:    { label: 'LIVE',     dotClass: 'bg-accent-400 animate-pulse' },
   connecting:   { label: 'SYNC',     dotClass: 'bg-yellow-400 animate-pulse' },
-  disconnected: { label: 'OFFLINE',  dotClass: 'bg-slate-500' },
+  disconnected: { label: 'OFFLINE',  dotClass: 'bg-neutral-500' },
   error:        { label: 'ERROR',    dotClass: 'bg-red-400 animate-pulse' },
 }
 
@@ -36,7 +36,7 @@ export default function DashboardTopBar({ onMissionEnd }) {
     <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between gap-3 px-5 py-3 pointer-events-none">
       {/* 좌측: 브랜드 + 세션 컨텍스트 + 검색 */}
       <div className="flex items-center gap-3 pointer-events-auto">
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/70 border border-slate-700/60 backdrop-blur-md shadow-lg">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-neutral-900/70 border border-neutral-700/60 backdrop-blur-sm shadow-md">
           <div className="p-1 bg-accent-500 rounded-md">
             <span className="text-white text-xs" aria-hidden>🚁</span>
           </div>
@@ -47,12 +47,12 @@ export default function DashboardTopBar({ onMissionEnd }) {
 
         {/* //* [Modified Code] 세션 컨텍스트 라벨 */}
         {siteName && (
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/70 border border-accent-500/30 backdrop-blur-md shadow-lg">
-            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Session</span>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-neutral-900/70 border border-accent-500/30 backdrop-blur-sm shadow-md">
+            <span className="text-xs text-slate-400">Session</span>
             <span className="text-xs text-white font-semibold truncate max-w-[240px]">{siteName}</span>
             <span className="text-[10px] text-slate-500">·</span>
             <span className="text-xs text-slate-300">{operatorName}</span>
-            <span className="text-[10px] font-mono text-accent-300 px-1.5 py-0.5 rounded bg-accent-500/10 border border-accent-500/40">
+            <span className="text-xs font-medium text-accent-400 bg-accent-500/10 px-1.5 py-0.5 rounded">
               L{level}
             </span>
           </div>
@@ -66,7 +66,7 @@ export default function DashboardTopBar({ onMissionEnd }) {
           <input
             type="text"
             placeholder="Global Search..."
-            className="bg-slate-900/70 border border-slate-700/60 backdrop-blur-md rounded-lg py-2 pl-9 pr-4 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500 w-60 shadow-lg"
+            className="bg-neutral-900/70 border border-neutral-700/60 backdrop-blur-md rounded-lg py-2 pl-9 pr-4 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500 w-60 shadow-lg"
           />
         </div>
       </div>
@@ -76,7 +76,7 @@ export default function DashboardTopBar({ onMissionEnd }) {
         <MissionControl onEnd={onMissionEnd} />
         <button
           type="button"
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900/70 border border-accent-500/40 backdrop-blur-md text-xs text-accent-300 font-semibold shadow-lg hover:bg-accent-500/10 transition"
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-neutral-900/70 border border-accent-500/40 backdrop-blur-md text-xs text-accent-300 font-semibold shadow-lg hover:bg-accent-500/10 transition"
           title="위성 맵 (데모 — Mapbox 도입 전)"
         >
           <Satellite size={14} />
@@ -88,31 +88,31 @@ export default function DashboardTopBar({ onMissionEnd }) {
       <div className="flex items-center gap-2 pointer-events-auto">
         <button
           type="button"
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900/70 border border-slate-700/60 backdrop-blur-md text-xs text-slate-200 font-semibold shadow-lg hover:border-slate-500 transition"
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-neutral-900/70 border border-neutral-700/60 backdrop-blur-md text-xs text-slate-200 font-semibold shadow-lg hover:border-neutral-500 transition"
           title="비행 경로 필터"
         >
           <Route size={14} />
           Flightpaths
         </button>
 
-        <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900/70 border border-slate-700/60 backdrop-blur-md text-xs text-slate-300 shadow-lg">
+        <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-neutral-900/70 border border-neutral-700/60 backdrop-blur-md text-xs text-slate-300 shadow-lg">
           <span className={`w-2 h-2 rounded-full ${status.dotClass}`} />
-          <span className="font-mono tracking-wider">{status.label}</span>
+          <span className="font-mono">{status.label}</span>
         </div>
 
         <button
           type="button"
-          className="relative p-2 rounded-lg bg-slate-900/70 border border-slate-700/60 backdrop-blur-md text-slate-300 hover:text-white shadow-lg transition"
+          className="relative p-2 rounded-lg bg-neutral-900/70 border border-neutral-700/60 backdrop-blur-md text-slate-300 hover:text-white shadow-lg transition"
           aria-label="알림"
         >
           <Bell size={14} />
           {highCount > 0 && (
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border border-slate-900 animate-pulse" />
+            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border border-neutral-900 animate-pulse" />
           )}
         </button>
 
         <div
-          className="w-9 h-9 rounded-lg bg-slate-900/70 border border-slate-700/60 backdrop-blur-md flex items-center justify-center text-xs font-bold text-white shadow-lg"
+          className="w-9 h-9 rounded-lg bg-neutral-900/70 border border-neutral-700/60 backdrop-blur-md flex items-center justify-center text-xs font-bold text-white shadow-lg"
           title="프로필 (TEMP — DB 연결 전)"
         >
           U

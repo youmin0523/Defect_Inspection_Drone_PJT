@@ -29,9 +29,9 @@
  *   DRONE 02 클릭 → cameraMode='thermal' → 메인 배경이 열화상 스트림
  */
 
-import { useCallback } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, Video, ArrowLeftRight } from 'lucide-react'
+import { Activity, Video, ArrowLeftRight, Circle, Square, Maximize2, Minimize2 } from 'lucide-react'
 import BuildingScene from '../components/map3d/BuildingScene.jsx'
 import LiveVideoFeed from '../components/video/LiveVideoFeed.jsx'
 import DefectPanel from '../components/defects/DefectPanel.jsx'
@@ -70,11 +70,58 @@ const SAFE = {
 const MINIMAP_W = 360
 const MINIMAP_H = 200
 
+// 초(seconds)를 MM:SS 형식으로 변환
+const formatTime = (sec) => {
+  const m = Math.floor(sec / 60).toString().padStart(2, '0')
+  const s = Math.floor(sec % 60).toString().padStart(2, '0')
+  return `${m}:${s}`
+}
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const selectedDroneId = useDroneStore((s) => s.selectedDroneId)
   const cameraMode = useDroneStore((s) => s.cameraMode)
   const setSelectedDrone = useDroneStore((s) => s.setSelectedDrone)
+
+  // ── 미니맵 확장 상태 ─────────────────────────
+  const [minimapExpanded, setMinimapExpanded] = useState(false)
+
+  // ── 녹화 상태 ─────────────────────────────
+  const [isRecording, setIsRecording] = useState(false)
+  const [recElapsed, setRecElapsed] = useState(0)
+  const timerRef = useRef(null)
+
+  // 녹화 타이머: 녹화 시작 시 1초 간격으로 경과 시간 카운트
+  useEffect(() => {
+    if (isRecording) {
+      timerRef.current = setInterval(() => setRecElapsed((p) => p + 1), 1000)
+    } else {
+      clearInterval(timerRef.current)
+      setRecElapsed(0)
+    }
+    return () => clearInterval(timerRef.current)
+  }, [isRecording])
+
+  // 녹화 시작/중지 토글 (RGB + Thermal 동시 녹화)
+  const handleRecordToggle = useCallback(async () => {
+    try {
+      if (!isRecording) {
+        const res = await fetch(`${API_BASE}/stream/record/start`, {
+          method: 'POST',
+        })
+        if (res.ok) setIsRecording(true)
+      } else {
+        const res = await fetch(`${API_BASE}/stream/record/stop`, {
+          method: 'POST',
+        })
+        if (res.ok) setIsRecording(false)
+      }
+    } catch (err) {
+      console.error('[Recording]', err)
+    }
+  }, [isRecording])
 
   // PIP 에 표시할 반대편 드론 정보 (선택되지 않은 쪽)
   const pipDroneId = otherDroneId(selectedDroneId)
@@ -87,20 +134,7 @@ export default function Dashboard() {
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-dashboard-bg">
-      {/* //* [Modified Code] 은은한 도트 그리드 배경 — HUD 느낌 강화 (검은 공백 방지) */}
-      <div
-        aria-hidden="true"
-        className="absolute inset-0 pointer-events-none opacity-[0.45]"
-        style={{
-          backgroundImage: 'radial-gradient(circle at center, rgba(51,65,85,0.35) 0.5px, transparent 1px)',
-          backgroundSize: '24px 24px',
-        }}
-      />
-      {/* //* [Modified Code] 상단/하단 비네팅 글로우 — 정적 대시보드에 깊이감 */}
-      <div
-        aria-hidden="true"
-        className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_80%_50%_at_50%_0%,rgba(16,185,129,0.06),transparent_60%)]"
-      />
+      {/* 배경: 플랫 솔리드 다크 */}
 
       {/* ── 상단 HUD 바 ─────────────────────────────────────── */}
       <DashboardTopBar onMissionEnd={handleMissionEnd} />
@@ -118,31 +152,57 @@ export default function Dashboard() {
         }}
       >
         <div
-          className="relative bg-black rounded-xl overflow-hidden border border-slate-700/60 shadow-2xl ring-1 ring-accent-500/5"
+          className="relative bg-black rounded-xl overflow-hidden border border-neutral-700/60 shadow-2xl"
           style={{
             aspectRatio: '16 / 9',
             width: '100%',
             maxHeight: '100%',
           }}
         >
-          {/* //* [Modified Code] HUD 코너 브래킷 4개 — "관제실 카메라 프레임" 톤 */}
-          <CornerBracket position="tl" />
-          <CornerBracket position="tr" />
-          <CornerBracket position="bl" />
-          <CornerBracket position="br" />
-
           <LiveVideoFeed fill />
 
-          {/* 피드 상단 좌측: 드론/카메라 컨텍스트 HUD 뱃지 */}
+          {/* 피드 상단 좌측: 드론/카메라 컨텍스트 뱃지 */}
           <div className="absolute top-3 left-3 pointer-events-none">
-            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/70 border border-slate-700/60 backdrop-blur-md shadow-lg">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-neutral-900/70 border border-neutral-700/60 shadow-md">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
               <Video size={12} className="text-accent-400" />
-              <span className="text-[11px] font-mono tracking-wider text-slate-200">
-                {selectedDroneId.replace('drone-0', 'DRONE ')} · {CAMERA_LABEL[cameraMode]}
+              <span className="text-[11px] font-mono text-slate-200">
+                {selectedDroneId.replace('drone-0', 'DRONE ')} · {CAMERA_LABEL[cameraMode]} · LIVE
               </span>
-              <span className="text-[10px] font-mono text-slate-500">LIVE</span>
             </div>
+          </div>
+
+          {/* 피드 상단 우측: 녹화 버튼 */}
+          <div className="absolute top-3 right-3 z-10 pointer-events-auto">
+            <button
+              type="button"
+              onClick={handleRecordToggle}
+              title={isRecording ? '녹화 중지' : '녹화 시작 (RGB + Thermal 동시 저장)'}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full border shadow-lg transition-all ${
+                isRecording
+                  ? 'bg-red-600/90 border-red-500/80 hover:bg-red-500'
+                  : 'bg-neutral-900/70 border-neutral-700/60 hover:bg-neutral-800/80 hover:border-accent-500/50'
+              }`}
+            >
+              {isRecording ? (
+                <>
+                  <span className="relative flex items-center justify-center w-3.5 h-3.5">
+                    <span className="absolute w-3.5 h-3.5 rounded-full bg-red-400 animate-ping opacity-50" />
+                    <span className="relative w-2 h-2 rounded-sm bg-white" />
+                  </span>
+                  <span className="text-[11px] font-mono font-bold text-white tracking-wider">
+                    REC {formatTime(recElapsed)}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Circle size={12} className="text-slate-400" strokeWidth={2} />
+                  <span className="text-[11px] font-mono text-slate-400 tracking-wider">
+                    녹화
+                  </span>
+                </>
+              )}
+            </button>
           </div>
 
           {/* //* [Modified Code] 피드 우하단: 반대편 드론 카메라 PIP — 두 드론의 뷰를 동시에 모니터링.
@@ -152,15 +212,15 @@ export default function Dashboard() {
             type="button"
             onClick={() => setSelectedDrone(pipDroneId)}
             title={`${pipDroneId.replace('drone-0', 'DRONE ')} 시점으로 전환`}
-            className="group absolute bottom-3 right-3 z-10 w-[260px] aspect-video rounded-lg bg-black border border-slate-700/60 backdrop-blur-md shadow-xl overflow-hidden hover:border-accent-500/70 transition pointer-events-auto"
+            className="group absolute bottom-3 right-3 z-10 w-[260px] aspect-video rounded-lg bg-black border border-neutral-700/60 backdrop-blur-md shadow-xl overflow-hidden hover:border-accent-500/70 transition pointer-events-auto"
           >
             <LiveVideoFeed fill mode={pipMode} />
 
             {/* PIP 상단: 드론/카메라 라벨 */}
             <div className="absolute top-1.5 left-1.5 pointer-events-none">
-              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-900/80 border border-slate-700/60 backdrop-blur-sm">
-                <span className="w-1 h-1 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-[9px] font-mono tracking-wider text-slate-200">
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-neutral-900/80 border border-neutral-700/60">
+                <span className="w-1 h-1 rounded-full bg-red-500" />
+                <span className="text-[9px] font-mono text-slate-200">
                   {pipDroneId.replace('drone-0', 'D')} · {CAMERA_LABEL_SHORT[pipMode]}
                 </span>
               </div>
@@ -168,9 +228,9 @@ export default function Dashboard() {
 
             {/* PIP 우상단: 스왑 힌트 아이콘 (hover 시 강조) */}
             <div className="absolute top-1.5 right-1.5 pointer-events-none">
-              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-900/60 text-slate-400 group-hover:bg-accent-500/20 group-hover:text-accent-300 transition">
+              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-900/60 text-slate-400 group-hover:bg-accent-500/20 group-hover:text-accent-300 transition">
                 <ArrowLeftRight size={10} />
-                <span className="text-[9px] font-mono tracking-wider">SWAP</span>
+                <span className="text-[9px] font-mono">SWAP</span>
               </div>
             </div>
           </button>
@@ -182,25 +242,31 @@ export default function Dashboard() {
 
       {/* ── 우하단: 3D 미니맵 (도면/평면도/시뮬레이션 모델링 용) ── */}
       <aside
-        className="absolute right-4 bottom-4 z-20 pointer-events-auto"
-        style={{ width: MINIMAP_W, height: MINIMAP_H }}
+        className="absolute right-4 bottom-4 z-20 pointer-events-auto transition-all duration-300 ease-in-out"
+        style={{
+          width:  minimapExpanded ? MINIMAP_W * 2 : MINIMAP_W,
+          height: minimapExpanded ? MINIMAP_H * 2 : MINIMAP_H,
+        }}
       >
-        <div className="relative flex flex-col h-full rounded-xl bg-slate-900/85 border border-slate-700/60 backdrop-blur-md shadow-2xl overflow-hidden ring-1 ring-slate-500/5">
-          {/* //* [Modified Code] 헤더 폴리시 — 좌측 accent 바 + Map 아이콘 + 상태 dot */}
-          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700/60 flex-shrink-0 bg-gradient-to-r from-accent-500/5 to-transparent">
-            <div className="flex items-center gap-2">
-              <span className="w-0.5 h-4 bg-accent-400 rounded-full" />
-              <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-100">
-                3D Mini Map
-              </span>
-              <span className="text-[9px] font-mono text-slate-500 bg-slate-800/60 border border-slate-700 rounded px-1 py-0.5">
-                FLOOR · SIM
-              </span>
-            </div>
-            <span className="flex items-center gap-1 text-[9px] font-mono text-accent-300 tracking-wider">
-              <span className="w-1 h-1 rounded-full bg-accent-400 animate-pulse" />
-              LIVE
+        <div className="relative flex flex-col h-full rounded-xl bg-neutral-900/90 border border-neutral-700/60 backdrop-blur-sm shadow-lg overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-700/60 flex-shrink-0">
+            <span className="text-xs font-semibold text-slate-100">
+              3D Mini Map
             </span>
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1 text-xs text-accent-300">
+                <span className="w-1 h-1 rounded-full bg-accent-400 animate-pulse" />
+                LIVE
+              </span>
+              <button
+                type="button"
+                onClick={() => setMinimapExpanded((v) => !v)}
+                title={minimapExpanded ? '축소' : '확대'}
+                className="p-1.5 rounded bg-slate-700/80 text-slate-200 hover:text-white hover:bg-accent-500/30 transition border border-slate-600"
+              >
+                {minimapExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
+            </div>
           </div>
           <div className="flex-1 relative">
             <BuildingScene />
@@ -210,21 +276,21 @@ export default function Dashboard() {
 
       {/* ── 우측: AI Defect Analysis (미니맵과 겹치지 않도록 bottom offset) ── */}
       <aside
-        className="absolute top-20 right-4 z-20 w-[360px] pointer-events-auto"
-        style={{ bottom: MINIMAP_H + 24 /* minimap(200) + gap(16) + safety(8) */ }}
+        className="absolute top-20 right-4 z-20 w-[360px] pointer-events-auto transition-all duration-300"
+        style={{ bottom: (minimapExpanded ? MINIMAP_H * 2 : MINIMAP_H) + 24 }}
       >
-        <div className="flex flex-col h-full rounded-xl bg-slate-900/80 border border-accent-500/30 backdrop-blur-md shadow-2xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-700/60 flex-shrink-0">
+        <div className="flex flex-col h-full rounded-xl bg-neutral-900/90 border border-accent-500/30 backdrop-blur-sm shadow-lg overflow-hidden">
+          <div className="px-4 py-3 border-b border-neutral-700/60 flex-shrink-0">
             <div className="flex items-center gap-2">
               <Activity className="text-accent-400" size={16} />
-              <span className="text-sm font-bold tracking-tight uppercase text-white">
+              <span className="text-sm font-bold text-white">
                 AI Defect Analysis
               </span>
             </div>
             <div className="flex items-center gap-1.5 mt-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-accent-400 animate-pulse" />
-              <span className="text-[10px] font-mono text-accent-300 uppercase tracking-wider">
-                Real-time detection
+              <span className="w-1.5 h-1.5 rounded-full bg-accent-400" />
+              <span className="text-xs text-slate-400">
+                실시간 하자 탐지
               </span>
             </div>
           </div>
@@ -237,15 +303,3 @@ export default function Dashboard() {
   )
 }
 
-// //* [Modified Code] HUD 코너 브래킷 — LIVE 피드 16:9 박스 네 모서리에 L자 형태 배치
-// "관제실 카메라 프레임" 톤 주는 장식 (pointer-events-none 이라 클릭 방해 없음)
-function CornerBracket({ position }) {
-  const base = 'pointer-events-none absolute w-5 h-5 border-accent-400/60'
-  const posClass = {
-    tl: 'top-2 left-2 border-t-2 border-l-2 rounded-tl',
-    tr: 'top-2 right-2 border-t-2 border-r-2 rounded-tr',
-    bl: 'bottom-2 left-2 border-b-2 border-l-2 rounded-bl',
-    br: 'bottom-2 right-2 border-b-2 border-r-2 rounded-br',
-  }[position]
-  return <div className={`${base} ${posClass}`} />
-}

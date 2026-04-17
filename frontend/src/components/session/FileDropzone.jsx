@@ -56,10 +56,10 @@ export default function FileDropzone({
       onDrop={handleDrop}
       className={`relative w-full rounded-xl border-2 border-dashed transition px-6 py-8 text-center ${
         isDragOver
-          ? 'border-accent-500 bg-accent-500/10'
+          ? 'border-blue-500 bg-blue-50'
           : hasFile
-            ? 'border-accent-500/50 bg-slate-900/60'
-            : 'border-slate-700 bg-slate-900/40 hover:border-slate-500'
+            ? 'border-blue-400 bg-gray-50'
+            : 'border-gray-300 bg-white hover:border-gray-400'
       }`}
     >
       <input
@@ -76,28 +76,28 @@ export default function FileDropzone({
             <img
               src={previewUrl}
               alt="미리보기"
-              className="max-h-40 rounded-md border border-slate-700 object-contain"
+              className="max-h-40 rounded-md border border-gray-200 object-contain"
             />
           ) : (
-            <div className="w-14 h-14 rounded-xl bg-accent-500/10 border border-accent-500/40 flex items-center justify-center">
-              <FileText size={22} className="text-accent-400" />
+            <div className="w-14 h-14 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center">
+              <FileText size={22} className="text-blue-600" />
             </div>
           )}
-          <div className="text-sm text-white font-mono truncate max-w-[360px]">{file.name}</div>
-          <div className="text-[11px] text-slate-500 font-mono">{formatBytes(file.size)}</div>
+          <div className="text-sm text-slate-800 font-mono truncate max-w-[360px]">{file.name}</div>
+          <div className="text-[11px] text-gray-500 font-mono">{formatBytes(file.size)}</div>
 
           <div className="flex items-center gap-2 mt-1">
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="text-[11px] px-3 py-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white transition"
+              className="text-[11px] px-3 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 hover:text-slate-800 transition"
             >
               다시 선택
             </button>
             <button
               type="button"
               onClick={onClear}
-              className="text-[11px] px-2 py-1 rounded border border-slate-700 text-slate-400 hover:text-red-400 hover:border-red-500/50 transition flex items-center gap-1"
+              className="text-[11px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:text-red-600 hover:border-red-300 transition flex items-center gap-1"
               title="선택 해제"
             >
               <X size={12} /> 지우기
@@ -110,17 +110,17 @@ export default function FileDropzone({
           onClick={() => inputRef.current?.click()}
           className="w-full flex flex-col items-center gap-2 py-4"
         >
-          <div className="w-14 h-14 rounded-xl bg-slate-800 flex items-center justify-center">
+          <div className="w-14 h-14 rounded-xl bg-gray-100 flex items-center justify-center">
             {accept?.startsWith('image') ? (
-              <ImageIcon size={24} className="text-slate-400" />
+              <ImageIcon size={24} className="text-gray-500" />
             ) : (
-              <Upload size={24} className="text-slate-400" />
+              <Upload size={24} className="text-gray-500" />
             )}
           </div>
-          <div className="text-sm text-slate-200 font-semibold">
+          <div className="text-sm text-slate-700 font-semibold">
             클릭 또는 드래그하여 파일 업로드
           </div>
-          {hint && <div className="text-[11px] text-slate-500 font-mono">{hint}</div>}
+          {hint && <div className="text-[11px] text-gray-500 font-mono">{hint}</div>}
         </button>
       )}
     </div>

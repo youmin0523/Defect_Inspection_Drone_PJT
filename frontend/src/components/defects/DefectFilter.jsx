@@ -72,7 +72,7 @@ function FilterBtn({ active, onClick, label, color, title }) {
       className={`px-2 py-0.5 text-xs rounded border transition-all ${
         active
           ? 'bg-white/10 font-semibold'
-          : 'border-dashboard-border text-slate-500 hover:text-white hover:border-slate-500'
+          : 'border-dashboard-border text-slate-500 hover:text-white hover:border-neutral-500'
       }`}
     >
       {label}

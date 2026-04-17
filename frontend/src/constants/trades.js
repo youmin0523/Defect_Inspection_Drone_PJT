@@ -94,3 +94,52 @@ const INITIAL_LOCATION_BY_AREA = {
 export function inferInitialLocation(area) {
   return INITIAL_LOCATION_BY_AREA[area] ?? ''
 }
+
+/* ──────────────────────────────────────────────────────────────
+   양식 내보내기 전용 매핑 (하자점검_결과보고서.xlsx 대응)
+   ────────────────────────────────────────────────────────────── */
+
+/** 시스템 12종 공종 → 양식 분류코드 A~F 6종 매핑 */
+export const TRADE_TO_TEMPLATE_CODE = {
+  '골조':       'E',
+  '도배':       'A',
+  '도장':       'A',
+  '타일':       'B',
+  '목공':       'C',
+  '마루/바닥재': 'C',
+  '창호':       'D',
+  '방수':       'E',
+  '단열':       'E',
+  '설비':       'E',
+  '전기':       'F',
+  '기타':       'E',
+}
+
+/** 양식 분류코드 → 라벨 (범례 및 미리보기 표시용) */
+export const TEMPLATE_CODE_LABELS = {
+  A: '도장·도배',
+  B: '타일·석재',
+  C: '목공·수장',
+  D: '창호',
+  E: '금속·잡철',
+  F: '전기·조명',
+}
+
+/** 시스템 심각도 → 양식 등급 (역순) */
+export const SEVERITY_TO_GRADE = {
+  HIGH: 'C',
+  MED:  'B',
+  LOW:  'A',
+}
+
+/** 양식 등급 → 라벨 */
+export const GRADE_LABELS = {
+  A: '경미',
+  B: '보통',
+  C: '중대',
+}
+
+/** 양식 분류코드 리스트 (드롭다운 등) */
+export const TEMPLATE_CODES_LIST = Object.entries(TEMPLATE_CODE_LABELS).map(
+  ([code, label]) => ({ code, label: `${code}. ${label}` })
+)

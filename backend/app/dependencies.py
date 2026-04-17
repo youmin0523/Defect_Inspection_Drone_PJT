@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import async_session_factory
 from app.core.ws_manager import ws_manager
 from app.services.camera import rgb_camera_service, thermal_camera_service
+from app.services.recording import recording_service
 from app.services.yolo_inference import yolo_service
 
 
@@ -44,6 +45,11 @@ def get_rgb_camera():
 def get_thermal_camera():
     """열화상 카메라 서비스 싱글톤 반환"""
     return thermal_camera_service
+
+
+def get_recording_service():
+    """녹화 서비스 싱글톤 반환"""
+    return recording_service
 
 
 def get_yolo_service():

@@ -31,19 +31,20 @@ export default function DefectEditRow({
 
   return (
     <tr className={`border-b border-gray-100 ${defect.verified ? 'bg-green-50/30' : 'bg-white'} hover:bg-blue-50/40 transition`}>
-      {/* 이미지 썸네일 */}
+      {/* 이미지 썸네일 (근경 + 원경) */}
       <td className="px-2 py-2">
-        {defect.image_crop ? (
-          <img
-            src={defect.image_crop}
-            alt="하자"
-            className="w-14 h-14 object-cover rounded-lg border border-gray-200 shadow-sm"
-          />
-        ) : (
-          <div className="w-14 h-14 rounded-lg border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center text-gray-400">
-            <ImageIcon size={18} />
-          </div>
-        )}
+        <div className="flex gap-1">
+          {defect.image_crop ? (
+            <img src={defect.image_crop} alt="근경" title="근경" className="w-12 h-12 object-cover rounded border border-gray-200 shadow-sm" />
+          ) : (
+            <div className="w-12 h-12 rounded border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center text-gray-400 text-[9px]">근</div>
+          )}
+          {defect.image_wide ? (
+            <img src={defect.image_wide} alt="원경" title="원경" className="w-12 h-12 object-cover rounded border border-gray-200 shadow-sm" />
+          ) : (
+            <div className="w-12 h-12 rounded border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center text-gray-400 text-[9px]">원</div>
+          )}
+        </div>
       </td>
 
       {/* 하자 유형 + 영역 chip + 카테고리 + 수동추가 뱃지 */}
