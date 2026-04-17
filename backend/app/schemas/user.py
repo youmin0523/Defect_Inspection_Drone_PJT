@@ -112,6 +112,30 @@ class BusinessInfoResponse(BaseModel):
 UserResponse.model_rebuild()
 
 
+# ── 로그인 / 토큰 스키마 ─────────────────────
+class LoginRequest(BaseModel):
+    """일반 로그인 (아이디 + 비밀번호)"""
+    username: str = Field(..., description="로그인 아이디")
+    password: str = Field(..., description="비밀번호")
+
+
+class OAuthCallbackRequest(BaseModel):
+    """프론트에서 전달하는 OAuth 인가 코드"""
+    code: str = Field(..., description="OAuth authorization code")
+    redirect_uri: str = Field(..., description="프론트에서 사용한 redirect_uri")
+
+
+class TokenResponse(BaseModel):
+    """로그인 성공 시 반환하는 JWT 토큰 + 사용자 정보"""
+    access_token: str
+    token_type: str = "bearer"
+    user: "UserResponse"
+
+
+# 전방 참조 해결
+TokenResponse.model_rebuild()
+
+
 # ── 중복확인 응답 스키마 ──────────────────────
 class AvailabilityResponse(BaseModel):
     """이메일/아이디 중복 확인 응답"""

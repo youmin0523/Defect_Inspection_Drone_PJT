@@ -25,6 +25,7 @@ import ProtectedSessionLayout from './components/session/ProtectedSessionLayout.
 import SessionSetup from './pages/session/SessionSetup.jsx'
 import SessionLevel from './pages/session/SessionLevel.jsx'
 import SessionModeling from './pages/session/SessionModeling.jsx'
+import OAuthCallback from './pages/OAuthCallback.jsx'
 import ReportModal from './components/report/ReportModal.jsx'
 import useWebSocket from './hooks/useWebSocket.js'
 
@@ -77,6 +78,8 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/find-account" element={<FindAccount />} />
+        {/* OAuth 콜백 (Google / Kakao / Naver) */}
+        <Route path="/auth/:provider/callback" element={<OAuthCallback />} />
 
         {/* //* [Modified Code] 직원 전용 랜딩 — "직원 전용" 버튼 클릭 시 진입하는 허브 */}
         <Route path="/employee" element={<EmployeeLanding />} />
