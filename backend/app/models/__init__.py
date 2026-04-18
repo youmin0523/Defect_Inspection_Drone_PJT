@@ -22,6 +22,9 @@ from app.models.slam_map import SlamMap  # noqa: F401
 # ── 평면도 / 환경 생성 ───────────────────────
 from app.models.floorplan import Floorplan  # noqa: F401
 
+# ── 현장 관리 ────────────────────────────────
+from app.models.site import Site  # noqa: F401
+
 # ── 보고서 ───────────────────────────────────
 from app.models.report import Report  # noqa: F401
 
@@ -38,6 +41,8 @@ __all__ = [
     "SlamMap",
     # 평면도
     "Floorplan",
+    # 현장 관리
+    "Site",
     # 보고서
     "Report",
 ]
