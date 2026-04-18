@@ -12,7 +12,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, String, Float, Text, BigInteger,
-    DateTime, Enum as SAEnum, Index, func
+    DateTime, Enum as SAEnum, Index, func, ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
@@ -28,6 +28,9 @@ class DefectLog(Base):
 
     # ── 기본 키 ──────────────────────────────
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+
+    # ── 현장 연결 (경향보고서 연계) ───────────
+    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True, comment="연결 현장 ID")
 
     # ── 하자 분류 ─────────────────────────────
     # area: A(구조) / B(단열·방수) / C(마감재) / D(바닥) / E(창호)

@@ -8,7 +8,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, Integer, Text, DateTime, func
+from sqlalchemy import Column, String, Integer, Text, DateTime, func, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import Base
@@ -19,6 +19,9 @@ class Report(Base):
     __tablename__ = "reports"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+
+    # ── 현장 연결 (경향보고서 연계) ───────────
+    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True, comment="연결 현장 ID")
 
     # ── 보고서 정보 ──────────────────────────
     title = Column(String(200), comment="보고서 제목")
