@@ -39,9 +39,26 @@ class Settings(BaseSettings):
     LIDAR_SERIAL_PORT: str = "COM3"
     LIDAR_BAUD_RATE: int = 115200
 
-    # ── AI Model ─────────────────────────────
+    # ── AI Model (3-모델 파이프라인) ──────────
+    # 가중치 디렉토리 + 개별 파일명 분리 → 배포 환경별로 경로만 바꾸면 됨
+    AEROINSPECT_WEIGHTS_DIR: str = "./models_weights"
+    YOLO_THERMAL_WEIGHTS: str = "yolov8s_crack_moisture_best.pt"
+    YOLO_DELAM_WEIGHTS: str = "yolov8s_delamination_best.pt"
+    WALLPAPER_WEIGHTS: str = "resnet50_wallpaper_best.pt"
+
+    # YOLO 공통 신뢰도 임계값 (crack_moisture + delamination)
+    YOLO_CONF_THRESHOLD: float = 0.25
+    # ResNet50 벽지 분류 신뢰도 임계값 (val_acc 54% 감안, 보수적으로 0.4)
+    WALLPAPER_CONF_THRESHOLD: float = 0.4
+
+    # WebSocket 스트림 추론 — N프레임 중 1프레임만 추론 (GPU 부하 분산)
+    FRAME_SKIP: int = 3
+
+    # 추론 디바이스: 'auto' | 'cuda' | 'cpu'
+    DEVICE: str = "auto"
+
+    # ── Legacy (하위 호환용, 신규 코드에선 사용 금지) ──
     YOLO_WEIGHTS_PATH: str = "./models_weights/aeroinspect_yolov8.pt"
-    YOLO_CONF_THRESHOLD: float = 0.45
 
     # ── LLM ──────────────────────────────────
     ANTHROPIC_API_KEY: str = ""

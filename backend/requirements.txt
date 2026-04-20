@@ -26,9 +26,9 @@ python-jose[cryptography]
 # ── Computer Vision / AI ───────────────────
 opencv-python
 numpy
-torch
+torch>=2.1
 torchvision
-ultralytics
+ultralytics>=8.3.0
 anomalib
 
 # ── Hardware ───────────────────────────────
@@ -45,3 +45,7 @@ pillow
 httpx
 websockets
 aiofiles
+
+# ── Test ───────────────────────────────────
+pytest
+pytest-asyncio
