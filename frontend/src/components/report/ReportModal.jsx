@@ -37,12 +37,13 @@ function toEditableDefects(raw) {
     verified: d.verified ?? false,
     action_note: d.action_note ?? '',
     is_manual: d.is_manual ?? false,
+    image_wide: d.image_wide ?? null,
   }))
 }
 
 export default function ReportModal() {
   const navigate = useNavigate()
-  const { siteName, operatorName, inspectionDate, level, modelSource, sessionId, startedAt, finishedAt } = useSessionStore()
+  const { siteName, siteUnit, operatorName, inspectionDate, level, modelSource, sessionId, startedAt, finishedAt } = useSessionStore()
   const sessionReset = useSessionStore((s) => s.reset)
   const droneReset = useDroneStore((s) => s.reset)
   const defectsRaw = useDefectStore((s) => s.defects)
@@ -57,6 +58,7 @@ export default function ReportModal() {
   const [draft, setDraft] = useState(() => ({
     id: null,
     site_name: siteName || '',
+    site_unit: siteUnit || '',
     operator_name: operatorName || '',
     inspection_date: inspectionDate || '',
     level: level || null,
@@ -96,6 +98,7 @@ export default function ReportModal() {
     try {
       const created = await createReport({
         site_name: draft.site_name,
+        site_unit: draft.site_unit,
         operator_name: draft.operator_name,
         inspection_date: draft.inspection_date,
         level: draft.level,
@@ -245,7 +248,7 @@ export default function ReportModal() {
             <button
               type="button"
               onClick={handleNewInspection}
-              className="flex items-center gap-2 px-4 py-2 rounded-md bg-accent-500 text-slate-900 font-bold text-xs hover:bg-accent-400 transition shadow-lg"
+              className="flex items-center gap-2 px-4 py-2 rounded-md bg-accent-500 text-white font-bold text-xs hover:bg-accent-400 transition shadow-lg"
             >
               <RotateCcw size={12} /> 새 점검 시작
             </button>

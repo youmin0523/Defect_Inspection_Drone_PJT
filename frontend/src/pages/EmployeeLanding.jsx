@@ -344,10 +344,17 @@ const QUICK_ACTIONS = [
     key: 'manage-sites',
     title: '현장 관리',
     desc: '진행 중/예정 현장을 등록·수정하고 담당자를 배정합니다.',
-    to: '#sites',
+    to: '/employee/sites',
     icon: MapPin,
     accent: 'indigo',
-    disabled: true,
+  },
+  {
+    key: 'analytics',
+    title: '분석 · 보고서',
+    desc: '하자 경향보고서 및 주간업무보고서를 자동 생성합니다.',
+    to: '/employee/analytics',
+    icon: TrendingUp,
+    accent: 'violet',
   },
 ]
 
@@ -356,6 +363,7 @@ const ACTION_ACCENT = {
   yellow: { border: 'border-t-4 border-yellow-500', panel: 'bg-yellow-50', iconBg: 'bg-yellow-500', text: 'text-yellow-700', hoverBg: 'group-hover:bg-yellow-100' },
   green:  { border: 'border-t-4 border-green-600',  panel: 'bg-green-50',  iconBg: 'bg-green-600',  text: 'text-green-700',  hoverBg: 'group-hover:bg-green-100' },
   indigo: { border: 'border-t-4 border-indigo-600', panel: 'bg-indigo-50', iconBg: 'bg-indigo-600', text: 'text-indigo-700', hoverBg: 'group-hover:bg-indigo-100' },
+  violet: { border: 'border-t-4 border-violet-600', panel: 'bg-violet-50', iconBg: 'bg-violet-600', text: 'text-violet-700', hoverBg: 'group-hover:bg-violet-100' },
 }
 
 function QuickActionsSection() {
@@ -366,7 +374,7 @@ function QuickActionsSection() {
         title="자주 사용하는 작업"
         desc="클릭 한 번으로 사무실 업무와 현장 점검을 시작하세요."
       />
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mt-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5 mt-6">
         {QUICK_ACTIONS.map((action) => {
           const style = ACTION_ACCENT[action.accent]
           const Icon = action.icon

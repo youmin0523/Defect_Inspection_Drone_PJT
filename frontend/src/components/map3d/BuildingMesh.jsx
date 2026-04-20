@@ -76,29 +76,119 @@ function LevelOneMesh() {
   )
 }
 
+// 건물 외곽 윤곽선 → 유리 경계 벽 (창호 갭을 반투명 유리로 채움)
+function OutlineBoundary({ outline }) {
+  const segments = useMemo(() => {
+    if (!outline || outline.length < 3) return null
+    return outline.map((pt, i) => {
+      const next = outline[(i + 1) % outline.length]
+      const x1 = (pt.x - 0.5) * WIDTH
+      const z1 = (pt.y - 0.5) * DEPTH
+      const x2 = (next.x - 0.5) * WIDTH
+      const z2 = (next.y - 0.5) * DEPTH
+
+      const midX = (x1 + x2) / 2
+      const midZ = (z1 + z2) / 2
+      const length = Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2)
+      const angle = Math.atan2(z2 - z1, x2 - x1)
+
+      if (length < 0.05) return null
+
+      return (
+        <mesh
+          key={`outline-${i}`}
+          position={[midX, HEIGHT / 2, midZ]}
+          rotation={[0, -angle, 0]}
+        >
+          <boxGeometry args={[length, HEIGHT, 0.04]} />
+          <meshStandardMaterial
+            color="#38bdf8"
+            transparent
+            opacity={0.18}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )
+    })
+  }, [outline])
+
+  if (!segments) return null
+  return <>{segments}</>
+}
+
+// 벽체 좌표 → 3D 박스 메시 생성 유틸
+function WallMeshes({ wallsData }) {
+  const meshes = useMemo(() => {
+    if (!wallsData || wallsData.length === 0) return null
+    return wallsData.map((wall, i) => {
+      // 정규화 좌표(0-1) → 씬 좌표 (원점 중심)
+      const x1 = (wall.x1 - 0.5) * WIDTH
+      const z1 = (wall.y1 - 0.5) * DEPTH
+      const x2 = (wall.x2 - 0.5) * WIDTH
+      const z2 = (wall.y2 - 0.5) * DEPTH
+
+      const midX = (x1 + x2) / 2
+      const midZ = (z1 + z2) / 2
+      const length = Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2)
+      const angle = Math.atan2(z2 - z1, x2 - x1)
+
+      if (length < 0.05) return null
+
+      return (
+        <mesh
+          key={i}
+          position={[midX, HEIGHT / 2, midZ]}
+          rotation={[0, -angle, 0]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[length, HEIGHT, 0.12]} />
+          <meshStandardMaterial color="#64748b" />
+        </mesh>
+      )
+    })
+  }, [wallsData])
+
+  return <>{meshes}</>
+}
+
 // L2 (이미지 있음): useTexture 는 조건부 호출 불가라 별도 컴포넌트로 분리
-function LevelTwoMeshTextured({ imageUrl }) {
+function LevelTwoMeshTextured({ imageUrl, wallsData, outline }) {
   const texture = useTexture(imageUrl)
   texture.wrapS = THREE.ClampToEdgeWrapping
   texture.wrapT = THREE.ClampToEdgeWrapping
 
+  const hasWalls = wallsData && wallsData.length > 0
+
   return (
     <group>
+      {/* 바닥: 원본 이미지 텍스처 */}
       <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[WIDTH, DEPTH]} />
         <meshBasicMaterial map={texture} />
       </mesh>
       <gridHelper args={[Math.max(WIDTH, DEPTH) + 4, 20, '#1e3a8a', '#1e293b']} position={[0, 0.02, 0]} />
-      <mesh position={[0, HEIGHT / 2, 0]}>
-        <boxGeometry args={[WIDTH, HEIGHT, DEPTH]} />
-        <meshStandardMaterial color="#0ea5e9" wireframe transparent opacity={0.35} />
-      </mesh>
+
+      {/* 외곽 윤곽선 — 유리 경계 (창호 위치 포함) */}
+      <OutlineBoundary outline={outline} />
+
+      {/* 내벽 + 외벽 실체 */}
+      {hasWalls ? (
+        <WallMeshes wallsData={wallsData} />
+      ) : (
+        <mesh position={[0, HEIGHT / 2, 0]}>
+          <boxGeometry args={[WIDTH, HEIGHT, DEPTH]} />
+          <meshStandardMaterial color="#0ea5e9" wireframe transparent opacity={0.35} />
+        </mesh>
+      )}
     </group>
   )
 }
 
-// L2 (이미지 없음 / 재업로드 필요) — persist 복원 후 imageUrl 없을 때 안내 톤
-function LevelTwoMeshFallback() {
+// L2 (이미지 없음 / 재업로드 필요)
+function LevelTwoMeshFallback({ wallsData, outline }) {
+  const hasWalls = wallsData && wallsData.length > 0
+
   return (
     <group>
       <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -106,10 +196,17 @@ function LevelTwoMeshFallback() {
         <meshStandardMaterial color="#334155" />
       </mesh>
       <gridHelper args={[Math.max(WIDTH, DEPTH) + 4, 20, '#1e3a8a', '#1e293b']} position={[0, 0.02, 0]} />
-      <mesh position={[0, HEIGHT / 2, 0]}>
-        <boxGeometry args={[WIDTH, HEIGHT, DEPTH]} />
-        <meshStandardMaterial color="#0ea5e9" wireframe transparent opacity={0.35} />
-      </mesh>
+
+      <OutlineBoundary outline={outline} />
+
+      {hasWalls ? (
+        <WallMeshes wallsData={wallsData} />
+      ) : (
+        <mesh position={[0, HEIGHT / 2, 0]}>
+          <boxGeometry args={[WIDTH, HEIGHT, DEPTH]} />
+          <meshStandardMaterial color="#0ea5e9" wireframe transparent opacity={0.35} />
+        </mesh>
+      )}
     </group>
   )
 }
@@ -197,9 +294,11 @@ function DefaultMesh() {
   )
 }
 
-export default function BuildingMesh({ level, imageUrl }) {
+export default function BuildingMesh({ level, imageUrl, wallsData, outline }) {
   if (level === 1) return <LevelOneMesh />
-  if (level === 2) return imageUrl ? <LevelTwoMeshTextured imageUrl={imageUrl} /> : <LevelTwoMeshFallback />
+  if (level === 2) return imageUrl
+    ? <LevelTwoMeshTextured imageUrl={imageUrl} wallsData={wallsData} outline={outline} />
+    : <LevelTwoMeshFallback wallsData={wallsData} outline={outline} />
   if (level === 3) return <LevelThreeMesh />
   return <DefaultMesh />
 }

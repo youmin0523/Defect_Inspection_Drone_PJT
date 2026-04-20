@@ -53,7 +53,7 @@ export default function DroneStatusCard() {
             className={`h-full transition-all ${
               batteryLow
                 ? 'bg-red-500'
-                : 'bg-accent-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]'
+                : 'bg-accent-500'
             }`}
             style={{ width: `${telemetry.battery}%` }}
           />

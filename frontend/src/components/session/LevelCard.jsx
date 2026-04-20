@@ -22,12 +22,12 @@ export default function LevelCard({
       onClick={() => onSelect?.(level)}
       className={`group relative flex flex-col text-left h-full w-full rounded-2xl border px-5 py-5 transition ${
         selected
-          ? 'bg-accent-500/10 border-accent-500/70 shadow-[0_0_24px_rgba(16,185,129,0.25)]'
-          : 'bg-slate-900/70 border-slate-700/60 hover:border-slate-500'
+          ? 'bg-accent-500/10 border-accent-500 ring-2 ring-accent-500/30'
+          : 'bg-neutral-900/70 border-neutral-700/60 hover:border-neutral-500'
       }`}
     >
       {recommended && (
-        <span className="absolute top-3 right-3 px-2 py-0.5 rounded bg-accent-500 text-slate-900 text-[10px] font-bold tracking-wider uppercase">
+        <span className="absolute top-3 right-3 px-2 py-0.5 rounded bg-accent-500 text-white text-[10px] font-semibold">
           추천
         </span>
       )}
@@ -36,7 +36,7 @@ export default function LevelCard({
       <div className="flex items-start justify-between mb-3">
         <div
           className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-            selected ? 'bg-accent-500/20 text-accent-300' : 'bg-slate-800 text-slate-300'
+            selected ? 'bg-accent-500/20 text-accent-300' : 'bg-neutral-800 text-slate-300'
           }`}
         >
           <Icon size={24} />
@@ -69,7 +69,7 @@ export default function LevelCard({
         className={`mt-4 text-[10px] font-mono uppercase tracking-wider text-center py-1.5 rounded-md border transition ${
           selected
             ? 'bg-accent-500 border-accent-500 text-slate-900'
-            : 'bg-slate-950/40 border-slate-700 text-slate-500 group-hover:text-slate-300'
+            : 'bg-neutral-950/40 border-neutral-700 text-slate-500 group-hover:text-slate-300'
         }`}
       >
         {selected ? 'Selected' : 'Tap to select'}

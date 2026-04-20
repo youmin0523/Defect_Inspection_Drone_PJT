@@ -15,8 +15,7 @@ import {
 import DefectEditRow from './DefectEditRow.jsx'
 import LocationMapEditor from './LocationMapEditor.jsx'
 import AddDefectDialog from './AddDefectDialog.jsx'
-import ExcelExportButton from './ExcelExportButton.jsx'
-import PdfExportButton from './PdfExportButton.jsx'
+import TemplateExportButton from './TemplateExportButton.jsx'
 import { LOCATION_PRESETS } from '../../constants/trades.js'
 import { suggestTrades } from '../../api/reportApi.js'
 
@@ -122,6 +121,19 @@ export default function ReportEditor({ report, onChange, variant = 'page' }) {
         {presets.map((p) => (<option key={p} value={p} />))}
       </datalist>
 
+      {/* 확인자 입력 바 (양식 내보내기 전 기입) */}
+      <div className="flex items-center gap-3 px-4 py-2 bg-yellow-50 border-b border-yellow-200 text-xs flex-shrink-0">
+        <span className="font-semibold text-yellow-800">확인자</span>
+        <input
+          type="text"
+          value={report.confirmer ?? ''}
+          onChange={(e) => onChange?.({ confirmer: e.target.value })}
+          placeholder="B2C: 의뢰 고객 / B2B: 의뢰 업체"
+          className="bg-white border border-yellow-300 rounded px-2 py-1 text-xs w-60 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+        />
+        <span className="text-[10px] text-yellow-600">양식 내보내기 시 확인자란에 기입됩니다.</span>
+      </div>
+
       {/* 툴바 */}
       <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-3 bg-gradient-to-br from-gray-50 to-white border-b border-gray-200">
         <div className="flex items-center gap-3 text-xs text-gray-600">
@@ -159,8 +171,7 @@ export default function ReportEditor({ report, onChange, variant = 'page' }) {
           >
             <Plus size={12} /> 하자 추가
           </button>
-          <ExcelExportButton report={report} />
-          <PdfExportButton report={report} />
+          <TemplateExportButton report={report} />
         </div>
       </div>
 

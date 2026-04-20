@@ -38,7 +38,8 @@ export default function AddDefectDialog({ presets, onAdd, onClose }) {
   const [trade, setTrade] = useState('도배')
   const [severity, setSeverity] = useState('MED')
   const [actionNote, setActionNote] = useState('')
-  const [imageDataUrl, setImageDataUrl] = useState(null)
+  const [imageDataUrl, setImageDataUrl] = useState(null)     // 근경
+  const [imageWideUrl, setImageWideUrl] = useState(null)     // 원경
   const [error, setError] = useState(null)
 
   const handleFile = async (e) => {
@@ -77,6 +78,7 @@ export default function AddDefectDialog({ presets, onAdd, onClose }) {
       confidence: 1.0,
       timestamp: Date.now(),
       image_crop: imageDataUrl,
+      image_wide: imageWideUrl,
       trade,
       trade_confidence: 1.0,
       location: location.trim() || inferInitialLocation(area),
@@ -217,27 +219,23 @@ export default function AddDefectDialog({ presets, onAdd, onClose }) {
             />
           </FieldBlock>
 
-          {/* 5) 이미지 */}
-          <FieldBlock label="이미지 (선택)">
-            {imageDataUrl ? (
-              <div className="relative inline-block">
-                <img src={imageDataUrl} alt="미리보기" className="max-h-36 rounded-lg border border-gray-200 shadow-sm" />
-                <button
-                  type="button"
-                  onClick={() => setImageDataUrl(null)}
-                  className="absolute top-1 right-1 p-1 bg-white/95 rounded-full text-gray-600 hover:text-red-600 shadow transition"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ) : (
-              <label className="flex items-center justify-center gap-2 text-xs text-gray-500 cursor-pointer hover:text-blue-700 hover:bg-blue-50 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg transition">
-                <ImageIcon size={14} />
-                클릭하여 이미지 첨부
-                <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
-              </label>
-            )}
-          </FieldBlock>
+          {/* 5) 이미지 2장 (근경 + 원경) */}
+          <div className="grid grid-cols-2 gap-3">
+            <FieldBlock label="근경 사진 (클로즈업)">
+              <ImageUpload
+                value={imageDataUrl}
+                onSet={setImageDataUrl}
+                placeholder="근경 첨부"
+              />
+            </FieldBlock>
+            <FieldBlock label="원경 사진 (전체 뷰)">
+              <ImageUpload
+                value={imageWideUrl}
+                onSet={setImageWideUrl}
+                placeholder="원경 첨부"
+              />
+            </FieldBlock>
+          </div>
 
           {error && (
             <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 flex items-center gap-2">
@@ -277,5 +275,36 @@ function FieldBlock({ icon, label, hint, children }) {
       </div>
       {children}
     </div>
+  )
+}
+
+function ImageUpload({ value, onSet, placeholder }) {
+  const handleChange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => onSet(reader.result)
+    reader.readAsDataURL(file)
+  }
+  if (value) {
+    return (
+      <div className="relative inline-block">
+        <img src={value} alt="미리보기" className="max-h-28 rounded-lg border border-gray-200 shadow-sm" />
+        <button
+          type="button"
+          onClick={() => onSet(null)}
+          className="absolute top-1 right-1 p-1 bg-white/95 rounded-full text-gray-600 hover:text-red-600 shadow transition"
+        >
+          <X size={10} />
+        </button>
+      </div>
+    )
+  }
+  return (
+    <label className="flex items-center justify-center gap-2 text-[11px] text-gray-500 cursor-pointer hover:text-blue-700 hover:bg-blue-50 px-3 py-3 border-2 border-dashed border-gray-300 rounded-lg transition">
+      <ImageIcon size={12} />
+      {placeholder}
+      <input type="file" accept="image/*" className="hidden" onChange={handleChange} />
+    </label>
   )
 }

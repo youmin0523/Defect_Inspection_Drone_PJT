@@ -28,13 +28,15 @@ const usePreModelStore = create(
        *     fileName: string,
        *     fileSize: number,
        *     imageDataUrl: string | null,  // L2 전용: BuildingMesh 바닥 텍스처 용 base64
+       *     wallsData: array | null,      // 벽체 좌표 [{x1,y1,x2,y2}, ...] (0-1 정규화)
+       *     outline: array | null,        // 건물 외곽 다각형 [{x,y}, ...] (0-1 정규화, 닫힘)
        *     createdAt: number (ms),
        *   }
        * ]
        */
       preModels: [],
 
-      /** 사전 모델 추가 — PreWork 페이지에서 Mock 모델링 완료 시 호출 */
+      /** 사전 모델 추가 — PreWork 페이지에서 벽체 추출 완료 시 호출 */
       addPreModel: (model) =>
         set((state) => ({
           preModels: [
@@ -46,6 +48,8 @@ const usePreModelStore = create(
               fileName: model.fileName,
               fileSize: model.fileSize ?? 0,
               imageDataUrl: model.imageDataUrl ?? null,
+              wallsData: model.wallsData ?? null,
+              outline: model.outline ?? null,
               createdAt: Date.now(),
             },
           ],

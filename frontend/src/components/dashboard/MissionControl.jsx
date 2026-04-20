@@ -40,7 +40,7 @@ export default function MissionControl({ onEnd }) {
       <button
         type="button"
         onClick={startMission}
-        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-500 text-slate-900 font-bold text-xs tracking-wider uppercase shadow-lg hover:bg-accent-400 transition"
+        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 text-white font-bold text-xs shadow-md hover:bg-emerald-400 transition"
       >
         <Play size={12} /> Start Mission
       </button>
@@ -70,7 +70,7 @@ export default function MissionControl({ onEnd }) {
     <button
       type="button"
       onClick={() => onEnd?.()}
-      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 text-slate-300 font-bold text-xs tracking-wider uppercase shadow-lg cursor-default"
+      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-700 text-slate-300 font-bold text-xs tracking-wider uppercase shadow-lg cursor-default"
       title="비행 종료 — 리포트 확인"
     >
       <CheckCircle2 size={12} className="text-accent-400" /> Mission Ended

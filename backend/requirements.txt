@@ -21,6 +21,7 @@ pydantic-settings
 
 # ── Auth / Security ────────────────────────
 passlib[bcrypt]
+python-jose[cryptography]
 
 # ── Computer Vision / AI ───────────────────
 opencv-python

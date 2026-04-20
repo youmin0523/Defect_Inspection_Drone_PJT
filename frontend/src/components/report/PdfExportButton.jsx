@@ -9,20 +9,25 @@
  *       백엔드 전환 시 WeasyPrint + HTML 템플릿으로 교체 가능.
  */
 
+import { useState } from 'react'
 import { Download } from 'lucide-react'
 import {
-  Document, Page, Text, View, StyleSheet, pdf, Image, Font,
+  Document, Page, Text, View, StyleSheet, Image, Font,
 } from '@react-pdf/renderer'
+import PdfPreviewModal from './PdfPreviewModal.jsx'
 
-// 한글 지원 폰트 — Google Fonts 의 Noto Sans KR (Apache 2.0 라이선스)
-// CDN URL. 네트워크 없으면 폰트 로딩 실패 → Helvetica fallback.
+// //* [Modified Code] 한글 지원 폰트 — 로컬 파일 (public/fonts/) 에서 로드
+// CDN 404 이슈 해소. Noto Sans KR OTF (Google Noto CJK, Apache 2.0)
+// public/ 디렉토리 파일은 Vite 가 / 루트로 서빙 → '/fonts/NotoSansKR-Regular.ttf'
 Font.register({
   family: 'NotoSansKR',
   fonts: [
-    { src: 'https://cdn.jsdelivr.net/npm/noto-sans-kr@1.1.0/files/noto-sans-kr-all-400-normal.woff', fontWeight: 400 },
-    { src: 'https://cdn.jsdelivr.net/npm/noto-sans-kr@1.1.0/files/noto-sans-kr-all-700-normal.woff', fontWeight: 700 },
+    { src: '/fonts/NotoSansKR-Regular.ttf', fontWeight: 400 },
+    { src: '/fonts/NotoSansKR-Bold.ttf',    fontWeight: 700 },
   ],
 })
+
+Font.registerHyphenationCallback((word) => [word])
 
 const styles = StyleSheet.create({
   page:      { padding: 32, fontFamily: 'NotoSansKR', fontSize: 9, color: '#1e293b' },
@@ -50,13 +55,13 @@ const styles = StyleSheet.create({
   defectMeta: { flexDirection: 'row', marginTop: 2 },
   metaPill:   { fontSize: 7, color: '#475569', backgroundColor: '#f1f5f9', padding: '1 4', borderRadius: 2, marginRight: 4 },
   note:       { fontSize: 8, color: '#475569', marginTop: 4, fontStyle: 'italic' },
-  footer:     { position: 'absolute', bottom: 24, left: 32, right: 32, textAlign: 'center', fontSize: 7, color: '#94a3b8' },
+  footer:     { position: 'absolute', bottom: 24, left: 32, right: 32, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', fontSize: 7, color: '#94a3b8' },
 })
 
 const sevStyle = (sev) =>
   sev === 'HIGH' ? styles.sevHigh : sev === 'MED' ? styles.sevMed : styles.sevLow
 
-function ReportDocument({ report }) {
+export function ReportDocument({ report }) {
   const defects = report.defects ?? []
   const hi = defects.filter((d) => d.severity === 'HIGH').length
   const me = defects.filter((d) => d.severity === 'MED').length
@@ -139,28 +144,22 @@ function ReportDocument({ report }) {
           </View>
         ))}
 
-        <Text style={styles.footer} fixed>
-          DRONE INSPECT · 자동 발행 · 본 리포트는 AI 분석 결과를 포함하며 현장 검증이 필요합니다.
-        </Text>
+        <View style={styles.footer} fixed>
+          <Text>DRONE INSPECT</Text>
+          <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
+          <Text>{report.site_name ?? ''}{report.site_unit ? ` ${report.site_unit}` : ''}</Text>
+        </View>
       </Page>
     </Document>
   )
 }
 
 export default function PdfExportButton({ report, label = 'PDF 내보내기', variant = 'primary' }) {
-  const handleExport = async () => {
-    const blob = await pdf(<ReportDocument report={report} />).toBlob()
-    const url = URL.createObjectURL(blob)
-    const date = report.inspection_date ?? new Date().toISOString().slice(0, 10)
-    const site = (report.site_name ?? 'report').replace(/[\\/:*?"<>|]/g, '_')
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${date.replace(/-/g, '')}_${site}_하자리포트.pdf`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
+  const [showPreview, setShowPreview] = useState(false)
+
+  const date = report.inspection_date ?? new Date().toISOString().slice(0, 10)
+  const site = (report.site_name ?? 'report').replace(/[\\/:*?"<>|]/g, '_')
+  const filename = `${date.replace(/-/g, '')}_${site}_하자리포트.pdf`
 
   const baseClass =
     variant === 'primary'
@@ -168,13 +167,22 @@ export default function PdfExportButton({ report, label = 'PDF 내보내기', va
       : 'bg-white text-red-700 border border-red-600 hover:bg-red-50'
 
   return (
-    <button
-      type="button"
-      onClick={handleExport}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold shadow-sm transition ${baseClass}`}
-      title="현재 리포트를 PDF 파일로 다운로드"
-    >
-      <Download size={13} /> {label}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => setShowPreview(true)}
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold shadow-sm transition ${baseClass}`}
+        title="PDF 미리보기 후 다운로드"
+      >
+        <Download size={13} /> {label}
+      </button>
+      {showPreview && (
+        <PdfPreviewModal
+          document={<ReportDocument report={report} />}
+          filename={filename}
+          onClose={() => setShowPreview(false)}
+        />
+      )}
+    </>
   )
 }

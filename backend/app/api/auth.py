@@ -1,18 +1,20 @@
 # =============================================
 # app/api/auth.py
-# 역할: 회원가입 및 계정 중복확인 엔드포인트
+# 역할: 회원가입, 로그인, 계정 중복확인 엔드포인트
 #       - POST /auth/signup           → 신규 회원 생성 (개인/사업자 공용)
+#       - POST /auth/login            → 일반 로그인 (아이디+비밀번호 → JWT)
+#       - GET  /auth/me               → 현재 로그인 사용자 조회
 #       - GET  /auth/check-email      → 이메일 중복 확인
 #       - GET  /auth/check-username   → 아이디 중복 확인
-# 참고: 로그인/토큰 발급은 다음 라운드에서 추가 예정
 # =============================================
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import hash_password
-from app.dependencies import get_db
+from app.core.security import hash_password, verify_password
+from app.core.jwt import create_access_token
+from app.dependencies import get_db, get_current_user
 from app.models.user import User
 from app.models.business_profile import BusinessProfile
 from app.models.term import Term
@@ -20,6 +22,8 @@ from app.models.user_term_agreement import UserTermAgreement
 from app.schemas.user import (
     AvailabilityResponse,
     BusinessInfoResponse,
+    LoginRequest,
+    TokenResponse,
     UserSignupRequest,
     UserResponse,
 )
@@ -169,4 +173,53 @@ async def signup(
         phone=user.phone,
         created_at=user.created_at,
         business=business_resp,
+    )
+
+
+# ── 로그인 ──────────────────────────────────
+@router.post("/login", response_model=TokenResponse)
+async def login(
+    payload: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    일반 로그인: 아이디 + 비밀번호 → JWT 액세스 토큰 발급.
+    """
+    result = await db.execute(select(User).where(User.username == payload.username))
+    user = result.scalar_one_or_none()
+
+    if user is None or user.password_hash is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+
+    token = create_access_token(user.id)
+
+    return TokenResponse(
+        access_token=token,
+        user=UserResponse(
+            id=user.id,
+            account_type=user.account_type,
+            email=user.email,
+            username=user.username,
+            name=user.name,
+            phone=user.phone,
+            created_at=user.created_at,
+        ),
+    )
+
+
+# ── 현재 사용자 조회 ────────────────────────
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: User = Depends(get_current_user)):
+    """Bearer 토큰으로 현재 로그인 사용자 정보 반환."""
+    return UserResponse(
+        id=current_user.id,
+        account_type=current_user.account_type,
+        email=current_user.email,
+        username=current_user.username,
+        name=current_user.name,
+        phone=current_user.phone,
+        created_at=current_user.created_at,
     )

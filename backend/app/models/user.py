@@ -42,7 +42,18 @@ class User(Base):
 
     # ── 인증 ─────────────────────────────────
     # bcrypt 해시 (~60자) / argon2 여유 대비 255 확보
-    password_hash = Column(String(255), nullable=False, comment="비밀번호 해시")
+    # OAuth 가입 사용자는 비밀번호 없이 가입 가능 → nullable
+    password_hash = Column(String(255), nullable=True, comment="비밀번호 해시 (OAuth 사용자는 NULL)")
+
+    # ── OAuth 소셜 로그인 ────────────────────
+    oauth_provider = Column(
+        String(20), nullable=True,
+        comment="소셜 로그인 제공자 (google / kakao / naver / NULL=일반가입)",
+    )
+    oauth_id = Column(
+        String(255), nullable=True, unique=True,
+        comment="소셜 제공자 고유 사용자 ID",
+    )
 
     # ── 개인정보 ─────────────────────────────
     name = Column(String(100), nullable=False, comment="이름 (사업자는 담당자 성명)")

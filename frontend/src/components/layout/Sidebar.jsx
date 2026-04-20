@@ -31,9 +31,9 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
   return (
-    <aside className="flex flex-col w-14 bg-dashboard-surface border-r border-slate-700 flex-shrink-0">
+    <aside className="flex flex-col w-14 bg-dashboard-surface border-r border-neutral-700 flex-shrink-0">
       {/* 브랜드 로고 — 사이드바 상단 */}
-      <div className="flex items-center justify-center h-14 border-b border-slate-700">
+      <div className="flex items-center justify-center h-14 border-b border-neutral-700">
         <img
           src={logoWhite}
           alt="DRONE INSPECT"
@@ -66,8 +66,8 @@ export default function Sidebar() {
               className={({ isActive }) =>
                 `flex items-center justify-center w-10 h-10 rounded-lg transition-colors ${
                   isActive
-                    ? 'bg-accent-500/20 text-accent-400 border border-accent-500/40 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
-                    : 'text-slate-400 hover:bg-slate-700/60 hover:text-white'
+                    ? 'bg-accent-500/20 text-accent-400 border border-accent-500/40'
+                    : 'text-slate-400 hover:bg-neutral-700/60 hover:text-white'
                 }`
               }
             >
@@ -78,11 +78,11 @@ export default function Sidebar() {
       </nav>
 
       {/* 하단: 로그아웃 (TEMP — 세션 연동 전) */}
-      <div className="flex flex-col items-center pb-3 border-t border-slate-700 pt-3">
+      <div className="flex flex-col items-center pb-3 border-t border-neutral-700 pt-3">
         <button
           type="button"
           title="로그아웃 — 세션 연동 전 임시 버튼"
-          className="flex items-center justify-center w-10 h-10 rounded-lg text-slate-400 hover:bg-slate-700/60 hover:text-white transition"
+          className="flex items-center justify-center w-10 h-10 rounded-lg text-slate-400 hover:bg-neutral-700/60 hover:text-white transition"
         >
           <LogOut size={18} />
         </button>

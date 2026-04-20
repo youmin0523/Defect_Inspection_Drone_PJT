@@ -7,8 +7,10 @@
  */
 
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
+import { login as loginApi, getGoogleAuthUrl, getKakaoAuthUrl, getNaverAuthUrl } from '../api/authApi'
+import useAuthStore from '../store/authStore'
 import logoDark from '../assets/logo/logo_transparent-removebg-preview.png'
 
 // 탭 구성
@@ -56,6 +58,9 @@ export default function Login() {
   const [loginType, setLoginType] = useState('personal') // 'personal' | 'business'
   const [form, setForm] = useState({ bizNumber: '', userId: '', password: '' })
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const navigate = useNavigate()
+  const setAuth = useAuthStore((s) => s.setAuth)
 
   const isBusiness = loginType === 'business'
 
@@ -70,7 +75,7 @@ export default function Login() {
     setError('')
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (isBusiness) {
       const bizNum = form.bizNumber.trim()
@@ -87,13 +92,27 @@ export default function Login() {
       setError('아이디와 비밀번호를 모두 입력해주세요.')
       return
     }
-    // TODO: 백엔드 로그인 API 연동 (개인 / 사업자)
-    console.log(`${loginType} 로그인 시도:`, form.userId)
+
+    setLoading(true)
+    try {
+      const res = await loginApi(form.userId, form.password)
+      const { access_token, user } = res.data
+      setAuth(access_token, user)
+      navigate('/employee')
+    } catch (err) {
+      setError(err.response?.data?.detail || '로그인에 실패했습니다.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleSocialLogin = (provider) => {
-    // TODO: 소셜 로그인 OAuth 연동
-    console.log(`${provider} 로그인 시도`)
+    const urlMap = {
+      google: getGoogleAuthUrl,
+      kakao: getKakaoAuthUrl,
+      naver: getNaverAuthUrl,
+    }
+    window.location.href = urlMap[provider]()
   }
 
   // 탭 버튼 스타일
@@ -209,9 +228,10 @@ export default function Login() {
 
           <button
             type="submit"
-            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-lg py-3.5 rounded-lg transition shadow-md"
+            disabled={loading}
+            className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-500 text-white font-bold text-lg py-3.5 rounded-lg transition shadow-md"
           >
-            로그인
+            {loading ? '로그인 중...' : '로그인'}
           </button>
         </form>
 

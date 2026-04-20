@@ -20,11 +20,15 @@ import EmployeeLanding from './pages/EmployeeLanding.jsx'
 import PreWork from './pages/employee/PreWork.jsx'
 import ReportsList from './pages/employee/ReportsList.jsx'
 import ReportDetail from './pages/employee/ReportDetail.jsx'
+import SiteManagement from './pages/employee/SiteManagement.jsx'
+import SiteDetail from './pages/employee/SiteDetail.jsx'
+import Analytics from './pages/employee/Analytics.jsx'
 import SessionLayout from './components/session/SessionLayout.jsx'
 import ProtectedSessionLayout from './components/session/ProtectedSessionLayout.jsx'
 import SessionSetup from './pages/session/SessionSetup.jsx'
 import SessionLevel from './pages/session/SessionLevel.jsx'
 import SessionModeling from './pages/session/SessionModeling.jsx'
+import OAuthCallback from './pages/OAuthCallback.jsx'
 import ReportModal from './components/report/ReportModal.jsx'
 import useWebSocket from './hooks/useWebSocket.js'
 
@@ -77,6 +81,8 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/find-account" element={<FindAccount />} />
+        {/* OAuth 콜백 (Google / Kakao / Naver) */}
+        <Route path="/auth/:provider/callback" element={<OAuthCallback />} />
 
         {/* //* [Modified Code] 직원 전용 랜딩 — "직원 전용" 버튼 클릭 시 진입하는 허브 */}
         <Route path="/employee" element={<EmployeeLanding />} />
@@ -85,6 +91,11 @@ export default function App() {
         {/* //* [Modified Code] 리포트 아카이브 — 사무실 목록 + 재편집 상세 */}
         <Route path="/employee/reports" element={<ReportsList />} />
         <Route path="/employee/reports/:id" element={<ReportDetail />} />
+        {/* //* [Modified Code] 현장 관리 — 목록 + 상세 */}
+        <Route path="/employee/sites" element={<SiteManagement />} />
+        <Route path="/employee/sites/:id" element={<SiteDetail />} />
+        {/* //* [Modified Code] 분석·보고서 — 경향보고서 + 주간업무보고서 */}
+        <Route path="/employee/analytics" element={<Analytics />} />
 
         {/* //* [Modified Code] 세션 워크플로우 (Setup → Level → Modeling) */}
         <Route path="/session" element={<SessionLayout />}>
