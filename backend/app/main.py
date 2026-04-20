@@ -18,6 +18,10 @@ from app.api.router import api_router
 from app.services.camera import rgb_camera_service, thermal_camera_service
 from app.services.recording import recording_service
 from app.services.yolo_inference import yolo_service
+from app.services.inference_pipeline import pipeline as inference_pipeline
+from app.services.wallpaper_classifier import wallpaper_classifier
+from app.core.stream_inference import stream_inference_worker
+from app.services.defect_taxonomy import WALLPAPER_CLASSES
 
 
 @asynccontextmanager
@@ -44,9 +48,16 @@ async def lifespan(app: FastAPI):
     await thermal_camera_service.open()
     print(f"[AeroInspect] 열화상 카메라 (index={settings.THERMAL_CAMERA_INDEX}) 열림")
 
-    # YOLOv8 모델 로드 (가중치 파일 존재 시)
-    yolo_service.load_model()
-    print("[AeroInspect] YOLOv8 모델 로드 완료")
+    # 3-모델 추론 파이프라인 로드 (YOLO thermal + delam + ResNet 벽지)
+    # 가중치 파일 누락 시 FileNotFoundError가 나지만 서버 자체는 기동 유지 (503 반환)
+    try:
+        yolo_service.load_model()  # shim → inference_pipeline.load_models()
+        print("[AeroInspect] 3-모델 추론 파이프라인 로드 완료")
+    except FileNotFoundError as e:
+        print(f"[AeroInspect] AI 모델 로드 실패 (가중치 없음): {e}")
+
+    # WebSocket 스트림 추론 워커 시작 (드롭 큐)
+    await stream_inference_worker.start()
 
     print("[AeroInspect] 서버 준비 완료")
 
@@ -54,6 +65,9 @@ async def lifespan(app: FastAPI):
 
     # ── 종료 ─────────────────────────────────
     print("[AeroInspect] 서버 종료 중...")
+
+    # 스트림 추론 워커 종료
+    await stream_inference_worker.stop()
 
     # 녹화 중이면 안전하게 중지
     if recording_service.is_recording:
@@ -95,10 +109,23 @@ async def root():
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """카메라 및 서비스 상태 확인"""
+    """
+    카메라 + AI 3-모델 + 스트림 워커 상태 확인.
+    프롬프트 스펙대로 models_loaded / device / frame_skip / wallpaper_classes_count 포함.
+    """
+    models = inference_pipeline.models_loaded
+    all_loaded = models.yolo_thermal and models.yolo_delam and models.wallpaper
     return {
-        "status": "ok",
+        "status": "ok" if all_loaded else "degraded",
+        "device": inference_pipeline.device,
+        "models_loaded": {
+            "yolo_thermal": models.yolo_thermal,
+            "yolo_delam": models.yolo_delam,
+            "wallpaper": models.wallpaper,
+        },
+        "wallpaper_classes_count": len(WALLPAPER_CLASSES),
+        "stream_worker_running": stream_inference_worker.is_running,
+        "frame_skip": settings.FRAME_SKIP,
         "rgb_camera": rgb_camera_service.is_open,
         "thermal_camera": thermal_camera_service.is_open,
-        "yolo_loaded": yolo_service.is_loaded,
     }

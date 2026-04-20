@@ -41,12 +41,26 @@ class DefectLogCreate(BaseModel):
     """
     하자 탐지 결과 저장 요청.
     AI 파이프라인에서 탐지 후 백엔드 DB에 저장할 때 사용.
+    레거시 A-E taxonomy (area/category_code/defect_type)는
+    신규 3-모델 중 매핑 불가 클래스의 경우 None 허용.
     """
-    area: str = Field(..., pattern="^[A-E]$", description="하자 영역 코드 (A-E)")
-    category_code: str = Field(..., description="하자 카테고리 코드 (예: A-01)")
-    defect_type: str = Field(..., description="하자 유형명 (한글)")
+    # 레거시 taxonomy (신규 모델 결과 중 매핑 없으면 None)
+    area: Optional[str] = Field(None, pattern="^[A-E]$", description="하자 영역 코드 (A-E)")
+    category_code: Optional[str] = Field(None, description="하자 카테고리 코드 (예: A-01)")
+    defect_type: Optional[str] = Field(None, description="하자 유형명 (한글)")
+
     severity: str = Field(..., pattern="^(HIGH|MED|LOW)$", description="심각도 등급")
     confidence: float = Field(..., ge=0.0, le=1.0, description="AI 탐지 신뢰도")
+
+    # 신규 3-모델 파이프라인 분류 (⚠️ 'good'은 벽지 '터짐(Burst)')
+    defect_source: Optional[str] = Field(
+        None, pattern="^(yolo_thermal|yolo_delam|wallpaper)$",
+        description="탐지 모델 종류"
+    )
+    defect_class: Optional[str] = Field(None, description="모델 내부 클래스명 (예: 'Crack', 'good')")
+    defect_class_display_en: Optional[str] = Field(None, description="영문 표시명")
+    defect_class_display_ko: Optional[str] = Field(None, description="한글 표시명")
+
     bbox: Optional[BoundingBox] = None
     lidar_position: Optional[LidarPosition] = None
     thermal_data: Optional[ThermalData] = None
@@ -62,11 +76,19 @@ class DefectLogResponse(BaseModel):
     목록 조회 및 단건 조회 시 반환 형식.
     """
     id: UUID
-    area: str
-    category_code: str
-    defect_type: str
+    # 레거시 taxonomy (신규 모델 중 매핑 없으면 None)
+    area: Optional[str]
+    category_code: Optional[str]
+    defect_type: Optional[str]
     severity: str
     confidence: float
+
+    # 신규 3-모델 파이프라인 분류
+    defect_source: Optional[str] = None
+    defect_class: Optional[str] = None
+    defect_class_display_en: Optional[str] = None
+    defect_class_display_ko: Optional[str] = None
+
     bbox_x: Optional[float]
     bbox_y: Optional[float]
     bbox_w: Optional[float]

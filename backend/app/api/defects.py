@@ -64,6 +64,30 @@ async def get_defect_summary(db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.get("/recent", response_model=DefectLogListResponse)
+async def list_recent_defects(
+    severity: Optional[str] = Query(None, description="심각도 필터 (HIGH/MED/LOW)"),
+    limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    최신순 하자 로그 N건 조회.
+    실시간 대시보드용 — severity 단일 필터만 지원하는 경량 엔드포인트.
+    """
+    query = select(DefectLog).order_by(desc(DefectLog.timestamp))
+    if severity:
+        query = query.where(DefectLog.severity == severity.upper())
+    query = query.limit(limit)
+    result = await db.execute(query)
+    items = result.scalars().all()
+    return DefectLogListResponse(
+        items=[DefectLogResponse.model_validate(item) for item in items],
+        total=len(items),
+        limit=limit,
+        offset=0,
+    )
+
+
 @router.get("", response_model=DefectLogListResponse)
 async def list_defects(
     area: Optional[str] = Query(None, description="영역 코드 (A-E)"),
@@ -125,11 +149,15 @@ async def create_defect(
     AI 파이프라인(defect_processor.py)에서 탐지 시 호출.
     """
     defect = DefectLog(
-        area=payload.area.upper(),
+        area=payload.area.upper() if payload.area else None,
         category_code=payload.category_code,
         defect_type=payload.defect_type,
         severity=payload.severity.upper(),
         confidence=payload.confidence,
+        defect_source=payload.defect_source,
+        defect_class=payload.defect_class,
+        defect_class_display_en=payload.defect_class_display_en,
+        defect_class_display_ko=payload.defect_class_display_ko,
         bbox_x=payload.bbox.x if payload.bbox else None,
         bbox_y=payload.bbox.y if payload.bbox else None,
         bbox_w=payload.bbox.w if payload.bbox else None,

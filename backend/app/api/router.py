@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook, sites, notifications, chat, organization
+from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook, sites, notifications, chat, organization, detect, ws_stream
 
 api_router = APIRouter()
 
@@ -107,4 +107,18 @@ api_router.include_router(
     chat.router,
     prefix="/chat",
     tags=["Chat"],
+)
+
+# 3-모델 하자 탐지 (multipart 업로드)
+api_router.include_router(
+    detect.router,
+    prefix="/detect",
+    tags=["Detect"],
+)
+
+# 실시간 스트림 수신 WebSocket (/ws/stream)
+api_router.include_router(
+    ws_stream.router,
+    prefix="",
+    tags=["WebSocket"],
 )

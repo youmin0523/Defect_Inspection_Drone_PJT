@@ -71,7 +71,11 @@ async def receive_detection(
         })
     """
     defect = DefectLog(
-        area=payload.area.upper(),
+        area=payload.area.upper() if payload.area else None,
+        defect_source=payload.defect_source,
+        defect_class=payload.defect_class,
+        defect_class_display_en=payload.defect_class_display_en,
+        defect_class_display_ko=payload.defect_class_display_ko,
         category_code=payload.category_code,
         defect_type=payload.defect_type,
         severity=payload.severity.upper(),
