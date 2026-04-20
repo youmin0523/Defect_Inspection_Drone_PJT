@@ -8,6 +8,7 @@
  *       - useDefects 훅으로 초기 데이터 로드
  */
 
+import { Search } from 'lucide-react'
 import useDefectStore from '../../store/defectStore.js'
 import useDefects from '../../hooks/useDefects.js'
 import DefectCard from './DefectCard.jsx'
@@ -35,7 +36,7 @@ export default function DefectPanel() {
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-3 flex-shrink-0">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+          <h2 className="text-sm font-semibold text-slate-300">
             하자 탐지 목록
           </h2>
           <span className="text-xs text-slate-500">
@@ -55,10 +56,15 @@ export default function DefectPanel() {
       {/* 하자 목록 */}
       <div className="flex-1 overflow-y-auto space-y-2 pr-1">
         {filteredDefects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-slate-600">
-            <span className="text-3xl mb-2">✅</span>
-            <span className="text-sm">
+          <div className="flex flex-col items-center justify-center py-10 text-slate-500">
+            <div className="w-12 h-12 rounded-full bg-neutral-800 flex items-center justify-center mb-3">
+              <Search size={20} className="text-slate-500" />
+            </div>
+            <span className="text-sm text-slate-400 font-semibold">
               {total === 0 ? '탐지된 하자 없음' : '필터 조건에 맞는 하자 없음'}
+            </span>
+            <span className="text-xs text-slate-500 mt-1">
+              {total === 0 ? '드론 스트림에서 수신 대기 중' : `전체 ${total}건 중 필터링 결과 0건`}
             </span>
           </div>
         ) : (

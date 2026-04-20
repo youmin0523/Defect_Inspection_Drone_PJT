@@ -16,15 +16,19 @@ alembic
 psycopg2-binary
 
 # ── Validation ─────────────────────────────
-pydantic
+pydantic[email]
 pydantic-settings
+
+# ── Auth / Security ────────────────────────
+passlib[bcrypt]
+python-jose[cryptography]
 
 # ── Computer Vision / AI ───────────────────
 opencv-python
 numpy
-torch
+torch>=2.1
 torchvision
-ultralytics
+ultralytics>=8.3.0
 anomalib
 
 # ── Hardware ───────────────────────────────
@@ -41,3 +45,7 @@ pillow
 httpx
 websockets
 aiofiles
+
+# ── Test ───────────────────────────────────
+pytest
+pytest-asyncio

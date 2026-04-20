@@ -7,9 +7,23 @@
 
 from fastapi import APIRouter
 
-from app.api import defects, stream, websocket, report
+from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook, sites, notifications, chat, organization, detect, ws_stream
 
 api_router = APIRouter()
+
+# 인증 / 회원가입
+api_router.include_router(
+    auth.router,
+    prefix="/auth",
+    tags=["Auth"],
+)
+
+# OAuth 소셜 로그인 (Google / Kakao / Naver)
+api_router.include_router(
+    oauth.router,
+    prefix="/oauth",
+    tags=["OAuth"],
+)
 
 # 하자 탐지 로그 CRUD
 api_router.include_router(
@@ -32,9 +46,79 @@ api_router.include_router(
     tags=["WebSocket"],
 )
 
-# LLM 하자 점검 보고서 생성
+# LLM 하자 점검 보고서 생성/저장/조회/다운로드
 api_router.include_router(
     report.router,
     prefix="/report",
     tags=["Report"],
+)
+
+# 드론 텔레메트리 (좌표/센서/배터리)
+api_router.include_router(
+    telemetry.router,
+    prefix="/telemetry",
+    tags=["Telemetry"],
+)
+
+# SLAM 맵 데이터
+api_router.include_router(
+    slam.router,
+    prefix="/slam",
+    tags=["SLAM"],
+)
+
+# 평면도 업로드 & 처리
+api_router.include_router(
+    floorplan.router,
+    prefix="/floorplan",
+    tags=["Floorplan"],
+)
+
+# AI 서버 연동 웹훅 (탐지 이벤트 수신)
+api_router.include_router(
+    ai_webhook.router,
+    prefix="/ai",
+    tags=["AI Webhook"],
+)
+
+# 현장(Site) 관리 CRUD
+api_router.include_router(
+    sites.router,
+    prefix="/sites",
+    tags=["Sites"],
+)
+
+# 알림 관리 CRUD
+api_router.include_router(
+    notifications.router,
+    prefix="/notifications",
+    tags=["Notifications"],
+)
+
+# 조직(회사) 관리 — 멤버 목록 / 초대 / 권한
+api_router.include_router(
+    organization.router,
+    prefix="/organizations",
+    tags=["Organizations"],
+)
+
+# 메신저 / 채팅
+api_router.include_router(
+    chat.router,
+    prefix="/chat",
+    tags=["Chat"],
+)
+
+# 3-모델 하자 탐지 (multipart 업로드)
+api_router.include_router(
+    detect.router,
+    prefix="/detect",
+    tags=["Detect"],
+)
+
+# 실시간 스트림 수신 WebSocket (/ws/stream)
+api_router.include_router(
+    ws_stream.router,
+    prefix="",
+    tags=["WebSocket"],
 )

@@ -12,7 +12,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, String, Float, Text, BigInteger,
-    DateTime, Enum as SAEnum, Index, func
+    DateTime, Enum as SAEnum, Index, func, ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
@@ -29,12 +29,28 @@ class DefectLog(Base):
     # ── 기본 키 ──────────────────────────────
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
 
-    # ── 하자 분류 ─────────────────────────────
+    # ── 현장 연결 (경향보고서 연계) ───────────
+    site_id = Column(UUID(as_uuid=True), ForeignKey("sites.id"), nullable=True, comment="연결 현장 ID")
+
+    # ── 하자 분류 (레거시 A-E taxonomy) ───────
     # area: A(구조) / B(단열·방수) / C(마감재) / D(바닥) / E(창호)
-    area = Column(String(1), nullable=False, comment="하자 영역 코드 (A-E)")
-    # category_code: A-01, B-03 등 20종 코드
-    category_code = Column(String(10), nullable=False, comment="하자 카테고리 코드")
-    defect_type = Column(String(100), nullable=False, comment="하자 유형명 (한글)")
+    # 신규 3-모델 중 레거시 매핑 없는 케이스는 NULL 허용
+    area = Column(String(1), nullable=True, comment="하자 영역 코드 (A-E, 매핑 없으면 NULL)")
+    category_code = Column(String(10), nullable=True, comment="하자 카테고리 코드 (예: A-01)")
+    defect_type = Column(String(100), nullable=True, comment="하자 유형명 (한글)")
+
+    # ── 신규 3-모델 파이프라인 분류 ───────────
+    # defect_source: 탐지한 모델 종류
+    defect_source = Column(
+        SAEnum("yolo_thermal", "yolo_delam", "wallpaper", name="defect_source_enum"),
+        nullable=True,
+        comment="탐지 모델 (yolo_thermal | yolo_delam | wallpaper)",
+    )
+    # defect_class: 모델 내부 클래스명 (예: 'Crack', 'good')
+    # ⚠️ 'good'은 벽지 '터짐(Burst)'임 — "정상" 아님
+    defect_class = Column(String(50), nullable=True, comment="모델 내부 클래스명")
+    defect_class_display_en = Column(String(80), nullable=True, comment="영문 표시명 (예: 'Burst')")
+    defect_class_display_ko = Column(String(80), nullable=True, comment="한글 표시명 (예: '터짐')")
 
     # ── 심각도 ───────────────────────────────
     # HIGH: 구조·안전·방수 직결 / MED: 기능 저하 / LOW: 마감 미관

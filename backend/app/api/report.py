@@ -1,17 +1,32 @@
 # =============================================
 # app/api/report.py
-# 역할: LLM 기반 하자 점검 보고서 생성 API
-#       - POST /report/generate → 스트리밍 방식 보고서 생성 (Claude/Gemini)
-#       - POST /report/preview  → 비스트리밍 방식 보고서 미리보기
-#       - 프론트엔드는 fetch + response.body.getReader()로 청크 단위 수신
+# 역할: LLM 기반 하자 점검 보고서 생성/저장/조회/다운로드 API
+#       - POST /report/generate   → 스트리밍 방식 보고서 생성 (Claude/Gemini)
+#       - POST /report/preview    → 비스트리밍 방식 보고서 미리보기
+#       - POST /report/save       → 생성된 보고서 DB 저장
+#       - GET  /report            → 저장된 보고서 목록 조회
+#       - GET  /report/{id}       → 보고서 단건 조회
+#       - GET  /report/{id}/download → 마크다운 파일 다운로드
+#       - DELETE /report/{id}     → 보고서 삭제
 # =============================================
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
+from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
-from app.schemas.report import ReportRequest, ReportResponse
+from app.dependencies import get_db, get_current_org_member
+from app.models.report import Report
+from app.models.site import Site
+from app.schemas.report import (
+    ReportRequest,
+    ReportResponse,
+    ReportSaveRequest,
+    ReportSavedResponse,
+    ReportListResponse,
+)
 from app.services.llm_report import LLMReportService
 
 router = APIRouter()
@@ -61,3 +76,134 @@ async def preview_report(
         return report
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"보고서 생성 실패: {str(e)}")
+
+
+# ── 보고서 저장/조회/다운로드 ──────────────────
+
+
+@router.post("/save", response_model=ReportSavedResponse, status_code=201)
+async def save_report(
+    payload: ReportSaveRequest,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """생성된 보고서를 DB에 저장 (site_id 조직 검증)"""
+    user, member, org = org_tuple
+    # site_id가 있으면 소속 조직 검증
+    if payload.site_id:
+        site = await db.scalar(
+            select(Site.id).where(Site.id == payload.site_id, Site.organization_id == org.id)
+        )
+        if not site:
+            raise HTTPException(status_code=404, detail="해당 현장을 찾을 수 없습니다.")
+
+    report = Report(
+        site_id=payload.site_id,
+        title=payload.title,
+        building_name=payload.building_name,
+        inspector_name=payload.inspector_name,
+        provider=payload.provider,
+        content=payload.content,
+        defect_count=payload.defect_count,
+        high_count=payload.high_count,
+        med_count=payload.med_count,
+        low_count=payload.low_count,
+    )
+    db.add(report)
+    await db.flush()
+    return ReportSavedResponse.model_validate(report)
+
+
+@router.get("", response_model=ReportListResponse)
+async def list_reports(
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """저장된 보고서 목록 조회 (소속 조직 한정, 최신순)"""
+    user, member, org = org_tuple
+    org_filter = Report.site_id.in_(
+        select(Site.id).where(Site.organization_id == org.id)
+    )
+    total = await db.scalar(
+        select(func.count()).select_from(select(Report).where(org_filter).subquery())
+    )
+    result = await db.execute(
+        select(Report).where(org_filter).order_by(desc(Report.created_at))
+    )
+    items = result.scalars().all()
+    return ReportListResponse(
+        items=[ReportSavedResponse.model_validate(item) for item in items],
+        total=total or 0,
+    )
+
+
+@router.get("/{report_id}", response_model=ReportSavedResponse)
+async def get_report(
+    report_id: UUID,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """보고서 단건 조회 (소속 조직 검증)"""
+    user, member, org = org_tuple
+    result = await db.execute(
+        select(Report).where(
+            Report.id == report_id,
+            Report.site_id.in_(
+                select(Site.id).where(Site.organization_id == org.id)
+            ),
+        )
+    )
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="보고서를 찾을 수 없습니다.")
+    return ReportSavedResponse.model_validate(report)
+
+
+@router.get("/{report_id}/download")
+async def download_report(
+    report_id: UUID,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """보고서 마크다운 파일 다운로드 (소속 조직 검증)"""
+    user, member, org = org_tuple
+    result = await db.execute(
+        select(Report).where(
+            Report.id == report_id,
+            Report.site_id.in_(
+                select(Site.id).where(Site.organization_id == org.id)
+            ),
+        )
+    )
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="보고서를 찾을 수 없습니다.")
+
+    filename = f"{report.title or 'report'}_{report.created_at.strftime('%Y%m%d')}.md"
+    return Response(
+        content=report.content,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/{report_id}", status_code=204)
+async def delete_report(
+    report_id: UUID,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """보고서 삭제 (소속 조직 검증)"""
+    user, member, org = org_tuple
+    result = await db.execute(
+        select(Report).where(
+            Report.id == report_id,
+            Report.site_id.in_(
+                select(Site.id).where(Site.organization_id == org.id)
+            ),
+        )
+    )
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="보고서를 찾을 수 없습니다.")
+    await db.delete(report)

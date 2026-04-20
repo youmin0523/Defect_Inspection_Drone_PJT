@@ -1,0 +1,55 @@
+name: Vibe Log Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  check-vibe-log:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify Vibe_Coding_Log.md updated for changed areas
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          if echo "$LABELS" | grep -q 'skip-vibe-log'; then
+            echo "::notice::'skip-vibe-log' 라벨 있음 — 체크 생략"
+            exit 0
+          fi
+
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          FILES=$(git diff --name-only "$BASE" "$HEAD")
+
+          echo "--- Changed files ---"
+          echo "$FILES"
+          echo "---------------------"
+
+          NEED_BACKEND=false
+          NEED_FRONTEND=false
+          HAS_BACKEND_LOG=false
+          HAS_FRONTEND_LOG=false
+
+          while IFS= read -r f; do
+            case "$f" in
+              backend/Vibe_Coding_Log.md) HAS_BACKEND_LOG=true ;;
+              frontend/Vibe_Coding_Log.md) HAS_FRONTEND_LOG=true ;;
+              backend/*) NEED_BACKEND=true ;;
+              frontend/*) NEED_FRONTEND=true ;;
+            esac
+          done <<< "$FILES"
+
+          FAIL=0
+          if $NEED_BACKEND && ! $HAS_BACKEND_LOG; then
+            echo "::error::backend/ 코드가 변경됐는데 backend/Vibe_Coding_Log.md 업데이트가 없습니다. Claude 세션의 SessionEnd 훅이 자동 append 하도록 설정되어 있으니, 세션을 정상 종료한 뒤 생성된 블록을 함께 커밋해주세요. (우회가 필요하면 PR 에 'skip-vibe-log' 라벨 추가)"
+            FAIL=1
+          fi
+          if $NEED_FRONTEND && ! $HAS_FRONTEND_LOG; then
+            echo "::error::frontend/ 코드가 변경됐는데 frontend/Vibe_Coding_Log.md 업데이트가 없습니다. Claude 세션의 SessionEnd 훅이 자동 append 하도록 설정되어 있으니, 세션을 정상 종료한 뒤 생성된 블록을 함께 커밋해주세요. (우회가 필요하면 PR 에 'skip-vibe-log' 라벨 추가)"
+            FAIL=1
+          fi
+          exit $FAIL

@@ -8,7 +8,13 @@
 # =============================================
 
 import asyncio
+import os
+import sys
 from logging.config import fileConfig
+
+# alembic CLI는 작업 디렉토리를 sys.path에 안 넣으므로
+# 프로젝트 루트(backend/)를 수동 추가 — 이래야 `from app.db.base import Base`가 동작.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -25,7 +31,7 @@ if config.config_file_name is not None:
 
 # ── 모델 임포트 (autogenerate를 위해 모든 모델 등록) ──
 from app.db.base import Base
-from app.models import defect  # noqa: F401
+from app.models import *  # noqa: F401, F403
 
 target_metadata = Base.metadata
 

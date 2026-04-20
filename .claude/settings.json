@@ -1,0 +1,17 @@
+{
+  "_comment": "팀 공용 Claude Code 설정 — SessionEnd 훅이 세션 종료 시 backend/frontend 디렉터리 수정 여부를 보고 해당 Vibe_Coding_Log.md 에 블록을 자동 append 한다. 개인용 훅(예: Notion 동기화) 은 .claude/settings.local.json 에 별도 유지.",
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/on_session_end.sh\"",
+            "timeout": 60,
+            "statusMessage": "Vibe_Coding_Log 자동 기록 중..."
+          }
+        ]
+      }
+    ]
+  }
+}

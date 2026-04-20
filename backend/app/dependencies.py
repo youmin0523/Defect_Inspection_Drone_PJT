@@ -6,13 +6,23 @@
 # 사용: router 함수 파라미터에 Depends(get_db) 등으로 주입
 # =============================================
 
-from typing import AsyncGenerator
+from datetime import datetime, timezone
+from typing import AsyncGenerator, Optional
+from uuid import UUID
+
+from fastapi import Depends, Header, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import async_session_factory
+from app.core.jwt import decode_access_token
 from app.core.ws_manager import ws_manager
 from app.services.camera import rgb_camera_service, thermal_camera_service
+from app.services.recording import recording_service
 from app.services.yolo_inference import yolo_service
+
+_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -31,6 +41,123 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def get_current_user(
+    cred: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Bearer 토큰에서 현재 사용자를 추출하는 인증 의존성.
+    보호가 필요한 라우터에 Depends(get_current_user)로 주입.
+    """
+    if cred is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증 토큰이 필요합니다.")
+
+    user_id = decode_access_token(cred.credentials)
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않거나 만료된 토큰입니다.")
+
+    from app.models.user import User  # 순환 임포트 방지
+    result = await db.execute(select(User).where(User.id == UUID(user_id)))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="사용자를 찾을 수 없습니다.")
+    return user
+
+
+async def get_current_org_member(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    x_organization_id: Optional[str] = Header(None),
+):
+    """
+    현재 사용자의 활성 조직 멤버십을 반환.
+    다중 조직 시 X-Organization-Id 헤더로 선택, 없으면 가장 최근 활성 조직.
+    미소속 또는 계약 만료 시 403 반환.
+    반환: (user, org_member, organization) 튜플
+    """
+    from app.models.organization import Organization, OrganizationMember
+
+    query = (
+        select(OrganizationMember, Organization)
+        .join(Organization, Organization.id == OrganizationMember.organization_id)
+        .where(OrganizationMember.user_id == current_user.id)
+        .where(OrganizationMember.status == "active")
+        .where(
+            (OrganizationMember.ended_at.is_(None))
+            | (OrganizationMember.ended_at > datetime.now(timezone.utc))
+        )
+    )
+    if x_organization_id:
+        query = query.where(Organization.id == UUID(x_organization_id))
+    else:
+        query = query.order_by(OrganizationMember.joined_at.desc())
+
+    result = await db.execute(query)
+    row = result.first()
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="조직에 소속되지 않은 사용자입니다. 관리자에게 문의하세요.",
+        )
+    member, org = row
+    return current_user, member, org
+
+
+async def get_current_user_with_org(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    현재 사용자 + 조직 정보 (nullable) 반환.
+    /auth/me 등 조직 미소속도 허용하는 엔드포인트용.
+    """
+    from app.models.organization import Organization, OrganizationMember
+
+    result = await db.execute(
+        select(OrganizationMember, Organization)
+        .join(Organization, Organization.id == OrganizationMember.organization_id)
+        .where(OrganizationMember.user_id == current_user.id)
+        .where(OrganizationMember.status == "active")
+        .where(
+            (OrganizationMember.ended_at.is_(None))
+            | (OrganizationMember.ended_at > datetime.now(timezone.utc))
+        )
+        .order_by(OrganizationMember.joined_at.desc())
+    )
+    rows = result.all()
+    if not rows:
+        return current_user, []
+    return current_user, [(m, o) for m, o in rows]
+
+
+def require_role(*allowed_roles: str):
+    """
+    특정 조직 역할이 필요한 엔드포인트용 의존성 팩토리.
+    사용: Depends(require_role("owner", "admin"))
+    """
+    async def _check(org_tuple=Depends(get_current_org_member)):
+        user, member, org = org_tuple
+        if member.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"이 작업은 {', '.join(allowed_roles)} 권한이 필요합니다.",
+            )
+        return user, member, org
+    return _check
+
+
+async def require_superadmin(
+    current_user=Depends(get_current_user),
+):
+    """플랫폼 슈퍼어드민 전용 의존성. is_superadmin=False 시 403."""
+    if not current_user.is_superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="플랫폼 관리자 권한이 필요합니다.",
+        )
+    return current_user
+
+
 def get_ws_manager():
     """WebSocket 연결 매니저 싱글톤 반환"""
     return ws_manager
@@ -44,6 +171,11 @@ def get_rgb_camera():
 def get_thermal_camera():
     """열화상 카메라 서비스 싱글톤 반환"""
     return thermal_camera_service
+
+
+def get_recording_service():
+    """녹화 서비스 싱글톤 반환"""
+    return recording_service
 
 
 def get_yolo_service():
