@@ -15,7 +15,8 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -61,8 +62,10 @@ async def _find_or_create_oauth_user(
     if user:
         return user
 
-    # 2) 동일 이메일 계정 존재 시 OAuth 연결
-    result = await db.execute(select(User).where(User.email == email))
+    # 2) 동일 이메일 계정 존재 시 OAuth 연결 (대소문자 무시)
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == func.lower(email))
+    )
     user = result.scalar_one_or_none()
     if user:
         user.oauth_provider = provider
@@ -71,19 +74,32 @@ async def _find_or_create_oauth_user(
         return user
 
     # 3) 신규 생성 (OAuth 전용: 비밀번호 없음)
-    user = User(
-        account_type="personal",
-        email=email,
-        username=f"{provider}_{uuid.uuid4().hex[:8]}",
-        password_hash=None,
-        name=name or email.split("@")[0],
-        phone="000-0000-0000",
-        oauth_provider=provider,
-        oauth_id=oauth_id,
-    )
-    db.add(user)
-    await db.flush()
-    return user
+    try:
+        user = User(
+            account_type="personal",
+            email=email,
+            username=f"{provider}_{uuid.uuid4().hex[:8]}",
+            password_hash=None,
+            name=name or email.split("@")[0],
+            phone="000-0000-0000",
+            oauth_provider=provider,
+            oauth_id=oauth_id,
+        )
+        db.add(user)
+        await db.flush()
+        return user
+    except IntegrityError:
+        await db.rollback()
+        result = await db.execute(
+            select(User).where(func.lower(User.email) == func.lower(email))
+        )
+        user = result.scalar_one_or_none()
+        if user:
+            user.oauth_provider = provider
+            user.oauth_id = oauth_id
+            await db.flush()
+            return user
+        raise HTTPException(status_code=409, detail="이메일 충돌이 발생했습니다. 다시 시도해 주세요.")
 
 
 # ── Google OAuth ─────────────────────────────
