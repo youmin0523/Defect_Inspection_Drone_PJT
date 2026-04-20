@@ -157,3 +157,98 @@ def _blend_frames(rgb: np.ndarray, thermal: np.ndarray, alpha: float) -> np.ndar
 - **1NF**: 약관 동의를 M:N 연결 테이블로 원자화, 컬럼 기반 반복그룹 제거
 - **2NF**: 단일 PK 테이블은 자동 충족. 연결 테이블의 version/agreed_at 도 복합 PK 전체에 종속
 - **3NF**: 사업자 속성(`biz_number → ceo_name` 등) 분리, `account_type`에 대한 이행 종속 제거
+
+---
+
+## 5️⃣ 백엔드 대규모 확장 — 인증·현장·평면도·SLAM·텔레메트리·AI웹훅 (2026-04-20)
+
+> **착수 시각**: 2026-04-20 09:37  
+> **작업자**: @unknownname-15  
+> **목표**: 프론트엔드 기능 확장(현장 관리 / 분석 / 세션 워크플로우)에 대응하는 백엔드 API·모델·서비스 전면 구축. 총 36개 파일 신규/수정.
+
+### ⏱ 2026-04-20 09:37 | 인증 시스템 완성 (JWT + OAuth + 의존성 주입)
+- **신규 파일**:
+  - `app/core/jwt.py` — `python-jose` 기반 HS256 JWT. `create_access_token(user_id, expires_minutes)` / `decode_access_token(token)`. `settings.JWT_SECRET` + `JWT_ACCESS_EXPIRE_MINUTES` 파라미터화
+  - `app/api/auth.py` — 5개 엔드포인트: `POST /auth/signup`(개인/사업자 공용, 사업자 시 `business_profiles` 행 함께 생성) · `POST /auth/login`(아이디+비밀번호 → JWT) · `GET /auth/me`(현재 사용자 조회) · `GET /auth/check-email` · `GET /auth/check-username`(중복 확인)
+  - `app/api/oauth.py` — SNS 소셜 로그인 3종. `POST /oauth/google` · `POST /oauth/kakao` · `POST /oauth/naver`. 공통 플로우: 프론트 인가 코드 → provider access_token 교환 → 프로필 조회 → DB 조회/자동 회원가입 → JWT 반환. `httpx.AsyncClient` 비동기 provider 호출
+  - `app/dependencies.py` — FastAPI `Depends` 팩토리 모음. `get_db()`(비동기 DB 세션 생성기), `get_current_user()`(Bearer 토큰 검증 후 User ORM 반환), `get_ws_manager()`, `get_rgb_camera()`, `get_thermal_camera()`. 모든 라우터에서 재사용
+
+### ⏱ 2026-04-20 09:37 | 현장(Site) 관리 API + ORM + 스키마
+- **신규 파일**:
+  - `app/models/site.py` — `sites` 테이블. UUID PK, 현장명/건물유형/주소/점검구분/의뢰유형(B2B/B2C)/의뢰사/연락처/계약기간/세대수/면적/배정팀원 JSONB/메모. `DefectLog` · `Report` 에서 FK 참조 예정. 인덱스: `(status, created_at DESC)` · `(client_type, created_at DESC)`
+  - `app/schemas/site.py` — `SiteCreate / SiteUpdate / SiteResponse / SiteListResponse`. `SiteUpdate` 전 필드 Optional(PATCH 부분 업데이트). `SiteListResponse` 에 `total / page / per_page` 페이지네이션 메타 포함
+  - `app/api/sites.py` — 5개 엔드포인트: `GET /sites`(필터+검색+페이지네이션) · `GET /sites/{id}` · `POST /sites` · `PATCH /sites/{id}` · `DELETE /sites/{id}`. `get_current_user` 의존성으로 인증 필수
+
+### ⏱ 2026-04-20 09:37 | 평면도 업로드·처리 API + 서비스
+- **신규 파일**:
+  - `app/models/floorplan.py` — `floorplans` 테이블. 파일명/경로/크기/상태(`uploaded/processing/done/error`) + 추출 결과 JSONB(`walls_json` / `outline_json`)
+  - `app/schemas/floorplan.py` — `FloorplanUploadResponse / FloorplanDetail / FloorplanListResponse`
+  - `app/api/floorplan.py` — 5개 엔드포인트: `POST /floorplan/upload`(JPG/PDF/DXF, `aiofiles` 비동기 저장, 확장자 화이트리스트 검증) · `POST /floorplan/{id}/process`(OpenCV 벽체 추출 트리거, 백그라운드 태스크) · `GET /floorplan` · `GET /floorplan/{id}` · `DELETE /floorplan/{id}`
+  - `app/services/floorplan_processor.py` — OpenCV 순수 이미지 처리. `extract_walls_from_bytes(image_bytes)` 함수. 파이프라인: 그레이스케일 → 이진화 → 방향성 모폴로지(수평/수직 구조 벽 추출) → 컨투어 감지 → 건물 외곽 다각형 추출. DB 독립 순수 함수, 결과를 `{"walls": [...], "outline": [...]}` dict 반환
+
+### ⏱ 2026-04-20 09:37 | SLAM 맵 데이터 API
+- **신규 파일**:
+  - `app/models/slam_map.py` — `slam_maps` 테이블. 점유 격자(occupancy grid) 메타(해상도/크기/원점) + 이미지 base64 + 드론 위치 JSON
+  - `app/schemas/slam_map.py` — `SlamMapCreate / SlamMapUpdate / SlamMapResponse`
+  - `app/api/slam.py` — 5개 엔드포인트: `POST /slam`(새 맵 세션) · `GET /slam`(목록, 이미지 제외 메타만) · `GET /slam/{id}`(이미지 포함 상세) · `PATCH /slam/{id}`(실시간 매핑 중 점진 갱신) · `DELETE /slam/{id}`. WS `slam.map_updated` 이벤트 브로드캐스트로 프론트 3D 미니맵 실시간 반영
+
+### ⏱ 2026-04-20 09:37 | 드론 텔레메트리 로그 API
+- **신규 파일**:
+  - `app/models/telemetry.py` — `telemetry_logs` 테이블. 위치(pos_x/y/z) + 자세(roll/pitch/yaw) + 배터리 + 비행 모드 + 센서 상태. 인덱스: `(created_at DESC)` 타임시리즈 조회 최적화
+  - `app/schemas/telemetry.py` — `TelemetryCreate / TelemetryResponse`
+  - `app/api/telemetry.py` — 3개 엔드포인트: `POST /telemetry`(저장 + WS `telemetry.update` push) · `GET /telemetry`(목록, 기간 필터) · `GET /telemetry/latest`(최신 1건)
+
+### ⏱ 2026-04-20 09:37 | Python AI 서버 → FastAPI 웹훅 연동
+- **신규 파일**:
+  - `app/api/ai_webhook.py` — 3개 엔드포인트: `POST /ai/detection`(YOLO/PatchCore 탐지 이벤트 수신 → `DefectLog` DB 저장 + WS `defect.new` 브로드캐스트) · `POST /ai/thermal`(열화상 분석 결과 WS push) · `POST /ai/batch`(다건 탐지 결과 일괄 저장, 단건 `/detection` N회 호출과 동일 효과이나 트랜잭션 단위화)
+  - Python AI 프로세스(YOLO/PatchCore/RANSAC)와 FastAPI 백엔드를 분리된 서비스로 유지하면서 이 웹훅으로 연결하는 아키텍처 — AI 서버 재시작이 메인 백엔드에 영향 없음
+
+### ⏱ 2026-04-20 09:37 | 보고서 ORM + 녹화 서비스 + 라우터 통합
+- **신규 파일**:
+  - `app/models/report.py` — `reports` 테이블. 세션 ID / 현장 FK / LLM 제공자(claude/gemini) / 제목 / 본문 Text / 상태(draft/published) / 생성자 FK
+  - `app/schemas/report.py` — `ReportCreate / ReportResponse`
+  - `app/services/recording.py` — RGB + Thermal 동시 별도 파일 녹화. `recording_service` 싱글톤. `start_recording()` → `asyncio.Queue` 구독 + `cv2.VideoWriter` mp4 인코딩. `stop_recording()` → writer close + 파일 경로 반환. 저장 경로: `./recordings/YYYYMMDD_HHMMSS_rgb.mp4` / `_thermal.mp4`
+  - `app/api/router.py` — 모든 서브 라우터를 `api_router` 로 통합. `main.py` 에서 `app.include_router(api_router, prefix="/api/v1")` 로 마운트. 신규 라우터 포함: `auth / oauth / defects / stream / websocket / report / telemetry / slam / floorplan / ai_webhook / sites`
+- **수정 파일**:
+  - `app/models/__init__.py` — 신규 5개 모델(`Site / Floorplan / SlamMap / Telemetry / Report`) import 추가 → `Base.metadata` 자동 등록, Alembic 마이그레이션에 반영
+  - `app/db/init_db.py` — 신규 모델 임포트 추가
+  - `app/main.py` — `api_router` 마운트, lifespan 에 recording_service 포함
+  - `app/config.py` — `JWT_SECRET / JWT_ACCESS_EXPIRE_MINUTES / UPLOAD_DIR / RECORDINGS_DIR` 신규 환경변수 추가
+  - `app/api/report.py` — 기존 LLM 스트리밍에 Report ORM 저장 로직 추가
+  - `app/api/stream.py` · `app/services/camera.py` — 녹화 서비스 연동 주석 추가
+
+### 📐 확장 후 전체 DB 스키마 현황
+```
+users (기존)          ←─── business_profiles (1:1, 기존)
+  │                   ←─── user_term_agreements (M:N, 기존)
+  ├── sites           ← 신규. B2B/B2C 현장 관리
+  │     └── reports   ← 신규. 현장별 보고서 (FK: site_id optional)
+  ├── defect_logs     ← 기존. (FK: site_id 추가 예정)
+  ├── floorplans      ← 신규. 평면도 업로드·처리 결과
+  ├── slam_maps       ← 신규. SLAM 맵 스냅샷
+  └── telemetry_logs  ← 신규. 드론 위치/센서 타임시리즈
+```
+
+### 🔗 API 엔드포인트 전체 목록 (신규 추가분)
+| 도메인 | 메서드 | 경로 | 역할 |
+|--------|--------|------|------|
+| Auth | POST | `/api/v1/auth/signup` | 회원가입 |
+| Auth | POST | `/api/v1/auth/login` | JWT 로그인 |
+| Auth | GET | `/api/v1/auth/me` | 내 정보 |
+| OAuth | POST | `/api/v1/oauth/google` | Google OAuth |
+| OAuth | POST | `/api/v1/oauth/kakao` | Kakao OAuth |
+| OAuth | POST | `/api/v1/oauth/naver` | Naver OAuth |
+| Sites | GET/POST | `/api/v1/sites` | 현장 목록/등록 |
+| Sites | GET/PATCH/DELETE | `/api/v1/sites/{id}` | 현장 상세/수정/삭제 |
+| Floorplan | POST | `/api/v1/floorplan/upload` | 평면도 업로드 |
+| Floorplan | POST | `/api/v1/floorplan/{id}/process` | 벽체 추출 트리거 |
+| SLAM | CRUD | `/api/v1/slam` | SLAM 맵 관리 |
+| Telemetry | CRUD | `/api/v1/telemetry` | 텔레메트리 로그 |
+| AI Webhook | POST | `/api/v1/ai/detection` | AI 탐지 이벤트 |
+| AI Webhook | POST | `/api/v1/ai/batch` | 다건 탐지 일괄 |
+
+### 📋 잔여 한계 / 향후 작업
+- **DB 미연결**: 현재 모든 모델·엔드포인트 코드 완성 상태. Alembic `upgrade head` + AWS RDS 연결이 최종 단계
+- **인증 가드**: 현재 일부 엔드포인트(`sites` 등)만 `get_current_user` 의존성. 운영 배포 전 전체 적용 필요
+- **파일 저장**: `floorplan/upload` 는 로컬 파일시스템. 운영 시 S3 pre-signed URL 또는 `boto3` 업로드로 전환
+- **AI 서버 분리**: `ai_webhook.py` 는 Python AI 프로세스가 HTTP 호출하는 구조 — AI 서버 URL/인증 정책은 별건으로 결정 필요

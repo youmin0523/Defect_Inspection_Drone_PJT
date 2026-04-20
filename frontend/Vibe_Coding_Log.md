@@ -752,3 +752,150 @@ Dashboard (12-col grid)
 - **시각 비교**:
   - Before: 네이비 배경 + 네온그린 + HUD 코너 + 도트그리드 + 모노스페이스/트래킹 남발 → "AI 해커 터미널"
   - After: 세션=흰 배경 클린 폼, 대시보드=중성 다크그레이 + 인디고 + 초록 Start Mission → 일반 SaaS 제품 톤
+
+---
+
+### 7️⃣ 직원 허브 기능 확장 — 현장 관리 + 분석·보고서 모듈 (2026-04-20)
+
+#### ⏱ 2026-04-20 09:37 | 현장 관리 모듈 신규 구축 (`/employee/sites`)
+- **피드백**: `EmployeeLanding` 퀵 액션 "현장 관리" 카드가 `disabled: true` 상태로 SOON 처리되어 있었음. 현장 CRUD + 상세 탭 UI 를 완성해달라는 요청.
+- **설계 결정**:
+  - 저장소 SoT: `api/sitesApi.js` 내 localStorage(`drone-inspect-sites-v2` 키). 백엔드 연결 시 이 파일 body 만 `fetch()` 로 교체하면 호출부 변경 없음.
+  - 시드 데이터 3건(B2B 진행 중 / B2B 예정 / B2C 완료)을 `sitesApi.js` 에 내장 — 첫 진입 시 localStorage 가 빈 경우 자동 주입.
+  - 현장 상태 4종(`active / pending / completed / cancelled`) + 건물 유형 7종 + 점검 구분 4종 + 의뢰 유형(`B2B / B2C`) 를 `constants/siteTypes.js` 에 중앙화.
+- **신규 파일** (7개):
+  - `constants/siteTypes.js` — `BUILDING_TYPES / SITE_STATUS / INSPECTION_TYPES / CLIENT_TYPES` 배열 + `STATUS_MAP / CLIENT_TYPE_MAP` 룩업 객체
+  - `api/sitesApi.js` — `listSites / getSite / createSite / updateSite / deleteSite` (async, simulateLatency 포함). 예상 백엔드 엔드포인트(`GET /api/v1/sites` 등) 주석으로 명시
+  - `store/sitesStore.js` — Zustand (persist 없음, SoT 는 sitesApi). `fetchAll / fetchOne / create / update / remove / clear` 액션
+  - `pages/employee/SiteManagement.jsx` — `/employee/sites`. 히어로 배너 + KPI 요약(전체/진행중/예정/완료) + 검색 + 상태 필터 + 현장 테이블. 행 클릭 → 상세, 편집/삭제 액션 인라인. 상태별 컬러 뱃지(`STATUS_CONFIG`) + 건물유형 아이콘 뱃지(`BUILDING_BADGE`).
+  - `pages/employee/SiteDetail.jsx` — `/employee/sites/:id`. 히어로 배너 + 기본 정보 그리드(주소/의뢰사/연락처/점검구분/기간) + 미니 KPI(점검건수/면적/세대수) + 탭 3개(보고서/도면·3D모델/촬영영상). 상단 "점검 세션 시작" 버튼 → `/session/setup` 이동.
+  - `components/site/SiteFormModal.jsx` — 현장 등록/수정 모달. 현장명/건물유형/주소/점검구분/의뢰유형/의뢰사명/연락처/계약기간 필드. 신규: `createSite`, 수정: `updateSite` 분기.
+  - `components/site/SiteReportsTab.jsx` — 현장 연결 보고서 목록. `useReportsStore.fetchAll()` 후 `siteName 매칭` 필터. 아카이브 없는 경우 빈 상태 안내.
+  - `components/site/SiteModelsTab.jsx` — 이 현장에서 사전 작업된 모델 목록(`usePreModelStore.listForSite(siteName)`). 삭제 + "세션 로드" 버튼으로 `/session/level` 이동 시 현장 컨텍스트 연동.
+  - `components/site/SiteRecordingsTab.jsx` — 현장 촬영영상 목록(현재 seed 기준 recordings[] 배열). 업로드 placeholder + 영상 메타(파일명/크기/날짜) 표시.
+- **수정 파일**:
+  - `App.jsx` — `/employee/sites` + `/employee/sites/:id` 라우트 추가, `SiteManagement` / `SiteDetail` import
+  - `pages/EmployeeLanding.jsx` — `QUICK_ACTIONS` 의 `manage-sites` 카드 `disabled: true` 제거 + `to: '/employee/sites'` 활성화
+- **잔여 한계**:
+  - 현장-세션 연결은 **현장명 문자열 매칭** 기반 — 오타 허용 X. 운영 시 `site_id` FK 기반으로 전환 필요
+  - `recordings[]` 는 seed 빈 배열이므로 촬영영상 탭은 항상 빈 상태. 실제 업로드 기능은 백엔드(S3) 연결 후 구현 예정
+
+#### ⏱ 2026-04-20 09:37 | 인증 스토어 신규 (`authStore.js`)
+- **피드백**: 백엔드 JWT 연동 준비. 지금 당장 사용하진 않지만 향후 로그인 처리를 위해 빈 껍데기라도 마련해달라.
+- **반영**:
+  - `store/authStore.js` 신규. `token / user / isAuthenticated` 상태. `setAuth(token, user)` — localStorage(`access_token` / `user` 키) 동기 저장 + 스토어 업데이트. `clearAuth()` — 두 키 제거 + 초기화. 토큰은 store 생성 시 localStorage 에서 즉시 복원 → 새로고침 후 인증 유지.
+  - 현재 컴포넌트에서는 미사용 — `Login.jsx`/`OAuthCallback.jsx` 에서 추후 연결 예정.
+
+#### ⏱ 2026-04-20 10:18 | 분석·보고서 허브 신규 (`/employee/analytics`)
+- **피드백**: `EmployeeLanding` 퀵 액션에 "분석·보고서" 카드가 있었으나 페이지 없음. 경향보고서 + 주간업무보고서 두 탭 형태로 구현해달라.
+- **설계 결정**:
+  - 두 보고서 모두 **인쇄/납품 품질** 기준 — PT용 레이아웃, 체계적 섹션 구성.
+  - 데이터는 `data/mockTrendData.js` 상수 기반. 백엔드 연결 시 데이터 소스만 교체.
+  - Recharts(`BarChart / LineChart / PieChart`) 재사용 — 이미 `package.json` 에 포함.
+- **신규 파일** (3개):
+  - `pages/employee/Analytics.jsx` — `/employee/analytics`. 상단 헤더(← 직원 허브 / 타이틀 / 인쇄 버튼) + 탭 UI(경향보고서 / 주간업무보고서). `window.print()` 로 브라우저 인쇄 지원.
+  - `components/analytics/TrendReport.jsx` — 경향보고서. 7개 섹션: ① 보고서 개요 + 핵심 KPI ② 월별 하자 발생 추이(꺾은선) ③ 하자 유형별 분류(수평 막대 — 파레토) ④ 심각도 분포(도넛) + 조치 현황(도넛) ⑤ 시행사별 하자 패턴(스택 막대) ⑥ 대표 하자 사례 ⑦ AI 종합 분석 및 권고사항.
+  - `components/analytics/WeeklyReport.jsx` — 주간업무보고서. 6개 섹션: ① 보고서 헤더(주차/일자/보고자) ② 금주 핵심 요약(AI 3줄 요약) ③ 주간 KPI ④ 전주 실적(계획 vs 실적 대비표) ⑤ 금주 계획(업무항목/담당자/기한/우선순위) ⑥ 현안 및 리스크(신호등 체계).
+  - `data/mockTrendData.js` — `MONTHLY_TREND / DEFECT_BY_CATEGORY / SEVERITY_DIST / ACTION_STATUS / BUILDER_PATTERN / SAMPLE_DEFECTS / AI_TREND_COMMENTARY / AREA_LABELS / AREA_COLORS` + 주간보고 관련 상수(`getWeekRange / getLastWeekRange` 등). 백엔드 연결 시 이 파일 상수를 API 훅으로 교체.
+- **수정 파일**:
+  - `App.jsx` — `/employee/analytics` 라우트 추가, `Analytics` import
+  - `pages/EmployeeLanding.jsx` — `analytics` 카드 `to: '/employee/analytics'` 활성화 (기존 disabled 상태에서 전환)
+
+---
+
+### 8️⃣ 랜딩페이지 섹션 추가 — 도입 사례 슬라이드쇼 + Dual CTA (2026-04-18, @youminsu0523)
+
+#### ⏱ 2026-04-18 | 도입 사례 카드 이미지 슬라이드쇼 도입
+- **피드백**: CasesSection 3개 카드(B2B 건설사 / 정밀진단 / B2C 세대주)의 상단 이미지 영역이 정적이었음. 실제 이미지 자산(b2b/diagnosis/b2c 폴더)을 받아 카드별로 자동 크로스페이드 슬라이드쇼로 교체 요청.
+- **자산 추가**: `src/assets/cta/b2b/b2b_01~05.png` (5장), `src/assets/cta/b2c/b2c_01~04.png` (4장). diagnosis 카드도 b2b 폴더 자산 공유.
+- **신규 파일**:
+  - `components/landing/CaseSlideshow.jsx` — `images[]` prop 을 받아 `interval`(ms) 간격으로 크로스페이드 슬라이드쇼 재생. 이미지가 1장 이하면 정적 렌더. `startDelay` prop 으로 카드별 시작 타이밍을 어긋나게 해 여러 카드가 동시에 페이드되지 않도록 스태거링. 하단 미니 점 인디케이터 포함. `opacity` + `transition duration-1000` CSS로 부드러운 크로스페이드. `useEffect` cleanup 에서 `clearTimeout + clearInterval` 처리해 메모리 누수 방지.
+- **수정 파일**:
+  - `components/landing/CasesSection.jsx` — `import.meta.glob`(b2b/b2c 폴더 이미지 자동 수집) + `CaseSlideshow` import. `CASE_CARDS` 각 항목에 `images / interval / startDelay` 필드 추가. 카드 상단 기존 static placeholder 를 `<CaseSlideshow ... />` 로 교체. 스태거 타이밍: B2B(0ms) / 정밀진단(1300ms) / B2C(2600ms).
+
+#### ⏱ 2026-04-18 | B2B·B2C 가치 제안 Dual CTA 섹션 신설
+- **피드백**: 랜딩 최하단에 B2B(건설사·점검업체) / B2C(세대주) 두 타겟에게 각각 서비스 가치를 어필하는 분할 CTA 섹션 추가 요청. 이미지 배경 + 체크리스트 형태.
+- **신규 파일**:
+  - `components/landing/DualCTASection.jsx` — 가로 2분할(모바일은 세로 스택). **좌측(B2B)**: `b2b_03.png` 배경 + 다크 오버레이(`bg-slate-900/60`), 체크리스트 3항목(단지 전체 이력 DB화 / 소규모 업체 대단지 관리 / 멀티 테넌시). **우측(B2C)**: `b2c_04.png` 배경 + 라이트 오버레이, 체크리스트 3항목(웹 기반 3D 뷰어 / 외벽 상태 직관 확인 / 좌표 기반 보수 트래킹). 배경 이미지에 `scale-110 blur-[1.5px] opacity-40` 적용해 텍스트 가독성 확보. `CheckList` 서브 컴포넌트로 DRY화.
+- **수정 파일**:
+  - `pages/Landing.jsx` — `DualCTASection` import + `<CasesSection />` 아래에 삽입. TODO Footer 주석은 유지.
+
+---
+
+### 9️⃣ 버튼 클릭 포커스 외곽선 제거 (2026-04-20, @unknownname-15)
+
+#### ⏱ 2026-04-20 | 전역 버튼 focus ring 제거
+
+- **피드백**: 모든 JSX 페이지에서 버튼을 클릭하면 외곽선(focus ring)이 표시됨. 제거 요청.
+- **1차 조치**: `src/index.css`에 전역 스타일 추가.
+  ```css
+  button:focus,
+  button:focus-visible {
+    outline: none;
+  }
+  ```
+- **추가 피드백**: Landing 페이지의 '직원 전용', '로그인', '도입 문의하기', '3D 리포트 샘플 보기', '서비스 도입 문의' 버튼은 여전히 외곽선 표시됨.
+- **원인**: 해당 컴포넌트에 Tailwind 클래스 `focus:ring-2 focus:ring-*`가 인라인으로 명시돼 전역 CSS보다 우선 적용됨.
+- **2차 조치**: 각 컴포넌트에서 `focus:ring-2 focus:ring-*` 클래스를 직접 제거.
+- **수정 파일**:
+  - `src/index.css` — `button:focus, button:focus-visible { outline: none; }` 전역 규칙 추가
+  - `components/landing/LandingHeader.jsx` — 로고 링크, 네비 앵커, 직원 전용 링크, 로그인 링크, 도입 문의하기 버튼, 햄버거 버튼 총 6개소 `focus:ring-2 focus:ring-*` 제거
+  - `components/landing/HeroSection.jsx` — '3D 리포트 샘플 보기', '서비스 도입 문의' 버튼 2개소 `focus:ring-2 focus:ring-*` 제거
+- **유지 항목**: `ContactModal.jsx` input/textarea의 `focus:ring`은 폼 입력 UX용이므로 제거하지 않음.
+
+---
+
+### 🔟 모바일 햄버거 메뉴 추가 (2026-04-20, @unknownname-15)
+
+#### ⏱ 2026-04-20 | LandingHeader 모바일 반응형 햄버거 메뉴
+
+- **피드백**: 모바일 사이즈에서 '직원 전용', '로그인' 버튼이 보이지 않음. 햄버거 메뉴로 노출 요청.
+- **프롬프트**:
+  ```text
+  "LandingHeader 페이지에서 모바일 최적화 사이즈로 들어가면 '직원 전용', '로그인' 버튼이 보이지 않게 돼.
+  모바일 최적화 사이즈로 진입했을 때 우측 상단에 햄버거 라인을 만들고,
+  그 안에 '직원 전용, 로그인, 도입 문의하기 메뉴를 넣어 줘.
+  지금 디자인과 어울리게 하면서 아이콘은 remix icon에서 가져와 줘."
+  ```
+- **조치**:
+  - `frontend/index.html` — Remix Icons CDN 링크 추가 (`remixicon@4.5.0`)
+  - `components/landing/LandingHeader.jsx` — 햄버거 메뉴 구현
+    - `md` 미만(모바일)에서만 보이는 햄버거 버튼 (`ri-menu-line` / `ri-close-line` 토글)
+    - 드롭다운 3개 메뉴: `ri-shield-user-line` 직원 전용, `ri-login-box-line` 로그인, `ri-mail-send-line` 도입 문의하기
+    - `isAtTop` 상태에 따라 슬레이트 다크 / 흰색 두 테마 대응
+    - `mousedown` 이벤트로 외부 클릭 시 자동 닫힘 (`useRef` 활용)
+    - 기존 데스크탑 버튼은 `hidden md:block` 유지
+
+---
+
+### 1️⃣1️⃣ 뒤로가기 아이콘 통일 — Login / Signup / FindAccount (2026-04-20, @unknownname-15)
+
+#### ⏱ 2026-04-20 | '메인화면으로..' / '로그인으로..' 텍스트 → Remix Icon 아이콘 교체
+
+- **피드백**:
+  - Login·Signup 우측 상단 '메인화면으로..' 텍스트를 `ri-corner-up-left-line` 아이콘으로 교체 요청
+  - FindAccount '로그인으로..' 텍스트도 동일 아이콘으로 교체하되, 이전 화면으로 돌아가도록 변경 요청
+- **조치**:
+  - `pages/Login.jsx` — `메인화면으로..` Link → `ri-corner-up-left-line` 아이콘 Link (`to="/"`)
+  - `pages/Signup.jsx` — 동일 교체 (`to="/"`)
+  - `pages/FindAccount.jsx` — `로그인으로..` Link(`to="/login"`) → `button + navigate(-1)` 으로 변경
+    - 고정 경로 대신 실제 히스토리 뒤로 이동 (진입 경로가 다양하므로 UX상 자연스러움)
+
+```jsx
+// //! [Original Code] 텍스트 링크 (Login, Signup 공통)
+<Link to="/" className="... text-xs font-semibold text-gray-500 ...">메인화면으로..</Link>
+
+// //* [Modified Code] Remix Icon 아이콘으로 통일
+<Link to="/" aria-label="메인화면으로 이동" className="... text-gray-400 hover:text-blue-600 ...">
+  <i className="ri-corner-up-left-line text-2xl" />
+</Link>
+
+// //! [Original Code] FindAccount — 로그인으로 고정 이동
+<Link to="/login" className="...">로그인으로..</Link>
+
+// //* [Modified Code] FindAccount — 이전 화면으로 히스토리 이동
+<button type="button" onClick={() => navigate(-1)} aria-label="이전 화면으로 이동"
+  className="... text-gray-400 hover:text-blue-600 ...">
+  <i className="ri-corner-up-left-line text-2xl" />
+</button>
+```
