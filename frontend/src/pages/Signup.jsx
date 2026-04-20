@@ -12,6 +12,7 @@ import { Link, useNavigate } from 'react-router-dom'
 
 import logoDark from '../assets/logo/logo_transparent-removebg-preview.png'
 import { checkBusinessStatus, interpretStatus } from '../api/businessVerifyApi'
+import { checkEmail, checkUsername, signup } from '../api/authApi'
 
 // 눈 아이콘 (비밀번호 표시)
 function EyeIcon() {
@@ -185,6 +186,12 @@ export default function Signup() {
     TERMS.reduce((acc, t) => ({ ...acc, [t.id]: false }), {}),
   )
 
+  // 중복확인 결과 상태: { email: { checked, available, message }, userId: { ... } }
+  const [dupCheck, setDupCheck] = useState({
+    email: { checked: false, available: false, message: '' },
+    userId: { checked: false, available: false, message: '' },
+  })
+
   // 비밀번호 가시성 토글
   const [showPw, setShowPw] = useState(false)
   const [showPwConfirm, setShowPwConfirm] = useState(false)
@@ -217,6 +224,14 @@ export default function Signup() {
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }))
     setError('')
+    // 이메일 관련 필드 변경 시 이메일 중복확인 리셋
+    if (key === 'emailLocal' || key === 'emailDomain') {
+      setDupCheck((prev) => ({ ...prev, email: { checked: false, available: false, message: '' } }))
+    }
+    // 아이디 변경 시 아이디 중복확인 리셋
+    if (key === 'userId') {
+      setDupCheck((prev) => ({ ...prev, userId: { checked: false, available: false, message: '' } }))
+    }
   }
 
   const handleTypeChange = (type) => {
@@ -276,16 +291,40 @@ export default function Signup() {
     }
   }
 
-  // 중복 확인 (시뮬레이션)
-  const handleDuplicateCheck = (field) => {
-    const label = field === 'email' ? '이메일' : '아이디'
-    const value = field === 'email' ? composedEmail : form[field]?.trim()
+  // 중복 확인 — 백엔드 API 연동
+  const handleDuplicateCheck = async (field) => {
+    const isEmail = field === 'email'
+    const label = isEmail ? '이메일' : '아이디'
+    const value = isEmail ? composedEmail : form.userId?.trim()
     if (!value) {
-      alert(`${label}를 입력해주세요.`)
+      alert(`${label}을(를) 입력해주세요.`)
       return
     }
-    // TODO: 백엔드 중복 확인 API 연동
-    alert(`${label} 중복 확인 요청: ${value}`)
+
+    try {
+      const { data } = isEmail
+        ? await checkEmail(value)
+        : await checkUsername(value)
+
+      setDupCheck((prev) => ({
+        ...prev,
+        [isEmail ? 'email' : 'userId']: {
+          checked: true,
+          available: data.available,
+          message: data.message,
+        },
+      }))
+    } catch (err) {
+      const msg = err?.response?.data?.detail || '중복 확인 중 오류가 발생했습니다.'
+      setDupCheck((prev) => ({
+        ...prev,
+        [isEmail ? 'email' : 'userId']: {
+          checked: true,
+          available: false,
+          message: msg,
+        },
+      }))
+    }
   }
 
   // 비밀번호 자동생성 — 생성 후 눈 아이콘 토글로 자동 노출하여 사용자가 직접 확인
@@ -307,7 +346,9 @@ export default function Signup() {
 
   const allTermsChecked = TERMS.every((t) => termsAgreed[t.id])
 
-  const handleSubmit = (e) => {
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleSubmit = async (e) => {
     e.preventDefault()
 
     if (isBusiness) {
@@ -319,6 +360,15 @@ export default function Signup() {
 
     if (!composedEmail || !form.userId || !form.password || !form.passwordConfirm || !form.phone || !form.name) {
       setError('모든 항목을 입력해주세요.')
+      return
+    }
+    // 중복확인 완료 여부 검증
+    if (!dupCheck.email.checked || !dupCheck.email.available) {
+      setError('이메일 중복 확인을 완료해주세요.')
+      return
+    }
+    if (!dupCheck.userId.checked || !dupCheck.userId.available) {
+      setError('아이디 중복 확인을 완료해주세요.')
       return
     }
     if (form.password.length < 8) {
@@ -337,12 +387,46 @@ export default function Signup() {
       return
     }
 
-    // TODO: 백엔드 회원가입 API 연동
-    console.log(`${signupType} 회원가입 시도:`, form.userId)
+    // 백엔드 회원가입 API 호출
+    setSubmitting(true)
+    setError('')
 
-    // 가입 완료 알림 → 로그인 페이지로 이동
-    alert(`회원가입이 완료되었습니다.\n아이디: ${form.userId}\n로 로그인해주세요.`)
-    navigate('/login')
+    const payload = {
+      account_type: signupType,
+      email: composedEmail,
+      username: form.userId,
+      password: form.password,
+      name: form.name,
+      phone: form.phone,
+      terms: {
+        service: termsAgreed.service,
+        privacy: termsAgreed.privacy,
+        marketing: termsAgreed.marketing,
+      },
+      ...(isBusiness && {
+        business: {
+          biz_number: form.bizNumber,
+          ceo_name: form.bizCeoName,
+        },
+      }),
+    }
+
+    try {
+      await signup(payload)
+      alert(`회원가입이 완료되었습니다.\n아이디: ${form.userId}\n로 로그인해주세요.`)
+      navigate('/login')
+    } catch (err) {
+      const detail = err?.response?.data?.detail
+      if (typeof detail === 'string') {
+        setError(detail)
+      } else if (Array.isArray(detail)) {
+        setError(detail.map((d) => d.msg).join(', '))
+      } else {
+        setError('회원가입 중 오류가 발생했습니다. 다시 시도해주세요.')
+      }
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   // 탭 버튼 스타일
@@ -542,6 +626,11 @@ export default function Signup() {
                 중복 확인
               </button>
             </div>
+            {dupCheck.email.checked && (
+              <p className={`mt-1 text-xs font-medium ${dupCheck.email.available ? 'text-green-600' : 'text-red-600'}`}>
+                {dupCheck.email.message}
+              </p>
+            )}
           </div>
 
           {/* 아이디 */}
@@ -566,6 +655,11 @@ export default function Signup() {
                 중복 확인
               </button>
             </div>
+            {dupCheck.userId.checked && (
+              <p className={`mt-1 text-xs font-medium ${dupCheck.userId.available ? 'text-green-600' : 'text-red-600'}`}>
+                {dupCheck.userId.message}
+              </p>
+            )}
           </div>
 
           {/* 비밀번호 (별도 행) — 눈 아이콘 + 자동생성 */}
@@ -705,9 +799,10 @@ export default function Signup() {
 
           <button
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-base py-2.5 rounded-lg transition shadow-md"
+            disabled={submitting}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-base py-2.5 rounded-lg transition shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            가입 완료하기
+            {submitting ? '가입 처리 중...' : '가입 완료하기'}
           </button>
         </form>
 

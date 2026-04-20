@@ -13,10 +13,12 @@ import {
   LayoutDashboard,
   FileText,
   Map,
+  MessageSquare,
   Plane,
   Settings,
   LogOut,
 } from 'lucide-react'
+import useChatStore from '../../store/chatStore.js'
 import logoWhite from '../../assets/logo/logo_white.png'
 
 // 내비 항목. disabled: true → "준비 중" placeholder (클릭 시 무동작, 툴팁만 표시).
@@ -24,12 +26,15 @@ import logoWhite from '../../assets/logo/logo_white.png'
 const NAV_ITEMS = [
   { key: 'dashboard', to: '/dashboard',        icon: LayoutDashboard, label: '대시보드' },
   { key: 'reports',   to: '/employee/reports', icon: FileText,        label: '하자 리포트' },
+  { key: 'chat',      to: '/employee/chat',    icon: MessageSquare,   label: '메신저' },
   { key: 'flights',   to: '#',                 icon: Map,             label: '비행 경로',  disabled: true },
   { key: 'drones',    to: '#',                 icon: Plane,           label: '드론 관리',  disabled: true },
   { key: 'settings',  to: '#',                 icon: Settings,        label: '설정',       disabled: true },
 ]
 
 export default function Sidebar() {
+  const chatUnread = useChatStore((s) => s.unreadTotal)
+
   return (
     <aside className="flex flex-col w-14 bg-dashboard-surface border-r border-neutral-700 flex-shrink-0">
       {/* 브랜드 로고 — 사이드바 상단 */}
@@ -64,7 +69,7 @@ export default function Sidebar() {
               to={item.to}
               title={item.label}
               className={({ isActive }) =>
-                `flex items-center justify-center w-10 h-10 rounded-lg transition-colors ${
+                `relative flex items-center justify-center w-10 h-10 rounded-lg transition-colors ${
                   isActive
                     ? 'bg-accent-500/20 text-accent-400 border border-accent-500/40'
                     : 'text-slate-400 hover:bg-neutral-700/60 hover:text-white'
@@ -72,6 +77,11 @@ export default function Sidebar() {
               }
             >
               <Icon size={18} />
+              {item.key === 'chat' && chatUnread > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] flex items-center justify-center bg-red-500 text-white text-[9px] font-bold rounded-full px-0.5">
+                  {chatUnread > 9 ? '9+' : chatUnread}
+                </span>
+              )}
             </NavLink>
           )
         })}

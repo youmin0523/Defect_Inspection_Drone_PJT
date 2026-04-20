@@ -28,6 +28,17 @@ from app.models.site import Site  # noqa: F401
 # ── 보고서 ───────────────────────────────────
 from app.models.report import Report  # noqa: F401
 
+# ── 알림 ─────────────────────────────────────
+from app.models.notification import Notification  # noqa: F401
+
+# ── 조직 / 팀 ────────────────────────────────
+from app.models.organization import Organization, OrganizationMember  # noqa: F401
+
+# ── 메신저 / 채팅 ───────────────────────────
+from app.models.conversation import Conversation  # noqa: F401
+from app.models.message import Message  # noqa: F401
+from app.models.conversation_member import ConversationMember  # noqa: F401
+
 __all__ = [
     # 사용자 / 인증
     "User",
@@ -45,4 +56,13 @@ __all__ = [
     "Site",
     # 보고서
     "Report",
+    # 알림
+    "Notification",
+    # 조직 / 팀
+    "Organization",
+    "OrganizationMember",
+    # 메신저 / 채팅
+    "Conversation",
+    "Message",
+    "ConversationMember",
 ]

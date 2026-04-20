@@ -8,7 +8,7 @@
  *       - WebSocket 연결은 DashboardLayout 내부에서만 초기화하여 랜딩/세션 페이지에서는 비용 발생 없음
  */
 
-import { BrowserRouter, Routes, Route, Outlet } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './components/layout/Sidebar.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Landing from './pages/Landing.jsx'
@@ -23,6 +23,15 @@ import ReportDetail from './pages/employee/ReportDetail.jsx'
 import SiteManagement from './pages/employee/SiteManagement.jsx'
 import SiteDetail from './pages/employee/SiteDetail.jsx'
 import Analytics from './pages/employee/Analytics.jsx'
+import Chat from './pages/employee/Chat.jsx'
+import FloatingChatButton from './components/chat/FloatingChatButton.jsx'
+
+/** employee 경로에서만 Floating Chat Button 표시 */
+function GlobalFloatingChat() {
+  const { pathname } = useLocation()
+  if (!pathname.startsWith('/employee')) return null
+  return <FloatingChatButton />
+}
 import SessionLayout from './components/session/SessionLayout.jsx'
 import ProtectedSessionLayout from './components/session/ProtectedSessionLayout.jsx'
 import SessionSetup from './pages/session/SessionSetup.jsx'
@@ -75,6 +84,7 @@ function DashboardLayout() {
 export default function App() {
   return (
     <BrowserRouter>
+      <GlobalFloatingChat />
       <Routes>
         {/* 공개 라우트 */}
         <Route path="/" element={<Landing />} />
@@ -96,6 +106,8 @@ export default function App() {
         <Route path="/employee/sites/:id" element={<SiteDetail />} />
         {/* //* [Modified Code] 분석·보고서 — 경향보고서 + 주간업무보고서 */}
         <Route path="/employee/analytics" element={<Analytics />} />
+        {/* //* [Modified Code] 사내 메신저 — Slack/카카오톡 스타일 */}
+        <Route path="/employee/chat" element={<Chat />} />
 
         {/* //* [Modified Code] 세션 워크플로우 (Setup → Level → Modeling) */}
         <Route path="/session" element={<SessionLayout />}>

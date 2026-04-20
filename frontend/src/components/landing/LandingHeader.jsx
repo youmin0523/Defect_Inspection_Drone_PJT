@@ -11,24 +11,31 @@ import { Link, useLocation } from 'react-router-dom';
 import { handleAnchorClick, smoothScrollTo } from '../../utils/smoothScroll.js';
 import ContactModal from './ContactModal.jsx';
 
+// 네이비 원본(스크롤 후 흰 헤더용) + 흰색(최상단 어두운 히어로용)
 import logoDark from '../../assets/logo/logo_transparent-removebg-preview.png';
 import logoWhite from '../../assets/logo/logo_white.png';
 
+// 네비 메뉴 항목
 const NAV_LINKS = [
   { label: '서비스 소개', href: '#intro' },
   { label: '핵심 기술', href: '#features' },
   { label: '도입 사례', href: '#cases' },
 ];
 
+// 스크롤 전환 기준 (px): 이 값을 넘으면 배경이 흰색으로 바뀜
 const SCROLL_THRESHOLD = 50;
 
 export default function LandingHeader() {
+  // 최상단 여부: true면 투명 오버레이, false면 흰색 배경
   const [isAtTop, setIsAtTop] = useState(true);
+  // 도입 문의 모달 open 여부
   const [isContactOpen, setIsContactOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const mobileMenuRef = useRef(null);
   const location = useLocation();
 
+  // 로고 클릭: 이미 "/" 경로면 Link가 리렌더를 발생시키지 않아 스크롤이 안 먹음.
+  // 현재 경로가 "/"일 때만 기본 동작을 가로채 최상단까지 스무스 스크롤.
   const handleLogoClick = (event) => {
     if (location.pathname === '/') {
       event.preventDefault();
@@ -41,10 +48,13 @@ export default function LandingHeader() {
   };
 
   useEffect(() => {
+    // 초기 렌더 시 현재 스크롤 위치 반영 (새로고침 후 중간이면 바로 흰 배경)
     const syncScrollState = () => {
       setIsAtTop(window.scrollY < SCROLL_THRESHOLD);
     };
     syncScrollState();
+
+    // passive: true → 스크롤 성능 향상 (기본 동작 막지 않음 명시)
     window.addEventListener('scroll', syncScrollState, { passive: true });
     return () => window.removeEventListener('scroll', syncScrollState);
   }, []);
@@ -62,8 +72,10 @@ export default function LandingHeader() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isMobileMenuOpen]);
 
+  // //* [Modified Code] C 전략: 상단에서 투명, 스크롤 시 흰 배경 + 그림자
   const headerBgClass = isAtTop ? 'bg-transparent' : 'bg-white shadow-md';
 
+  // 네비 링크 텍스트 색: 최상단(어두운 히어로 위)에서는 흰색, 스크롤 후엔 회색
   const navTextClass = isAtTop
     ? 'text-white/90 hover:text-white'
     : 'text-gray-600 hover:text-blue-600';
@@ -82,8 +94,9 @@ export default function LandingHeader() {
         to="/"
         onClick={handleLogoClick}
         aria-label="DRONE INSPECT 홈"
-        className="flex items-center focus:outline-none rounded"
+        className="flex items-center focus:outline-none focus:ring-2 focus:ring-blue-400 rounded"
       >
+        {/* //* [Modified Code] 상태에 따라 흰/네이비 로고 스왑 */}
         <img
           src={isAtTop ? logoWhite : logoDark}
           alt="DRONE INSPECT"
@@ -101,7 +114,7 @@ export default function LandingHeader() {
             key={link.href}
             href={link.href}
             onClick={(e) => handleAnchorClick(e, link.href, 96, 1400)}
-            className={`${navTextClass} transition-colors focus:outline-none rounded`}
+            className={`${navTextClass} transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 rounded`}
           >
             {link.label}
           </a>
@@ -110,11 +123,17 @@ export default function LandingHeader() {
 
       {/* 우측 버튼 그룹 */}
       <div className="flex items-center gap-3">
+        {/* //! [Original Code] 직원 전용 버튼이 세션 셋업으로 직행하던 기존 동작
+            <Link to="/session/setup" title="DB 미연결 단계 — 로그인 없이 임시 접근. 세션 셋업 → 모델링 → 대시보드 순으로 진입"> */}
+
+        {/* //* [Modified Code] 직원 전용 진입 랜딩(/employee)을 거치도록 변경
+            - 기존 세션 셋업 플로우는 /employee 화면 내 "점검 세션 시작 →" 버튼에서 이어짐
+            - NOTE: 로그인/권한 가드는 DB 연결 단계에서 추가 예정 (AWS 프리티어 제약) */}
         {/* 직원 전용 (데스크탑) */}
         <Link
           to="/employee"
           title="DB 미연결 단계 — 로그인 없이 임시 접근. 직원 랜딩 → 세션 셋업 → 모델링 → 대시보드 순으로 진입"
-          className={`group hidden md:inline-flex items-center gap-2 px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none ${
+          className={`group hidden md:inline-flex items-center gap-2 px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-yellow-400 ${
             isAtTop
               ? 'border border-yellow-300/60 bg-yellow-300/10 text-yellow-200 hover:bg-yellow-300 hover:text-slate-900'
               : 'border border-yellow-500/70 bg-yellow-50 text-yellow-800 hover:bg-yellow-400 hover:text-slate-900'
@@ -136,7 +155,7 @@ export default function LandingHeader() {
         {/* 로그인 버튼 (데스크탑) */}
         <Link
           to="/login"
-          className={`hidden md:inline-block px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none ${
+          className={`hidden md:inline-block px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-400 ${
             isAtTop
               ? 'text-white/90 hover:text-white hover:bg-white/10'
               : 'text-gray-600 hover:text-blue-600 hover:bg-gray-100'
@@ -145,11 +164,12 @@ export default function LandingHeader() {
           로그인
         </Link>
 
+        {/* CTA: 최상단에서는 살짝 투명 처리, 스크롤 후엔 솔리드 */}
         {/* 도입 문의하기 CTA (데스크탑) */}
         <button
           type="button"
           onClick={handleContactOpen}
-          className={`hidden md:block px-5 py-2.5 rounded-md font-semibold transition shadow-md focus:outline-none ${
+          className={`hidden md:block px-5 py-2.5 rounded-md font-semibold transition shadow-md focus:outline-none focus:ring-2 focus:ring-blue-400 ${
             isAtTop
               ? 'bg-blue-600/90 hover:bg-blue-600 text-white backdrop-blur-sm'
               : 'bg-blue-600 hover:bg-blue-700 text-white'

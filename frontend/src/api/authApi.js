@@ -32,6 +32,26 @@ export const oauthLogin = (provider, code, redirectUri) =>
 /** 현재 로그인 사용자 조회 */
 export const getMe = () => API.get('/api/v1/auth/me')
 
+/** 이메일 중복 확인 */
+export const checkEmail = (email) =>
+  API.get('/api/v1/auth/check-email', { params: { email } })
+
+/** 아이디 중복 확인 */
+export const checkUsername = (username) =>
+  API.get('/api/v1/auth/check-username', { params: { username } })
+
+/** 회원가입 */
+export const signup = (payload) =>
+  API.post('/api/v1/auth/signup', payload)
+
+/** 아이디 찾기 (이메일 발송) */
+export const findId = (payload) =>
+  API.post('/api/v1/auth/find-id', payload)
+
+/** 비밀번호 찾기 (임시 비밀번호 이메일 발송) */
+export const findPassword = (payload) =>
+  API.post('/api/v1/auth/find-pw', payload)
+
 
 // ── OAuth 인가 URL 빌더 ─────────────────────
 const REDIRECT_BASE = window.location.origin

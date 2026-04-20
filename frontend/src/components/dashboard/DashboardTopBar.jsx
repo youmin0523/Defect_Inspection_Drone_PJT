@@ -7,11 +7,14 @@
  *       - 우측: Flightpaths 필터 + WS 연결 상태 + 알림 + 프로필
  */
 
+import { useEffect } from 'react'
 import { Search, Satellite, Route, Bell } from 'lucide-react'
 import useDroneStore from '../../store/droneStore.js'
 import useDefectStore from '../../store/defectStore.js'
 import useSessionStore from '../../store/sessionStore.js'
+import useNotificationStore from '../../store/notificationStore.js'
 import MissionControl from './MissionControl.jsx'
+import NotificationDropdown from '../notification/NotificationDropdown.jsx'
 
 const STATUS_CONFIG = {
   connected:    { label: 'LIVE',     dotClass: 'bg-accent-400 animate-pulse' },
@@ -26,6 +29,10 @@ export default function DashboardTopBar({ onMissionEnd }) {
   const defects = useDefectStore((s) => s.defects)
   const highCount = defects.filter((d) => d.severity === 'HIGH').length
   const status = STATUS_CONFIG[connectionStatus] ?? STATUS_CONFIG.disconnected
+  const { unreadCount, toggleDropdown } = useNotificationStore()
+  const fetchUnreadCount = useNotificationStore((s) => s.fetchUnreadCount)
+
+  useEffect(() => { fetchUnreadCount() }, [fetchUnreadCount])
 
   // //* [Modified Code] 세션 컨텍스트 구독 — 좌측 브랜드 옆에 "현장 · 운용자 · Lv" 라벨
   const siteName = useSessionStore((s) => s.siteName)
@@ -100,16 +107,22 @@ export default function DashboardTopBar({ onMissionEnd }) {
           <span className="font-mono">{status.label}</span>
         </div>
 
-        <button
-          type="button"
-          className="relative p-2 rounded-lg bg-neutral-900/70 border border-neutral-700/60 backdrop-blur-md text-slate-300 hover:text-white shadow-lg transition"
-          aria-label="알림"
-        >
-          <Bell size={14} />
-          {highCount > 0 && (
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border border-neutral-900 animate-pulse" />
-          )}
-        </button>
+        <div className="relative">
+          <button
+            type="button"
+            className="relative p-2 rounded-lg bg-neutral-900/70 border border-neutral-700/60 backdrop-blur-md text-slate-300 hover:text-white shadow-lg transition"
+            aria-label="알림"
+            onClick={toggleDropdown}
+          >
+            <Bell size={14} />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1 border-2 border-neutral-900">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </button>
+          <NotificationDropdown theme="dark" />
+        </div>
 
         <div
           className="w-9 h-9 rounded-lg bg-neutral-900/70 border border-neutral-700/60 backdrop-blur-md flex items-center justify-center text-xs font-bold text-white shadow-lg"

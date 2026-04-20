@@ -17,9 +17,10 @@
  *     → DB 연결 시 MOCK_* 상수를 각 API 훅 호출로 교체 (키·타입 동일하게 유지)
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Bell,
@@ -30,18 +31,21 @@ import {
   FileText,
   LogOut,
   MapPin,
-  Megaphone,
   Play,
   TrendingUp,
   Upload,
   UserCheck,
   Users,
   Activity,
-  AlertTriangle,
+  MessageSquare,
 } from 'lucide-react'
 import useDefectStore from '../store/defectStore.js'
 import useDroneStore from '../store/droneStore.js'
 import useSessionStore from '../store/sessionStore.js'
+import useNotificationStore from '../store/notificationStore.js'
+import useChatStore from '../store/chatStore.js'
+import NotificationDropdown from '../components/notification/NotificationDropdown.jsx'
+import NOTIFICATION_CATEGORIES from '../constants/notificationCategories.js'
 
 /* ──────────────────────────────────────────────────────────────
    상수: 목업 데이터 (DB 연결 시 API 훅으로 교체)
@@ -59,14 +63,6 @@ const MOCK_TODAY_SCHEDULE = [
   { id: 's1', time: '09:00', site: '송파 헬리오시티 102동 1501호', status: 'upcoming', operator: '유민수' },
   { id: 's2', time: '14:00', site: '잠실 리센츠 303동 503호',      status: 'upcoming', operator: '김다연' },
   { id: 's3', time: '16:30', site: '잠실 엘스 208동 2102호',       status: 'upcoming', operator: '박지훈' },
-]
-
-// 알림/공지 — `/api/v1/employee/notifications` 로 교체 예정
-const MOCK_NOTIFICATIONS = [
-  { id: 'n1', type: 'notice',  title: '4월 정기 드론 배터리 교체 공지',        date: '2026-04-16', pinned: true  },
-  { id: 'n2', type: 'alert',   title: '헬리오시티 1402호 보고서 승인 대기 중', date: '2026-04-15', pinned: false },
-  { id: 'n3', type: 'system',  title: 'AI 모델 v2.1 정식 배포 완료',           date: '2026-04-14', pinned: false },
-  { id: 'n4', type: 'notice',  title: '5월 법정 안전교육 사전 예약 안내',      date: '2026-04-12', pinned: false },
 ]
 
 // 팀원 현황 및 담당 현장 — `/api/v1/teams/assignments` 로 교체 예정
@@ -134,6 +130,14 @@ export default function EmployeeLanding() {
     return Math.round((end - missionStartedAt) / 60000)
   }, [missionStartedAt, missionEndedAt])
 
+  // 알림 데이터
+  const notifications = useNotificationStore((s) => s.notifications)
+  const unreadCount = useNotificationStore((s) => s.unreadCount)
+  const fetchAll = useNotificationStore((s) => s.fetchAll)
+  const fetchUnreadCount = useNotificationStore((s) => s.fetchUnreadCount)
+
+  useEffect(() => { fetchAll(); fetchUnreadCount() }, [fetchAll, fetchUnreadCount])
+
   // 현재 세션 컨텍스트 요약 문구 ("진행 중 세션 없음" / "송파 헬리오시티 · Level 3 · 비행 중")
   const sessionContextLabel = useMemo(() => {
     if (!siteName) return '진행 중인 세션이 없습니다.'
@@ -153,7 +157,7 @@ export default function EmployeeLanding() {
         dateStr={dateStr}
         weekdayLabel={weekdayLabel}
         todayCount={MOCK_TODAY_SCHEDULE.length}
-        pendingReports={MOCK_NOTIFICATIONS.filter((n) => n.type === 'alert').length}
+        pendingReports={unreadCount}
         sessionContextLabel={sessionContextLabel}
       />
 
@@ -169,13 +173,14 @@ export default function EmployeeLanding() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <TodayScheduleSection schedules={MOCK_TODAY_SCHEDULE} />
-          <NotificationsSection notifications={MOCK_NOTIFICATIONS} />
+          <NotificationsSection notifications={notifications} />
         </div>
 
         <TeamAssignmentsSection members={MOCK_TEAM_MEMBERS} />
 
         <RecentActivitySection activities={MOCK_RECENT_ACTIVITIES} />
       </main>
+
     </div>
   )
 }
@@ -187,6 +192,8 @@ export default function EmployeeLanding() {
 function EmployeeHeader({ operatorName }) {
   const displayName = operatorName || '게스트'
   const initials = (operatorName?.slice(0, 2) || 'GU').toUpperCase()
+  const { unreadCount, toggleDropdown } = useNotificationStore()
+  const chatUnread = useChatStore((s) => s.unreadTotal)
 
   return (
     <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-sm">
@@ -209,17 +216,41 @@ function EmployeeHeader({ operatorName }) {
           </div>
         </div>
 
-        {/* 우측: 알림 · 프로필 · 로그아웃 */}
+        {/* 우측: 메신저 · 알림 · 프로필 · 로그아웃 */}
         <div className="flex items-center gap-2 md:gap-3">
-          <button
-            type="button"
+          {/* 메신저 바로가기 */}
+          <Link
+            to="/employee/chat"
             className="relative p-2 rounded-full hover:bg-gray-100 transition focus:outline-none focus:ring-2 focus:ring-blue-400"
-            aria-label="알림 보기"
-            title="알림"
+            aria-label="메신저"
+            title="메신저"
           >
-            <Bell size={18} className="text-gray-600" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />
-          </button>
+            <MessageSquare size={18} className="text-gray-600" />
+            {chatUnread > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center bg-blue-600 text-white text-[10px] font-bold rounded-full px-1 border-2 border-white">
+                {chatUnread > 9 ? '9+' : chatUnread}
+              </span>
+            )}
+          </Link>
+
+          {/* 알림 */}
+          <div className="relative">
+            <button
+              type="button"
+              className="relative p-2 rounded-full hover:bg-gray-100 transition focus:outline-none focus:ring-2 focus:ring-blue-400"
+              aria-label="알림 보기"
+              title="알림"
+              onClick={toggleDropdown}
+            >
+              <Bell size={18} className="text-gray-600" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1 border-2 border-white">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </button>
+            <NotificationDropdown theme="light" />
+          </div>
           <div className="hidden md:flex items-center gap-3 pl-3 border-l border-gray-200">
             <div className="text-right leading-tight">
               <p className="text-sm font-bold text-slate-800">{displayName}</p>
@@ -356,6 +387,14 @@ const QUICK_ACTIONS = [
     icon: TrendingUp,
     accent: 'violet',
   },
+  {
+    key: 'chat',
+    title: '메신저',
+    desc: '팀원과 1:1 대화, 그룹 채팅, 팀 채널로 실시간 소통합니다.',
+    to: '/employee/chat',
+    icon: MessageSquare,
+    accent: 'cyan',
+  },
 ]
 
 const ACTION_ACCENT = {
@@ -364,6 +403,7 @@ const ACTION_ACCENT = {
   green:  { border: 'border-t-4 border-green-600',  panel: 'bg-green-50',  iconBg: 'bg-green-600',  text: 'text-green-700',  hoverBg: 'group-hover:bg-green-100' },
   indigo: { border: 'border-t-4 border-indigo-600', panel: 'bg-indigo-50', iconBg: 'bg-indigo-600', text: 'text-indigo-700', hoverBg: 'group-hover:bg-indigo-100' },
   violet: { border: 'border-t-4 border-violet-600', panel: 'bg-violet-50', iconBg: 'bg-violet-600', text: 'text-violet-700', hoverBg: 'group-hover:bg-violet-100' },
+  cyan:   { border: 'border-t-4 border-cyan-600',   panel: 'bg-cyan-50',   iconBg: 'bg-cyan-600',   text: 'text-cyan-700',   hoverBg: 'group-hover:bg-cyan-100' },
 }
 
 function QuickActionsSection() {
@@ -374,7 +414,7 @@ function QuickActionsSection() {
         title="자주 사용하는 작업"
         desc="클릭 한 번으로 사무실 업무와 현장 점검을 시작하세요."
       />
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5 mt-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mt-6">
         {QUICK_ACTIONS.map((action) => {
           const style = ACTION_ACCENT[action.accent]
           const Icon = action.icon
@@ -568,13 +608,22 @@ function TodayScheduleSection({ schedules }) {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   6. 알림/공지 — 2열 중 우측
+   6. 알림/공지 — 2열 중 우측 (notificationStore 연동)
    ────────────────────────────────────────────────────────────── */
 
-const NOTIFICATION_STYLE = {
-  notice: { icon: Megaphone,      iconBg: 'bg-blue-100',   iconText: 'text-blue-700',   label: '공지' },
-  alert:  { icon: AlertTriangle,  iconBg: 'bg-yellow-100', iconText: 'text-yellow-700', label: '알림' },
-  system: { icon: TrendingUp,     iconBg: 'bg-green-100',  iconText: 'text-green-700',  label: '시스템' },
+function formatRelativeTime(timestamp) {
+  const diff = Date.now() - timestamp
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return '방금 전'
+  if (minutes < 60) return `${minutes}분 전`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}시간 전`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}일 전`
+  const weeks = Math.floor(days / 7)
+  if (weeks < 5) return `${weeks}주 전`
+  const months = Math.floor(days / 30)
+  return `${months}개월 전`
 }
 
 function NotificationsSection({ notifications }) {
@@ -588,27 +637,25 @@ function NotificationsSection({ notifications }) {
         <span className="text-xs font-semibold text-gray-500">최근 {notifications.length}건</span>
       </div>
       <ul className="divide-y divide-gray-100">
-        {notifications.map((n) => {
-          const style = NOTIFICATION_STYLE[n.type] || NOTIFICATION_STYLE.notice
-          const Icon = style.icon
+        {notifications.slice(0, 6).map((n) => {
+          const cat = NOTIFICATION_CATEGORIES[n.category] || NOTIFICATION_CATEGORIES.system
+          const Icon = cat.icon
           return (
-            <li key={n.id} className="px-6 py-4 flex items-start gap-4 hover:bg-gray-50 transition">
-              <div className={`w-9 h-9 rounded-lg ${style.iconBg} ${style.iconText} flex items-center justify-center shrink-0`}>
+            <li key={n.id} className={`px-6 py-4 flex items-start gap-4 border-l-4 ${cat.border} hover:bg-gray-50 transition`}>
+              <div className={`w-9 h-9 rounded-lg ${cat.lightBg} ${cat.lightText} flex items-center justify-center shrink-0`}>
                 <Icon size={16} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${style.iconBg} ${style.iconText}`}>
-                    {style.label}
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${cat.lightBg} ${cat.lightText}`}>
+                    {cat.label}
                   </span>
-                  {n.pinned && (
-                    <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
-                      PINNED
-                    </span>
+                  {!n.is_read && (
+                    <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
                   )}
                 </div>
-                <p className="text-sm font-semibold text-slate-800 break-keep">{n.title}</p>
-                <p className="text-xs text-gray-500 mt-1">{n.date}</p>
+                <p className={`text-sm break-keep ${n.is_read ? 'text-slate-500' : 'font-semibold text-slate-800'}`}>{n.title}</p>
+                <p className="text-xs text-gray-500 mt-1">{formatRelativeTime(n.created_at)}</p>
               </div>
             </li>
           )

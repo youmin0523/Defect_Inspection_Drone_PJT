@@ -141,3 +141,26 @@ class AvailabilityResponse(BaseModel):
     """이메일/아이디 중복 확인 응답"""
     available: bool = Field(..., description="사용 가능 여부 (True=미사용)")
     message: str
+
+
+# ── 계정 찾기 요청/응답 스키마 ────────────────
+class FindIdRequest(BaseModel):
+    """아이디 찾기 요청 (이름 + 이메일로 조회 → 결과를 이메일로 발송)"""
+    type: Literal["personal", "business"] = Field("personal", description="사용자 유형")
+    name: str = Field(..., min_length=1, description="이름 (사업자는 담당자명)")
+    email: EmailStr = Field(..., description="가입 시 등록한 이메일")
+    bizNumber: Optional[str] = Field(None, description="사업자등록번호 (사업자 유형일 때)")
+
+
+class FindPasswordRequest(BaseModel):
+    """비밀번호 찾기 요청 (아이디 + 이메일 확인 → 임시 비밀번호 발급)"""
+    type: Literal["personal", "business"] = Field("personal", description="사용자 유형")
+    userId: str = Field(..., min_length=1, description="아이디")
+    email: EmailStr = Field(..., description="가입 시 등록한 이메일")
+    bizNumber: Optional[str] = Field(None, description="사업자등록번호 (사업자 유형일 때)")
+
+
+class AccountRecoveryResponse(BaseModel):
+    """아이디/비밀번호 찾기 공통 응답"""
+    success: bool
+    message: str
