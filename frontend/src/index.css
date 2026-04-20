@@ -17,6 +17,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* 버튼 클릭 시 외곽선(포커스 링) 제거 */
+button:focus,
+button:focus-visible {
+  outline: none;
+}
+
 /* 커스텀 스크롤바 */
 ::-webkit-scrollbar {
   width: 6px;
