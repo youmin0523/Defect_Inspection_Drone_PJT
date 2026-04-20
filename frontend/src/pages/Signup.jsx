@@ -390,12 +390,14 @@ export default function Signup() {
             </Link>
           </div>
           {/* 우측: 메인화면으로 나가기 */}
-          <Link
-            to="/"
-            className="w-20 shrink-0 flex items-center justify-center text-xs font-semibold text-gray-500 hover:text-blue-600 transition"
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            aria-label="이전 화면으로 이동"
+            className="w-20 shrink-0 flex items-center justify-center text-gray-400 hover:text-blue-600 transition"
           >
-            메인화면으로..
-          </Link>
+            <i className="ri-corner-up-left-line text-2xl" />
+          </button>
         </div>
 
         {/* 탭 선택 */}
