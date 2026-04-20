@@ -36,9 +36,17 @@ export default function ChatHeader() {
           </div>
         ) : conv.type === 'dm' ? (
           <div className="relative">
-            <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold">
-              {otherMember?.initials || '??'}
-            </div>
+            {otherMember?.profile_image_url ? (
+              <img
+                src={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}${otherMember.profile_image_url}`}
+                alt={otherMember.name}
+                className="w-8 h-8 rounded-full object-cover"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold">
+                {otherMember?.initials || '??'}
+              </div>
+            )}
             {statusConfig && (
               <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${statusConfig.dot}`} />
             )}

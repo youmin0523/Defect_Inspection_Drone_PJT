@@ -12,11 +12,15 @@ const API = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
 })
 
-// 요청 시 JWT 토큰 자동 첨부
+// 요청 시 JWT 토큰 + 현재 조직 ID 자동 첨부
 API.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+  }
+  const currentOrg = JSON.parse(localStorage.getItem('current_org') || 'null')
+  if (currentOrg?.id) {
+    config.headers['X-Organization-Id'] = currentOrg.id
   }
   return config
 })

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db, get_current_user, get_ws_manager
+from app.dependencies import get_db, get_current_user, get_current_org_member, get_ws_manager
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.conversation_member import ConversationMember
@@ -79,13 +79,14 @@ async def _build_conv_response(db: AsyncSession, conv: Conversation) -> Conversa
 
 @router.get("/conversations", response_model=ConversationListResponse)
 async def list_conversations(
-    current_user=Depends(get_current_user),
+    org_tuple=Depends(get_current_org_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """현재 사용자의 대화방 목록 조회"""
+    """현재 사용자의 대화방 목록 조회 (소속 조직 한정)"""
+    user, member, org = org_tuple
     conv_ids_q = await db.execute(
         select(ConversationMember.conversation_id)
-        .where(ConversationMember.user_id == current_user.id)
+        .where(ConversationMember.user_id == user.id)
     )
     conv_ids = [row[0] for row in conv_ids_q]
 
@@ -95,6 +96,7 @@ async def list_conversations(
     convs_q = await db.execute(
         select(Conversation)
         .where(Conversation.id.in_(conv_ids))
+        .where(Conversation.organization_id == org.id)
         .order_by(desc(Conversation.updated_at))
     )
     convs = convs_q.scalars().all()
@@ -109,20 +111,37 @@ async def list_conversations(
 @router.post("/conversations", response_model=ConversationResponse, status_code=201)
 async def create_conversation(
     payload: ConversationCreate,
-    current_user=Depends(get_current_user),
+    org_tuple=Depends(get_current_org_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """새 대화방 생성"""
+    """새 대화방 생성 (소속 조직에 자동 배정, 참여자 같은 조직 검증)"""
+    user, member, org = org_tuple
+    from app.models.organization import OrganizationMember
+    # 참여자가 같은 조직인지 검증
+    for pid in payload.participant_ids:
+        if pid == user.id:
+            continue
+        exists = await db.scalar(
+            select(OrganizationMember.id).where(
+                OrganizationMember.organization_id == org.id,
+                OrganizationMember.user_id == pid,
+                OrganizationMember.status == "active",
+            )
+        )
+        if not exists:
+            raise HTTPException(status_code=400, detail=f"참여자 {pid}는 같은 조직에 소속되어 있지 않습니다.")
+
     conv = Conversation(
         type=payload.type,
         name=payload.name,
-        created_by=current_user.id,
+        created_by=user.id,
+        organization_id=org.id,
     )
     db.add(conv)
     await db.flush()
 
     # 참여자 추가 (생성자 포함)
-    all_ids = set(payload.participant_ids) | {current_user.id}
+    all_ids = set(payload.participant_ids) | {user.id}
     for uid in all_ids:
         db.add(ConversationMember(conversation_id=conv.id, user_id=uid))
     await db.flush()

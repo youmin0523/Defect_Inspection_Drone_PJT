@@ -969,3 +969,100 @@ Dashboard (12-col grid)
   - 히어로 CTA 버튼 — focus ring 복원:
     ![히어로 CTA focus ring](/screenshots/07_hero_cta_focus_ring.png)
 - **상태**: 반영 완료 — 팀원 추가 모바일 햄버거 메뉴 코드는 유지하면서 주석·접근성만 복원
+
+### 1️⃣3️⃣ 도입 사례 슬라이드쇼 불규칙 전환 + 인디케이터 클릭 네비게이션 (2026-04-20, @youminsu0523)
+
+#### ⏱ 2026-04-20 | 슬라이드쇼 전환 리듬 불규칙화 + 도트 클릭 이동
+
+- **피드백**: CasesSection 3개 카드(B2B 8장 / 정밀진단 8장 / B2C 14장)의 이미지 슬라이드가 `setInterval` 고정 간격이라 기계적으로 규칙적임. 사진 수량이 서로 다르므로 불규칙적으로 넘어가게 해달라. 추가로 하단 도트 인디케이터를 클릭하면 해당 이미지로 즉시 이동할 수 있게 해달라.
+- **분석**:
+  - 기존 구현: `setInterval(interval)` — B2B/진단 4000ms 고정, B2C 3000ms 고정. `startDelay`(0/1300/2600ms)로 카드 간 시작만 스태거링.
+  - git 이력 확인: `CaseSlideshow.jsx`와 `CasesSection.jsx` 모두 `ffa566b` 커밋 이후 수정 이력 없음. unknownName-15는 이 파일 미수정.
+  - 노션 로그(04-18)에 기록된 초기 자산(`cta/b2b` 5장, `cta/b2c` 4장)과 실제 커밋 코드(`cases/` 폴더 8+8+14장)는 경로·수량 차이 존재 — 노션은 설계 단계 기록, 커밋은 최종 구현.
+- **수정 파일**:
+  - `components/landing/CaseSlideshow.jsx`:
+    1. **불규칙 전환**: `setInterval` → 재귀 `setTimeout` 방식으로 교체. 매 전환마다 `interval × (0.7 ~ 1.3)` 범위의 랜덤 딜레이(jitter) 적용. 예: B2B(interval=4000)는 2800~5200ms 사이에서 매번 다른 간격으로 전환.
+    2. **도트 클릭 네비게이션**: 하단 인디케이터를 `<span>` → `<button>`으로 교체. `goTo(i)` 핸들러가 현재 타이머를 `clearTimeout` 후 해당 인덱스로 즉시 이동, 이후 자동 전환 타이머 재시작.
+    3. **타이머 관리**: `useRef`(`timerRef`, `cancelledRef`)로 타이머 ID와 취소 상태를 관리하여 `goTo` 클릭 시 기존 예약된 전환과 충돌 방지. `useCallback`으로 `scheduleNext`/`goTo` 메모이제이션.
+- **상태**: 반영 완료
+
+---
+
+### 1️⃣4️⃣ 멀티테넌트 조직 권한 체계 — 프론트엔드 (2026-04-20, @youminsu0523)
+
+> **착수 시각**: 2026-04-20 14:30  
+> **목표**: 조직 기반 데이터 격리에 대응하는 프론트엔드 인증 플로우, 온보딩, 라우트 가드, 관리자 UI 구축
+
+#### ⏱ 14:30 | authStore 조직 정보 확장
+- **수정 파일**: `store/authStore.js`
+- `organizations`, `currentOrg`, `switchOrg()` 추가. 다중 조직 전환 + localStorage 연동
+
+#### ⏱ 14:40 | OrgRequired 라우트 가드 + 온보딩 페이지
+- **신규**: `components/auth/OrgRequired.jsx` — 미소속 → `/employee/onboarding` 리다이렉트. `adminOnly` prop 지원
+- **신규**: `pages/employee/Onboarding.jsx` — Slack/Notion/Jira 패턴. 새 조직 만들기 / 초대 코드 가입 / 배정 대기 3가지 선택지
+
+#### ⏱ 15:00 | 관리자 멤버 관리 페이지
+- **신규**: `pages/employee/AdminMembers.jsx` — 조직 멤버 테이블 + 미소속 사용자 탭 + 초대코드 표시. 멤버 행 클릭 → 상세/수정 모달 (역할/소속/부서(드롭다운)/직위/입사일/퇴사일/상태)
+
+#### ⏱ 15:20 | EmployeeLanding 프로필 드롭다운 + 내 정보 수정
+- **수정**: `pages/EmployeeLanding.jsx` — 프로필 아이콘 클릭 시 드롭다운 (사용자 정보 + 역할 뱃지 + 내 정보 수정 + 멤버 관리(관리자) + 로그아웃). EditProfileModal 추가. QuickActions에 관리자 전용 "멤버 관리" 카드
+
+#### ⏱ 15:30 | API 헤더 + 라우팅
+- **수정**: `api/authApi.js` — `X-Organization-Id` 헤더 자동 첨부
+- **수정**: `App.jsx` — `<OrgRequired>` 래핑 + 온보딩/관리자 라우트 추가
+- **수정**: `Login.jsx`, `OAuthCallback.jsx` — 로그인 후 조직 유무 분기 리다이렉트
+- **상태**: 반영 완료
+
+---
+
+### 1️⃣5️⃣ 프로필 이미지 업로드 + 채팅 아바타 연동 (2026-04-20, @youminsu0523)
+
+> **착수 시각**: 2026-04-20 22:00  
+> **목표**: 내 정보 수정에서 프로필 이미지 업로드/삭제 UI 추가. 헤더와 채팅 컴포넌트에서 이니셜 대신 프로필 사진 표시. 채팅에서도 메시지 송신 시 프로필 이미지 URL 전달.
+
+#### ⏱ 22:00 | EditProfileModal 프로필 이미지 업로드 UI
+
+- **피드백**: "내 정보 수정에서 프로필 이미지를 변경할 수 있게 해줘. 현재는 이름의 앞 두글자를 띄우지만, 회사 특성상 얼굴을 알아야 하는 경우가 있기 때문에 프로필 사진을 넣을 수 있게 해줘. 프로필 사진은 채팅에서도 표현되어야 해."
+- **수정 파일**: `pages/EmployeeLanding.jsx`
+  - `EditProfileModal` 전면 개편:
+    - 상단에 원형 프로필 영역 (24x24, 이미지 or 이니셜 폴백)
+    - hover 시 카메라 아이콘(`Camera` from lucide-react) 오버레이 → 클릭 시 `<input type="file">` 트리거
+    - "사진 변경" / "삭제" 링크 버튼 (이미지 존재 시에만 삭제 표시)
+    - 업로드 중 로딩 스피너 (반투명 검정 오버레이 + 회전 border 애니메이션)
+    - 제한사항 안내 텍스트: "JPEG, PNG, WebP, GIF / 최대 5MB"
+  - 이미지 업로드: `PUT /api/v1/auth/me/profile-image` (FormData, 즉시 반영 — 별도 저장 버튼 불필요)
+  - 이미지 삭제: `DELETE /api/v1/auth/me/profile-image`
+  - 업로드/삭제 성공 시 `setAuth(token, updatedUser)`로 authStore 즉시 갱신 → 헤더 아바타 실시간 반영
+- **스크린샷**:
+  - 프로필 이미지 업로드 모달 (이니셜 상태):
+    ![프로필 이미지 모달](/screenshots/profile_modal_initials.png)
+
+#### ⏱ 22:10 | EmployeeHeader 아바타 프로필 이미지 표시
+
+- **수정 파일**: `pages/EmployeeLanding.jsx`
+  - 헤더 우측 프로필 아바타: `user.profile_image_url` 존재 시 `<img>` 렌더링, 없으면 기존 이니셜 `<div>` 폴백
+  - 이미지 URL: `${VITE_API_BASE_URL}${user.profile_image_url}` 패턴으로 백엔드 StaticFiles 서빙 경로 참조
+
+#### ⏱ 22:15 | 채팅 컴포넌트 4종 프로필 이미지 지원
+
+- **수정 파일**:
+  - `components/chat/MessageBubble.jsx` — `message.sender_profile_image_url` 존재 시 `<img>` 아바타, 없으면 이니셜 폴백. 내 메시지(노란 말풍선)는 아바타 미표시 유지
+  - `components/chat/ChatHeader.jsx` — DM 상대방 헤더 아바타에 `otherMember.profile_image_url` 지원. 온라인 상태 도트는 이미지 위에도 동일하게 표시
+  - `components/chat/ConversationItem.jsx` — 대화 목록 DM 아바타에 프로필 이미지 지원
+  - `components/chat/ParticipantPanel.jsx` — 우측 참여자 패널 멤버 목록 아바타에 프로필 이미지 지원
+  - `api/chatApi.js` — `sendMessage()` 함수에 `sender_profile_image_url` 파라미터 추가
+  - `store/chatStore.js` — 메시지 전송 시 `localStorage.user.profile_image_url`에서 프로필 이미지 URL 읽어 전달
+
+- **아바타 렌더링 패턴** (4개 컴포넌트 공통):
+  ```jsx
+  {member?.profile_image_url ? (
+    <img src={`${API_BASE}${member.profile_image_url}`} alt={member.name}
+         className="w-9 h-9 rounded-full object-cover" />
+  ) : (
+    <div className="w-9 h-9 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold">
+      {member?.initials || '??'}
+    </div>
+  )}
+  ```
+
+- **상태**: 반영 완료

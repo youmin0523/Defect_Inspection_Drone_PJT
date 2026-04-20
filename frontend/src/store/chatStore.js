@@ -63,11 +63,15 @@ const useChatStore = create((set, get) => ({
     const { activeConversationId } = get()
     if (!activeConversationId || !text.trim()) return
 
+    // authStore에서 프로필 이미지 URL 가져오기
+    const authUser = JSON.parse(localStorage.getItem('user') || '{}')
+
     const msg = await sendMessage({
       conversation_id: activeConversationId,
       sender_id: CURRENT_USER.id,
       sender_name: CURRENT_USER.name,
       sender_initials: CURRENT_USER.initials,
+      sender_profile_image_url: authUser.profile_image_url || null,
       text: text.trim(),
     })
 

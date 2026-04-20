@@ -24,6 +24,9 @@ import SiteManagement from './pages/employee/SiteManagement.jsx'
 import SiteDetail from './pages/employee/SiteDetail.jsx'
 import Analytics from './pages/employee/Analytics.jsx'
 import Chat from './pages/employee/Chat.jsx'
+import AdminMembers from './pages/employee/AdminMembers.jsx'
+import Onboarding from './pages/employee/Onboarding.jsx'
+import OrgRequired from './components/auth/OrgRequired.jsx'
 import FloatingChatButton from './components/chat/FloatingChatButton.jsx'
 
 /** employee 경로에서만 Floating Chat Button 표시 */
@@ -94,20 +97,19 @@ export default function App() {
         {/* OAuth 콜백 (Google / Kakao / Naver) */}
         <Route path="/auth/:provider/callback" element={<OAuthCallback />} />
 
-        {/* //* [Modified Code] 직원 전용 랜딩 — "직원 전용" 버튼 클릭 시 진입하는 허브 */}
-        <Route path="/employee" element={<EmployeeLanding />} />
-        {/* //* [Modified Code] 사전 작업 — CAD/평면도 업로드 → Mock 3D 모델링 → preModelStore 저장 */}
-        <Route path="/employee/pre-work" element={<PreWork />} />
-        {/* //* [Modified Code] 리포트 아카이브 — 사무실 목록 + 재편집 상세 */}
-        <Route path="/employee/reports" element={<ReportsList />} />
-        <Route path="/employee/reports/:id" element={<ReportDetail />} />
-        {/* //* [Modified Code] 현장 관리 — 목록 + 상세 */}
-        <Route path="/employee/sites" element={<SiteManagement />} />
-        <Route path="/employee/sites/:id" element={<SiteDetail />} />
-        {/* //* [Modified Code] 분석·보고서 — 경향보고서 + 주간업무보고서 */}
-        <Route path="/employee/analytics" element={<Analytics />} />
-        {/* //* [Modified Code] 사내 메신저 — Slack/카카오톡 스타일 */}
-        <Route path="/employee/chat" element={<Chat />} />
+        {/* 온보딩 — 미소속 사용자 진입점 */}
+        <Route path="/employee/onboarding" element={<Onboarding />} />
+
+        {/* 직원 전용 랜딩 — 조직 소속 필수 */}
+        <Route path="/employee" element={<OrgRequired><EmployeeLanding /></OrgRequired>} />
+        <Route path="/employee/pre-work" element={<OrgRequired><PreWork /></OrgRequired>} />
+        <Route path="/employee/reports" element={<OrgRequired><ReportsList /></OrgRequired>} />
+        <Route path="/employee/reports/:id" element={<OrgRequired><ReportDetail /></OrgRequired>} />
+        <Route path="/employee/sites" element={<OrgRequired><SiteManagement /></OrgRequired>} />
+        <Route path="/employee/sites/:id" element={<OrgRequired><SiteDetail /></OrgRequired>} />
+        <Route path="/employee/analytics" element={<OrgRequired><Analytics /></OrgRequired>} />
+        <Route path="/employee/chat" element={<OrgRequired><Chat /></OrgRequired>} />
+        <Route path="/employee/admin/members" element={<OrgRequired adminOnly><AdminMembers /></OrgRequired>} />
 
         {/* //* [Modified Code] 세션 워크플로우 (Setup → Level → Modeling) */}
         <Route path="/session" element={<SessionLayout />}>

@@ -13,7 +13,9 @@
 # 테이블명: organizations, organization_members
 # =============================================
 
+import secrets
 import uuid
+
 from sqlalchemy import (
     Column, String, DateTime, Enum as SAEnum, Index, func, ForeignKey,
     UniqueConstraint,
@@ -21,6 +23,12 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import Base
+
+
+def _generate_invite_code(length: int = 8) -> str:
+    """8자리 영숫자 초대 코드 생성 (대문자+숫자, 혼동 문자 제외)"""
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # 0/O, 1/I/L 제외
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 class Organization(Base):
@@ -42,11 +50,21 @@ class Organization(Base):
         comment="사업자등록번호 (10자리, '-' 제외). 개인 조직은 null",
     )
 
+    # 초대 코드 — 미소속 사용자가 이 코드로 조직 가입
+    invite_code = Column(
+        String(8),
+        nullable=False,
+        unique=True,
+        default=_generate_invite_code,
+        comment="8자리 초대 코드 (조직 가입용)",
+    )
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
         Index("idx_org_biz_number", "biz_number"),
+        Index("idx_org_invite_code", "invite_code"),
     )
 
     def __repr__(self):
@@ -93,6 +111,19 @@ class OrganizationMember(Base):
     )
 
     joined_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # ── 계약 기간 관리 ───────────────────────
+    started_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        comment="입사/계약 시작일",
+    )
+    ended_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="퇴사/계약 만료일 (null=재직 중, 과거 날짜=접근 차단)",
+    )
 
     __table_args__ = (
         UniqueConstraint("organization_id", "user_id", name="uq_org_member"),

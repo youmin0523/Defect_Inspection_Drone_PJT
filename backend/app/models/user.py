@@ -9,7 +9,7 @@
 
 import uuid
 from sqlalchemy import (
-    Column, String, DateTime, Enum as SAEnum, Index, func
+    Boolean, Column, String, DateTime, Enum as SAEnum, Index, func
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -55,9 +55,21 @@ class User(Base):
         comment="소셜 제공자 고유 사용자 ID",
     )
 
+    # ── 플랫폼 관리자 ────────────────────────
+    is_superadmin = Column(
+        Boolean, nullable=False, default=False, server_default="false",
+        comment="플랫폼 전체 관리자 여부 (전체 사용자/조직 관리 가능)",
+    )
+
     # ── 개인정보 ─────────────────────────────
     name = Column(String(100), nullable=False, comment="이름 (사업자는 담당자 성명)")
     phone = Column(String(20), nullable=False, comment="휴대폰 번호 (010-0000-0000 포맷)")
+
+    # ── 프로필 이미지 ────────────────────────
+    profile_image_url = Column(
+        String(500), nullable=True,
+        comment="프로필 이미지 경로 (uploads/profiles/UUID.ext)",
+    )
 
     # ── 감사 타임스탬프 ───────────────────────
     created_at = Column(

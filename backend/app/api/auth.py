@@ -8,17 +8,22 @@
 #       - GET  /auth/check-username   → 아이디 중복 확인
 # =============================================
 
+import os
 import secrets
 import string
+import uuid as uuid_mod
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import aiofiles
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password, verify_password
 from app.core.jwt import create_access_token
 from app.services.email_service import send_found_username_email, send_temp_password_email
-from app.dependencies import get_db, get_current_user
+from app.dependencies import get_db, get_current_user_with_org
 from app.models.user import User
 from app.models.business_profile import BusinessProfile
 from app.models.term import Term
@@ -30,12 +35,41 @@ from app.schemas.user import (
     FindIdRequest,
     FindPasswordRequest,
     LoginRequest,
+    OrgBriefResponse,
     TokenResponse,
     UserSignupRequest,
     UserResponse,
 )
 
+PROFILE_UPLOAD_DIR = "./uploads/profiles"
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_PROFILE_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB
+
 router = APIRouter()
+
+
+# ── 내부 헬퍼: 사용자 조직 목록 조회 ─────────
+async def _get_user_orgs(db, user_id):
+    """사용자의 활성 조직 멤버십 → OrgBriefResponse 리스트"""
+    from datetime import datetime, timezone
+    from app.models.organization import Organization, OrganizationMember
+    result = await db.execute(
+        select(OrganizationMember, Organization)
+        .join(Organization, Organization.id == OrganizationMember.organization_id)
+        .where(OrganizationMember.user_id == user_id)
+        .where(OrganizationMember.status == "active")
+        .where(
+            (OrganizationMember.ended_at.is_(None))
+            | (OrganizationMember.ended_at > datetime.now(timezone.utc))
+        )
+    )
+    return [
+        OrgBriefResponse(
+            id=org.id, name=org.name, role=m.role,
+            department=m.department, position=m.position,
+        )
+        for m, org in result
+    ]
 
 
 # ── 내부 헬퍼 ────────────────────────────────
@@ -178,6 +212,7 @@ async def signup(
         username=user.username,
         name=user.name,
         phone=user.phone,
+        profile_image_url=user.profile_image_url,
         created_at=user.created_at,
         business=business_resp,
     )
@@ -202,6 +237,7 @@ async def login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
 
     token = create_access_token(user.id)
+    orgs = await _get_user_orgs(db, user.id)
 
     return TokenResponse(
         access_token=token,
@@ -212,23 +248,188 @@ async def login(
             username=user.username,
             name=user.name,
             phone=user.phone,
+            profile_image_url=user.profile_image_url,
+            is_superadmin=user.is_superadmin,
             created_at=user.created_at,
+            organizations=orgs,
         ),
     )
 
 
 # ── 현재 사용자 조회 ────────────────────────
 @router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)):
-    """Bearer 토큰으로 현재 로그인 사용자 정보 반환."""
+async def get_me(
+    result=Depends(get_current_user_with_org),
+):
+    """Bearer 토큰으로 현재 로그인 사용자 정보 반환 (조직 정보 포함)."""
+    user, memberships = result
+    orgs = [
+        OrgBriefResponse(
+            id=org.id, name=org.name, role=m.role,
+            department=m.department, position=m.position,
+        )
+        for m, org in memberships
+    ] if memberships else []
+
     return UserResponse(
-        id=current_user.id,
-        account_type=current_user.account_type,
-        email=current_user.email,
-        username=current_user.username,
-        name=current_user.name,
-        phone=current_user.phone,
-        created_at=current_user.created_at,
+        id=user.id,
+        account_type=user.account_type,
+        email=user.email,
+        username=user.username,
+        name=user.name,
+        phone=user.phone,
+        profile_image_url=user.profile_image_url,
+        is_superadmin=user.is_superadmin,
+        created_at=user.created_at,
+        organizations=orgs,
+    )
+
+
+# ── 내 정보 수정 ────────────────────────────
+class UpdateMeRequest(BaseModel):
+    """내 정보 수정 요청"""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    phone: Optional[str] = Field(None, pattern=r"^\d{3}-\d{3,4}-\d{4}$")
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    payload: UpdateMeRequest,
+    result=Depends(get_current_user_with_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """현재 사용자 이름/전화번호 수정."""
+    user, memberships = result
+
+    if payload.name is not None:
+        user.name = payload.name
+    if payload.phone is not None:
+        user.phone = payload.phone
+    await db.flush()
+
+    orgs = [
+        OrgBriefResponse(
+            id=org.id, name=org.name, role=m.role,
+            department=m.department, position=m.position,
+        )
+        for m, org in memberships
+    ] if memberships else []
+
+    return UserResponse(
+        id=user.id,
+        account_type=user.account_type,
+        email=user.email,
+        username=user.username,
+        name=user.name,
+        phone=user.phone,
+        profile_image_url=user.profile_image_url,
+        is_superadmin=user.is_superadmin,
+        created_at=user.created_at,
+        organizations=orgs,
+    )
+
+
+# ── 프로필 이미지 업로드 ────────────────────
+@router.put("/me/profile-image", response_model=UserResponse)
+async def upload_profile_image(
+    file: UploadFile = File(...),
+    result=Depends(get_current_user_with_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """프로필 이미지 업로드 (기존 이미지가 있으면 교체)."""
+    user, memberships = result
+
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="허용되지 않는 이미지 형식입니다. (JPEG, PNG, WebP, GIF만 가능)",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_PROFILE_IMAGE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미지 크기는 5MB 이하만 가능합니다.",
+        )
+
+    # 기존 파일 삭제
+    if user.profile_image_url:
+        old_path = user.profile_image_url.lstrip("/")
+        if os.path.exists(old_path):
+            os.remove(old_path)
+
+    # 새 파일 저장
+    os.makedirs(PROFILE_UPLOAD_DIR, exist_ok=True)
+    ext = os.path.splitext(file.filename or "unknown")[1].lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        ext = ".jpg"
+    saved_filename = f"{uuid_mod.uuid4()}{ext}"
+    file_path = os.path.join(PROFILE_UPLOAD_DIR, saved_filename)
+
+    async with aiofiles.open(file_path, "wb") as f:
+        await f.write(content)
+
+    # DB 업데이트 — URL 경로로 저장
+    user.profile_image_url = f"/uploads/profiles/{saved_filename}"
+    await db.flush()
+
+    orgs = [
+        OrgBriefResponse(
+            id=org.id, name=org.name, role=m.role,
+            department=m.department, position=m.position,
+        )
+        for m, org in memberships
+    ] if memberships else []
+
+    return UserResponse(
+        id=user.id,
+        account_type=user.account_type,
+        email=user.email,
+        username=user.username,
+        name=user.name,
+        phone=user.phone,
+        profile_image_url=user.profile_image_url,
+        is_superadmin=user.is_superadmin,
+        created_at=user.created_at,
+        organizations=orgs,
+    )
+
+
+# ── 프로필 이미지 삭제 ────────────────────
+@router.delete("/me/profile-image", response_model=UserResponse)
+async def delete_profile_image(
+    result=Depends(get_current_user_with_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """프로필 이미지 삭제 (이니셜 표시로 복귀)."""
+    user, memberships = result
+
+    if user.profile_image_url:
+        old_path = user.profile_image_url.lstrip("/")
+        if os.path.exists(old_path):
+            os.remove(old_path)
+        user.profile_image_url = None
+        await db.flush()
+
+    orgs = [
+        OrgBriefResponse(
+            id=org.id, name=org.name, role=m.role,
+            department=m.department, position=m.position,
+        )
+        for m, org in memberships
+    ] if memberships else []
+
+    return UserResponse(
+        id=user.id,
+        account_type=user.account_type,
+        email=user.email,
+        username=user.username,
+        name=user.name,
+        phone=user.phone,
+        profile_image_url=user.profile_image_url,
+        is_superadmin=user.is_superadmin,
+        created_at=user.created_at,
+        organizations=orgs,
     )
 
 

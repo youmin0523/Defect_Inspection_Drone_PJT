@@ -11,6 +11,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.db.init_db import init_db
@@ -99,6 +100,11 @@ app.add_middleware(
 
 # ── 라우터 마운트 ─────────────────────────────
 app.include_router(api_router, prefix="/api/v1")
+
+# ── 정적 파일 서빙 (업로드된 프로필 이미지 등) ──
+import os
+os.makedirs("./uploads/profiles", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
 
 
 @app.get("/", tags=["Health"])

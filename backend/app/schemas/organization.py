@@ -26,6 +26,7 @@ class OrganizationResponse(BaseModel):
     id: UUID
     name: str
     biz_number: Optional[str]
+    invite_code: Optional[str] = None
     member_count: int = 0
     created_at: datetime
 
@@ -42,11 +43,14 @@ class OrgMemberResponse(BaseModel):
     user_id: UUID
     name: str
     email: str
+    phone: Optional[str] = None
     initials: str
     role: str             # owner / admin / member
     department: Optional[str]
     position: Optional[str]
     status: str           # active / invited / deactivated
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -75,3 +79,33 @@ class UpdateMemberRequest(BaseModel):
     department: Optional[str] = None
     position: Optional[str] = None
     status: Optional[str] = Field(None, pattern="^(active|deactivated)$")
+    started_at: Optional[datetime] = Field(None, description="입사/계약 시작일")
+    ended_at: Optional[datetime] = Field(None, description="퇴사/계약 만료일")
+
+
+# ── 초대코드 가입 ────────────────────────────
+class JoinByCodeRequest(BaseModel):
+    """초대 코드로 조직 가입"""
+    invite_code: str = Field(..., min_length=8, max_length=8, description="8자리 초대 코드")
+
+
+# ── 사용자 배정 ──────────────────────────────
+class AssignMemberRequest(BaseModel):
+    """미소속 사용자를 조직에 배정"""
+    user_id: UUID = Field(..., description="배정할 사용자 ID")
+    role: str = Field("member", pattern="^(admin|member)$")
+    department: Optional[str] = None
+    position: Optional[str] = None
+
+
+# ── 미소속 사용자 응답 ───────────────────────
+class UnaffiliatedUserResponse(BaseModel):
+    """미소속 사용자 정보"""
+    id: UUID
+    name: str
+    email: str
+    account_type: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

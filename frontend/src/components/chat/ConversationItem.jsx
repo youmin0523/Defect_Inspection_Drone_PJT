@@ -49,9 +49,17 @@ export default function ConversationItem({ conv }) {
       {/* 아바타 */}
       {conv.type === 'dm' ? (
         <div className="relative shrink-0">
-          <div className="w-9 h-9 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold">
-            {otherMember?.initials || '??'}
-          </div>
+          {otherMember?.profile_image_url ? (
+            <img
+              src={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}${otherMember.profile_image_url}`}
+              alt={otherMember.name}
+              className="w-9 h-9 rounded-full object-cover"
+            />
+          ) : (
+            <div className="w-9 h-9 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold">
+              {otherMember?.initials || '??'}
+            </div>
+          )}
           {statusConfig && (
             <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${statusConfig.dot}`} />
           )}
