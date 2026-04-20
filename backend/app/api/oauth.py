@@ -23,13 +23,36 @@ from app.config import settings
 from app.core.jwt import create_access_token
 from app.dependencies import get_db
 from app.models.user import User
-from app.schemas.user import OAuthCallbackRequest, TokenResponse, UserResponse
+from app.schemas.user import OAuthCallbackRequest, OrgBriefResponse, TokenResponse, UserResponse
 
 router = APIRouter()
 
 
 # ── 공통 헬퍼 ────────────────────────────────
-def _build_user_response(user: User) -> UserResponse:
+async def _get_user_orgs(db: AsyncSession, user_id):
+    """사용자의 활성 조직 멤버십 → OrgBriefResponse 리스트"""
+    from datetime import datetime, timezone
+    from app.models.organization import Organization, OrganizationMember
+    result = await db.execute(
+        select(OrganizationMember, Organization)
+        .join(Organization, Organization.id == OrganizationMember.organization_id)
+        .where(OrganizationMember.user_id == user_id)
+        .where(OrganizationMember.status == "active")
+        .where(
+            (OrganizationMember.ended_at.is_(None))
+            | (OrganizationMember.ended_at > datetime.now(timezone.utc))
+        )
+    )
+    return [
+        OrgBriefResponse(
+            id=org.id, name=org.name, role=m.role,
+            department=m.department, position=m.position,
+        )
+        for m, org in result
+    ]
+
+
+def _build_user_response(user: User, orgs=None) -> UserResponse:
     return UserResponse(
         id=user.id,
         account_type=user.account_type,
@@ -37,7 +60,9 @@ def _build_user_response(user: User) -> UserResponse:
         username=user.username,
         name=user.name,
         phone=user.phone,
+        is_superadmin=user.is_superadmin,
         created_at=user.created_at,
+        organizations=orgs or [],
     )
 
 
@@ -122,7 +147,10 @@ async def google_callback(
             },
         )
     if token_resp.status_code != 200:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google 토큰 교환 실패")
+        error_detail = token_resp.json() if token_resp.headers.get("content-type", "").startswith("application/json") else token_resp.text
+        print(f"[OAuth Google] token exchange failed: {token_resp.status_code} / {error_detail}")
+        print(f"[OAuth Google] redirect_uri sent: {payload.redirect_uri}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Google 토큰 교환 실패: {error_detail}")
     token_data = token_resp.json()
     access_token = token_data.get("access_token")
 
@@ -147,7 +175,8 @@ async def google_callback(
 
     # 4) JWT 발급
     token = create_access_token(user.id)
-    return TokenResponse(access_token=token, user=_build_user_response(user))
+    orgs = await _get_user_orgs(db, user.id)
+    return TokenResponse(access_token=token, user=_build_user_response(user, orgs))
 
 
 # ── Kakao OAuth ──────────────────────────────
@@ -196,7 +225,8 @@ async def kakao_callback(
 
     # 4) JWT 발급
     token = create_access_token(user.id)
-    return TokenResponse(access_token=token, user=_build_user_response(user))
+    orgs = await _get_user_orgs(db, user.id)
+    return TokenResponse(access_token=token, user=_build_user_response(user, orgs))
 
 
 # ── Naver OAuth ──────────────────────────────
@@ -243,4 +273,5 @@ async def naver_callback(
 
     # 4) JWT 발급
     token = create_access_token(user.id)
-    return TokenResponse(access_token=token, user=_build_user_response(user))
+    orgs = await _get_user_orgs(db, user.id)
+    return TokenResponse(access_token=token, user=_build_user_response(user, orgs))

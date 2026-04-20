@@ -33,6 +33,7 @@ from app.models.notification import Notification  # noqa: F401
 
 # ── 조직 / 팀 ────────────────────────────────
 from app.models.organization import Organization, OrganizationMember  # noqa: F401
+from app.models.department import Department  # noqa: F401
 
 # ── 메신저 / 채팅 ───────────────────────────
 from app.models.conversation import Conversation  # noqa: F401
@@ -61,6 +62,7 @@ __all__ = [
     # 조직 / 팀
     "Organization",
     "OrganizationMember",
+    "Department",
     # 메신저 / 채팅
     "Conversation",
     "Message",

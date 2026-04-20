@@ -16,6 +16,12 @@ __pycache__/
 *.pyc
 *.pyo
 
+# 업로드 파일 (프로필 이미지, 평면도 등 런타임 생성물)
+backend/uploads/
+
+# 녹화 파일
+backend/recordings/
+
 # Vibe Coding 자동화 (개인 로컬 파일)
 screenshots/
 .vibe_sync_cursor.json

@@ -6,26 +6,45 @@
  *       - 이미지가 없으면 placeholder 텍스트 렌더
  */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 export default function CaseSlideshow({ images, placeholder, interval = 4000, startDelay = 0 }) {
   const [index, setIndex] = useState(0)
+  const timerRef = useRef(null)
+  const cancelledRef = useRef(false)
+
+  const scheduleNext = useCallback(() => {
+    const jitter = interval * (0.7 + Math.random() * 0.6)
+    timerRef.current = setTimeout(() => {
+      if (cancelledRef.current) return
+      setIndex((prev) => (prev + 1) % images.length)
+      scheduleNext()
+    }, jitter)
+  }, [images, interval])
+
+  // 도트 클릭 시 해당 이미지로 즉시 이동 + 타이머 리셋
+  const goTo = useCallback((i) => {
+    clearTimeout(timerRef.current)
+    setIndex(i)
+    scheduleNext()
+  }, [scheduleNext])
 
   useEffect(() => {
     if (!images || images.length <= 1) return
-    let intervalId
-    // 카드별 시작 시점을 어긋나게 하여 여러 카드가 동시에 페이드되지 않도록 함
-    const timeoutId = setTimeout(() => {
+    cancelledRef.current = false
+
+    const startTimerId = setTimeout(() => {
+      if (cancelledRef.current) return
       setIndex((prev) => (prev + 1) % images.length)
-      intervalId = setInterval(() => {
-        setIndex((prev) => (prev + 1) % images.length)
-      }, interval)
+      scheduleNext()
     }, startDelay + interval)
+
     return () => {
-      clearTimeout(timeoutId)
-      if (intervalId) clearInterval(intervalId)
+      cancelledRef.current = true
+      clearTimeout(startTimerId)
+      clearTimeout(timerRef.current)
     }
-  }, [images, interval, startDelay])
+  }, [images, interval, startDelay, scheduleNext])
 
   if (!images || images.length === 0) {
     return (
@@ -51,9 +70,12 @@ export default function CaseSlideshow({ images, placeholder, interval = 4000, st
       {images.length > 1 && (
         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
           {images.map((_, i) => (
-            <span
+            <button
               key={i}
-              className={`h-1.5 rounded-full transition-all duration-500 ${
+              type="button"
+              aria-label={`이미지 ${i + 1}`}
+              onClick={() => goTo(i)}
+              className={`h-1.5 rounded-full transition-all duration-500 cursor-pointer hover:bg-white/80 ${
                 i === index ? 'w-4 bg-white' : 'w-1.5 bg-white/50'
               }`}
             />

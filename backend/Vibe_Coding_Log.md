@@ -255,141 +255,110 @@ users (기존)          ←─── business_profiles (1:1, 기존)
 
 ---
 
-## 📝 세션 추가 정보 (2026-04-20 @Hijin)
+## 6️⃣ 멀티테넌트 조직 기반 권한 체계 구현 (2026-04-20)
 
-- 작성자 (Who): @Hijin554
-- 작성 일자 (When): 2026-04-20
-- 목표 기능 (Objective): 2차 프로젝트 Phase 2 — 학습 완료된 AI 3개 모델을 실제 서빙하는 파이프라인 + `/api/v1/detect` REST + `/api/v1/ws/stream` WebSocket (드롭 큐) 구축
-- 작업 브랜치/환경: `Hijin`
+> **착수 시각**: 2026-04-20 14:00  
+> **작업자**: @youminsu0523  
+> **목표**: 여러 회사/개인에게 배포될 플랫폼이므로, 조직(Organization) 기반 데이터 격리 + 사용자 권한 관리 체계 전면 구축.  
+> **배경**: 기존에는 로그인만 되면 전체 데이터에 접근 가능했음. A회사 사용자가 B회사 데이터를 볼 수 없도록 격리 필요.
 
-### 1️⃣ 초기 프롬프트 (Initial Prompt)
-> AeroInspect 2차 프로젝트 — FastAPI 백엔드 구축 요청(v3). 학습 완료된 YOLOv8s × 2 + ResNet50 × 1 가중치를 실제로 로드·추론하는 파이프라인을 기존 `backend/` 구조에 통합.
+### ⏱ 14:00 | 소셜 로그인 에러 수정 (선행 작업)
+- **문제 1**: `python-jose` 미설치 → 백엔드 기동 불가 → `ModuleNotFoundError: No module named 'jose'`
+  - 해결: `pip install python-jose[cryptography]`
+- **문제 2**: OAuth 이메일 중복 → `IntegrityError: duplicate key (email)=(youminsu0523@gmail.com)`
+  - 원인: `_find_or_create_oauth_user()` 이메일 조회가 case-sensitive → 기존 계정 못 찾고 INSERT 시도
+  - 해결: `func.lower()` 대소문자 무시 조회 + `IntegrityError` catch 후 재조회 (`app/api/oauth.py`)
+- **문제 3**: React 18 Strict Mode 이중 실행 → OAuth 인가 코드 2회 전송 → `invalid_grant`
+  - 해결: `OAuthCallback.jsx` 에 `useRef` guard 추가하여 1회만 실행
 
-### 2️⃣ 계획(Plan) 단계 피드백
+### ⏱ 14:30 | Phase 1 — 백엔드 스키마 + 핵심 의존성
+- **모델 변경**:
+  - `app/models/site.py` — `organization_id` FK 추가 (멀티테넌트 격리 기준)
+  - `app/models/conversation.py` — `organization_id` FK 추가
+  - `app/models/organization.py`:
+    - `Organization` 모델에 `invite_code` (8자리 영숫자, unique) 추가
+    - `OrganizationMember` 모델에 `started_at` (입사일), `ended_at` (퇴사/계약 만료일, nullable) 추가
+- **Alembic 마이그레이션**: `alembic.ini` 한글 인코딩 오류 수정 (cp949→UTF-8) + `env.py` 전체 모델 import + 마이그레이션 생성·적용 완료
+- **핵심 의존성** (`app/dependencies.py`):
+  - `get_current_org_member()` — 현재 사용자의 활성 조직 멤버십 조회. `X-Organization-Id` 헤더로 다중 조직 선택 지원. `ended_at` 만료 체크
+  - `get_current_user_with_org()` — 미소속 사용자도 허용 (soft 버전)
+  - `require_role("owner", "admin")` — 역할 기반 접근 제어 팩토리
 
-- **피드백 1** (통합 vs 신규):
-  > "aeroinspect_backend/ 새로 만들지 말고 기존 backend/ 에 통합해줘. 먼저 기존 구조 꼼꼼히 읽고 delta 계획부터 보여줘."
-  → 해결: 기존 [app/services/yolo_inference.py](app/services/yolo_inference.py), [core/ws_manager.py](app/core/ws_manager.py), [models/defect.py](app/models/defect.py) 등 15개 파일 분석 → 수정/신규/제외 파일 delta 계획서 작성 → 승인 후 구현 진입
+### ⏱ 15:00 | Phase 2 — 백엔드 API 조직 스코핑 (데이터 격리)
+- **Sites API** (`app/api/sites.py`): 모든 CRUD에 `Depends(get_current_org_member)` 적용. `list`: `WHERE organization_id = org.id`, `create`: 자동 `organization_id` 설정
+- **Defects API** (`app/api/defects.py`): `DefectLog → Site JOIN → Site.organization_id` 경유 필터링. summary/list/get 모두 적용
+- **Reports API** (`app/api/report.py`): `Report → Site JOIN → Site.organization_id` 경유 필터링. save/list/get/download/delete 모두 적용
+- **Chat API** (`app/api/chat.py`): 대화 생성 시 `organization_id` 자동 설정 + 참여자 같은 조직 검증. 목록 조회 시 `Conversation.organization_id == org.id` 필터
 
-- **피드백 2** (bbox 좌표 정책):
-  > "API 응답은 bbox_xyxy(픽셀) 유지. DB 저장 시에만 xywhn 변환. 이미지 W/H가 필요하니 프레임 shape을 결과에 같이 실어서 내려줘."
-  → 해결: `DetectionResult.image_shape: {width, height}` 필드 추가, `xyxy_to_xywhn(xyxy, w, h)` 헬퍼 별도 함수로 분리 → [tests/test_inference_pipeline.py](tests/test_inference_pipeline.py) 회귀 테스트 5건
+### ⏱ 15:30 | Phase 2 — 인증 응답 확장 + 조직 관리 API
+- **인증 응답에 조직 정보 포함**:
+  - `app/schemas/user.py` — `OrgBriefResponse` (id, name, role, department, position) 스키마 추가, `UserResponse.organizations` 필드 추가
+  - `app/api/auth.py` — `/me`, `login` 응답에 사용자 조직 목록 포함
+  - `app/api/oauth.py` — Google/Kakao/Naver 3종 OAuth 응답에도 조직 목록 포함
+  - `PATCH /auth/me` — 사용자 이름/전화번호 수정 엔드포인트 추가
+- **조직 관리 API 확장** (`app/api/organization.py`):
+  - `GET /organizations/unaffiliated-users` — 미소속 사용자 목록 (admin/owner 전용)
+  - `POST /organizations/members/assign` — 미소속 사용자 조직 배정 (admin/owner 전용)
+  - `POST /organizations/join` — 초대 코드로 조직 가입
+  - `PATCH /organizations/members/{user_id}` — 입사일/퇴사일 설정 지원, 퇴사일 경과 시 자동 비활성 처리
 
-- **피드백 3** (shim 패턴):
-  > "모델 로드는 절대 중복 금지 — inference_pipeline.service가 유일한 싱글톤. yolo_inference.yolo_service는 내부적으로 참조만 해."
-  → 해결: [yolo_inference.py](app/services/yolo_inference.py) 를 40줄 shim으로 재작성. 기존 호출자([defect_processor.py](app/services/defect_processor.py), [dependencies.py](app/dependencies.py)) 무수정으로 호환
+### 🔗 신규/변경 API 엔드포인트
+| 메서드 | 경로 | 역할 |
+|--------|------|------|
+| PATCH | `/api/v1/auth/me` | 내 정보 수정 (이름/전화번호) |
+| GET | `/api/v1/organizations/unaffiliated-users` | 미소속 사용자 목록 |
+| POST | `/api/v1/organizations/members/assign` | 미소속 사용자 배정 |
+| POST | `/api/v1/organizations/join` | 초대코드 가입 |
 
-- **피드백 4** (WS 이중 브로드캐스트):
-  > "신규 /ws/stream 탐지 결과는 기존 ws_manager.broadcast('defects', ...)로도 Push해줘. 두 WS 채널 분리돼 있지만 결과는 양쪽 다 흐르게."
-  → 해결: [core/stream_inference.py](app/core/stream_inference.py) 에서 `stream` 채널(신규 포맷) + `defects` 채널(레거시 `defect.new` 이벤트) 동시 브로드캐스트
+### 📐 설계 결정 사항
+- **데이터 격리 방식**: Site에 `organization_id` FK 직접 부여. Defect/Report는 Site FK 경유 간접 필터링 (스키마 최소 변경)
+- **다중 조직 허용**: 한 사용자가 여러 조직에 소속 가능 (프리랜서/컨설턴트 시나리오)
+- **계약 관리**: `started_at`/`ended_at`으로 입사·퇴사 관리, 퇴사일 경과 시 자동 비활성
+- **온보딩 플로우**: Slack/Notion/Jira 패턴 → "조직 생성 / 초대코드 가입 / 관리자 배정 대기" 3가지 선택지
 
-- **피드백 5** (Alembic 베이스라인):
-  > "0001_baseline.py 수동 작성은 기존 스키마와 drift 날 위험. 0002만 새로 작성하고 첫 배포 때 alembic stamp head 돌리는 절차로."
-  → 해결: [alembic/versions/0002_defect_class_display.py](alembic/versions/0002_defect_class_display.py) 하나만 생성 (`down_revision=None`). README에 `alembic stamp 0002_defect_class_display` 절차 명시
+---
 
-### 3️⃣ 구현 핵심 아키텍처
+## 7️⃣ 프로필 이미지 업로드 기능 구현 (2026-04-20)
 
-#### 3-모델 추론 파이프라인 (싱글톤)
-```
-InferencePipeline.load_models()
-  ├── YOLO(yolov8s_crack_moisture_best.pt)   — Crack, Moisture (nc=2)
-  ├── YOLO(yolov8s_delamination_best.pt)     — delamination (nc=1)
-  └── ResNet50(resnet50_wallpaper_best.pt)   — 19 classes (good=Burst 포함)
-```
-- 체크포인트 `class_names` 리스트를 하드코딩 `WALLPAPER_CLASSES`와 `assert` 검증 — 학습·서빙 클래스 순서 미스매치 사전 차단
-- 입력 타입 4종 지원: `bytes / numpy.ndarray / PIL.Image / str(경로)`
-- 블로킹 추론은 전부 `asyncio.to_thread()` 로 스레드 풀 위임
+> **착수 시각**: 2026-04-20 22:00  
+> **작업자**: @youminsu0523  
+> **목표**: 사용자 프로필 이미지 업로드/삭제 기능. 회사 특성상 팀원 얼굴 인식이 필요하므로 이니셜 아바타 → 실제 사진 전환 지원. 채팅에서도 프로필 이미지 표시.
 
-#### ⚠️ `good` 클래스 특수 처리
-데이터셋 폴더명이 `good`으로 지어졌으나 실제 내용은 "터짐(Burst)" 하자 이미지. 가중치에 baked-in 되어 있어 내부명은 유지하되:
-```python
-CLASS_DISPLAY_MAP = {
-    ...
-    "good": ("Burst", "터짐"),  # ⚠️ 실제 의미는 '터짐'
-}
-WALLPAPER_SEVERE_CLASSES = {"Mold", "Damage", "Exploded", "Defective_Joint", "good"}
-# → severity MED로 격상 (LOW 아님)
-```
-"정상=하자없음"으로 필터링하는 로직은 코드 어디에도 넣지 않음.
+### ⏱ 22:00 | User 모델 + 스키마 확장
 
-#### severity 자동 계산 규칙 ([inference_pipeline.py](app/services/inference_pipeline.py))
-```
-yolo_thermal/delam 탐지 있음               → HIGH
-벽지 is_confident & top1 ∈ SEVERE classes  → MED
-벽지 is_confident & 그 외                   → LOW
-그 외 (신뢰도 부족)                         → null (판단 보류)
-```
+- **피드백**: "내 정보 수정에서 프로필 이미지를 변경할 수 있게 해줘. 현재는 이름의 앞 두글자를 띄우지만, 회사 특성상 얼굴을 알아야 하는 경우가 있기 때문에 프로필 사진을 넣을 수 있게 해줘. 프로필 사진은 채팅에서도 표현되어야 해."
+- **수정 파일**:
+  - `app/models/user.py` — `profile_image_url` 컬럼 추가 (String 500, nullable). 업로드된 이미지의 서버 내 경로 저장
+  - `app/schemas/user.py` — `UserResponse`에 `profile_image_url: Optional[str] = None` 필드 추가
 
-#### WebSocket 드롭 큐 + 프레임 스킵 ([core/stream_inference.py](app/core/stream_inference.py))
-드론 IRC-256CA 스트림(15~30 fps) vs CPU/GPU 추론(80~150 ms/frame) 불일치 → 모든 프레임 처리 불가. 다음 패턴으로 해결:
-```python
-self._queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+### ⏱ 22:10 | 프로필 이미지 업로드/삭제 API
 
-def submit(frame):
-    if self._submitted_count % FRAME_SKIP != 0: return  # 3프레임 중 1개만
-    try: self._queue.put_nowait(QueuedFrame(frame, ...))
-    except asyncio.QueueFull: self._dropped_count += 1   # 바쁘면 그냥 버림
-```
-워커 태스크는 별도 `asyncio.create_task`로 영구 실행, main.py lifespan에서 `start()/stop()`.
+- **수정 파일**: `app/api/auth.py`
+  - `PUT /auth/me/profile-image` — 프로필 이미지 업로드. `UploadFile` 수신 → content-type 검증(JPEG/PNG/WebP/GIF) → 5MB 크기 제한 → UUID 파일명으로 `./uploads/profiles/` 저장 → 기존 파일 삭제 → DB `profile_image_url` 갱신
+  - `DELETE /auth/me/profile-image` — 프로필 이미지 삭제. 파일시스템 파일 제거 + DB null 처리
+  - 기존 `signup`, `login`, `get_me`, `update_me` 응답에 `profile_image_url` 포함하도록 갱신
+- **파일 업로드 패턴**: 기존 `floorplan.py` 패턴 참고 — `aiofiles` 비동기 파일 쓰기, `uuid` 파일명, 확장자 화이트리스트
 
-#### DB 스키마 확장 ([models/defect.py](app/models/defect.py), [alembic/versions/0002_defect_class_display.py](alembic/versions/0002_defect_class_display.py))
-기존 `defect_logs` 스키마 유지하면서 4컬럼 추가 + 레거시 A-E 컬럼 NULLABLE 완화:
-```
-+ defect_source ENUM('yolo_thermal','yolo_delam','wallpaper')
-+ defect_class VARCHAR(50)                 -- 모델 내부명 (예: 'good', 'Crack')
-+ defect_class_display_en VARCHAR(80)      -- 프론트용 (예: 'Burst')
-+ defect_class_display_ko VARCHAR(80)      -- 프론트용 (예: '터짐')
-~ area/category_code/defect_type: NOT NULL → NULLABLE  (신규 클래스 중 A-E 매핑 없는 케이스 대비)
-```
+### ⏱ 22:15 | 정적 파일 서빙 + DB 마이그레이션
 
-### 4️⃣ 신규/수정 파일 목록
+- **수정 파일**: `app/main.py` — `FastAPI.mount("/uploads", StaticFiles(...))` 추가. 업로드된 프로필 이미지를 `/uploads/profiles/{filename}` 경로로 HTTP 제공
+- **신규 파일**: `alembic/versions/b3f1a2c4e5d6_add_profile_image_url_to_users.py` — `users.profile_image_url` 컬럼 추가 마이그레이션
 
-**신규 (11개)**:
-- [app/schemas/detection.py](app/schemas/detection.py) — `DetectionResult`, `YoloDetection`, `WallpaperPrediction`, `HealthResponse` Pydantic 스키마
-- [app/services/defect_taxonomy.py](app/services/defect_taxonomy.py) — `WALLPAPER_CLASSES`(19), `CLASS_DISPLAY_MAP`, `YOLO_DISPLAY_MAP`, `LEGACY_MAP_THERMAL/WALLPAPER`, `map_to_legacy()`, `xyxy_to_xywhn()`
-- [app/services/wallpaper_classifier.py](app/services/wallpaper_classifier.py) — ResNet50 19-class. 체크포인트 `class_names` assert 검증. top1+top3 softmax
-- [app/services/inference_pipeline.py](app/services/inference_pipeline.py) — 싱글톤 오케스트레이터. `detect_defects()`, `detect_defects_async()`, `detect_defects_legacy()` shim용
-- [app/core/stream_inference.py](app/core/stream_inference.py) — 드롭 큐 워커 + `stream`/`defects` 양방향 브로드캐스트
-- [app/api/detect.py](app/api/detect.py) — `POST /api/v1/detect` multipart 단건, `POST /api/v1/detect/batch` 최대 10장
-- [app/api/ws_stream.py](app/api/ws_stream.py) — `WS /api/v1/ws/stream` 바이너리 JPEG 수신 + `asyncio.to_thread(cv2.imdecode)`
-- [alembic/versions/0002_defect_class_display.py](alembic/versions/0002_defect_class_display.py) — 4컬럼 추가 + NULLABLE 완화 마이그레이션
-- [tests/test_inference_pipeline.py](tests/test_inference_pipeline.py) — 18개 테스트 (xyxy→xywhn 5, taxonomy 8, /health & /detect 5)
-- [pytest.ini](pytest.ini) — `asyncio_mode=auto`
-- [README.md](README.md) — 3-모델 표, WebSocket 프로토콜, React 예제, 마이그레이션 절차, **동작 확인 체크리스트**
+### ⏱ 22:20 | 마이그레이션 적용 및 오류 해결
 
-**수정 (10개)**:
-- [app/services/yolo_inference.py](app/services/yolo_inference.py) — **전체 재작성**: 40줄 shim (`pipeline.load_models()` 위임, `detect_defects_legacy()` 반환)
-- [app/config.py](app/config.py) — `AEROINSPECT_WEIGHTS_DIR`, `YOLO_THERMAL_WEIGHTS`, `YOLO_DELAM_WEIGHTS`, `WALLPAPER_WEIGHTS`, `YOLO_CONF_THRESHOLD=0.25`, `WALLPAPER_CONF_THRESHOLD=0.4`, `FRAME_SKIP=3`, `DEVICE=auto` 추가
-- [.env.example](.env.example), [.env](.env) — 위 키 전부 반영
-- [app/models/defect.py](app/models/defect.py) — 4 컬럼 추가, 레거시 컬럼 NULLABLE
-- [app/schemas/defect.py](app/schemas/defect.py) — `DefectLogCreate/Response`에 4 필드 + 레거시 A-E Optional화
-- [app/api/defects.py](app/api/defects.py) — `GET /api/v1/defects/recent` 추가, `POST /defects`에 4 필드 DB 저장
-- [app/api/ai_webhook.py](app/api/ai_webhook.py) — 웹훅도 4 필드 저장
-- [app/api/router.py](app/api/router.py) — `detect`, `ws_stream` 라우터 등록
-- [app/main.py](app/main.py) — lifespan에 `stream_inference_worker.start()/stop()` + `/health` 확장 (`device/models_loaded/wallpaper_classes_count/stream_worker_running/frame_skip`)
-- [requirements.txt](requirements.txt) — `torch>=2.1`, `ultralytics>=8.3.0` 핀 + `pytest`, `pytest-asyncio`
-- [alembic.ini](alembic.ini), [alembic/env.py](alembic/env.py) — Python 3.14 cp949 로케일 이슈 대응: 한글 주석 제거 + `sys.path` 수동 삽입
+- **문제**: User 모델에 `profile_image_url` 컬럼 추가 후 서버 재시작 시, SQLAlchemy가 `SELECT users.profile_image_url`을 시도하지만 DB에 해당 컬럼 미존재 → 모든 인증 관련 쿼리 실패 (멤버 관리 페이지 "데이터를 불러오지 못했습니다" 에러)
+- **원인**: `Base.metadata.create_all()`은 새 테이블만 생성하고 기존 테이블에 컬럼을 추가하지 않음
+- **해결**: `PYTHONPATH=. alembic upgrade head` 실행 → `a957fb9970a3 → b3f1a2c4e5d6` 마이그레이션 성공 적용
 
-### 5️⃣ 실제 검증 결과
+### 🔗 신규 API 엔드포인트
+| 메서드 | 경로 | 역할 |
+|--------|------|------|
+| PUT | `/api/v1/auth/me/profile-image` | 프로필 이미지 업로드 (교체) |
+| DELETE | `/api/v1/auth/me/profile-image` | 프로필 이미지 삭제 |
 
-- **pytest**: 18/18 통과 (`good=Burst` 매핑, xyxy→xywhn 회귀 등 전부)
-- **서버 기동 로그**:
-  ```
-  [Pipeline] YOLO thermal 로드: yolov8s_crack_moisture_best.pt
-  [Pipeline] YOLO delam 로드:   yolov8s_delamination_best.pt
-  [Wallpaper] ResNet50 로드 완료: device=cpu, val_acc=0.5434, classes=19
-  [Pipeline] 3-모델 로드 완료
-  [StreamInfer] 워커 시작 (frame_skip=3)
-  ```
-- **`/health`** 응답: `models_loaded` 3개 전부 `true`, `wallpaper_classes_count=19`, `stream_worker_running=true`
-- **`/api/v1/detect`** 실제 이미지 업로드 테스트 (Roboflow 샘플):
-  ```
-  top1: Damage (훼손) / conf 97.97% / severity=MED / has_defect=true
-  ```
-  → 클래스 표시명 매핑, severity 격상 규칙, image_shape 기록 모두 정상
-
-### 📋 잔여 한계 / 향후 작업 (추가분)
-- **GPU 추론**: 현재 T4 없이 CPU로 돌려 한 장당 5~15초. 프로덕션 배포 시 GPU 인스턴스 + `DEVICE=cuda` 로 전환 필요
-- **싱글 워커 제한**: `stream_inference_worker`는 프로세스 내 싱글톤이라 gunicorn multi-worker 구동 불가. 다중 워커 필요 시 Redis pub/sub 기반 리팩터
-- **드론 좌표**: MAVLink/LiDAR 연동 전이라 `lidar_x/y/z`는 당분간 NULL. TF 연동 완료 후 기존 컬럼에 채울 예정
-- **벽지 분류 정확도 0.54**: `WALLPAPER_CONF_THRESHOLD=0.4`로 보수 필터링. 데이터 추가 수집 후 fine-tuning 필요
+### 📐 설계 결정 사항
+- **저장 방식**: 로컬 파일시스템 (`./uploads/profiles/`) + StaticFiles 서빙. 운영 배포 시 Cloudflare R2 presigned URL로 전환 예정 (기존 `project_file_storage_r2.md` 메모리 참조)
+- **파일명 전략**: UUID v4 + 원본 확장자. 중복/충돌 방지 + URL 추측 불가
+- **기존 파일 정리**: 새 이미지 업로드 시 이전 파일 자동 삭제 (디스크 낭비 방지)
+- **크기 제한**: 5MB. 프로필 사진 용도로 충분, 서버 부담 최소화
+>>>>>>> Stashed changes

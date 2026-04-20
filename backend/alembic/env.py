@@ -31,7 +31,7 @@ if config.config_file_name is not None:
 
 # ── 모델 임포트 (autogenerate를 위해 모든 모델 등록) ──
 from app.db.base import Base
-from app.models import defect  # noqa: F401
+from app.models import *  # noqa: F401, F403
 
 target_metadata = Base.metadata
 

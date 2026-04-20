@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
+from app.dependencies import get_db, get_current_org_member
 from app.models.site import Site
 from app.schemas.site import (
     SiteCreate,
@@ -35,10 +35,12 @@ async def list_sites(
     search: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    org_tuple=Depends(get_current_org_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """현장 목록 조회 (필터링 + 페이지네이션)"""
-    query = select(Site)
+    """현장 목록 조회 (소속 조직 한정, 필터링 + 페이지네이션)"""
+    user, member, org = org_tuple
+    query = select(Site).where(Site.organization_id == org.id)
 
     if status_filter:
         query = query.where(Site.status == status_filter)
@@ -67,9 +69,16 @@ async def list_sites(
 
 
 @router.get("/{site_id}", response_model=SiteResponse)
-async def get_site(site_id: UUID, db: AsyncSession = Depends(get_db)):
-    """단건 조회"""
-    result = await db.execute(select(Site).where(Site.id == site_id))
+async def get_site(
+    site_id: UUID,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """단건 조회 (소속 조직 검증)"""
+    user, member, org = org_tuple
+    result = await db.execute(
+        select(Site).where(Site.id == site_id, Site.organization_id == org.id)
+    )
     site = result.scalar_one_or_none()
     if not site:
         raise HTTPException(status_code=404, detail="현장을 찾을 수 없습니다.")
@@ -77,8 +86,13 @@ async def get_site(site_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/", response_model=SiteResponse, status_code=status.HTTP_201_CREATED)
-async def create_site(body: SiteCreate, db: AsyncSession = Depends(get_db)):
-    """새 현장 등록"""
+async def create_site(
+    body: SiteCreate,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """새 현장 등록 (소속 조직에 자동 배정)"""
+    user, member, org = org_tuple
     site = Site(
         name=body.name,
         address=body.address,
@@ -94,6 +108,8 @@ async def create_site(body: SiteCreate, db: AsyncSession = Depends(get_db)):
         status=body.status,
         assigned_members=[m.model_dump() for m in body.assigned_members] if body.assigned_members else [],
         memo=body.memo,
+        organization_id=org.id,
+        created_by=user.id,
     )
     db.add(site)
     await db.commit()
@@ -102,9 +118,17 @@ async def create_site(body: SiteCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/{site_id}", response_model=SiteResponse)
-async def update_site(site_id: UUID, body: SiteUpdate, db: AsyncSession = Depends(get_db)):
-    """부분 업데이트"""
-    result = await db.execute(select(Site).where(Site.id == site_id))
+async def update_site(
+    site_id: UUID,
+    body: SiteUpdate,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """부분 업데이트 (소속 조직 검증)"""
+    user, member, org = org_tuple
+    result = await db.execute(
+        select(Site).where(Site.id == site_id, Site.organization_id == org.id)
+    )
     site = result.scalar_one_or_none()
     if not site:
         raise HTTPException(status_code=404, detail="현장을 찾을 수 없습니다.")
@@ -125,9 +149,16 @@ async def update_site(site_id: UUID, body: SiteUpdate, db: AsyncSession = Depend
 
 
 @router.delete("/{site_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_site(site_id: UUID, db: AsyncSession = Depends(get_db)):
-    """삭제"""
-    result = await db.execute(select(Site).where(Site.id == site_id))
+async def delete_site(
+    site_id: UUID,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """삭제 (소속 조직 검증)"""
+    user, member, org = org_tuple
+    result = await db.execute(
+        select(Site).where(Site.id == site_id, Site.organization_id == org.id)
+    )
     site = result.scalar_one_or_none()
     if not site:
         raise HTTPException(status_code=404, detail="현장을 찾을 수 없습니다.")

@@ -131,7 +131,7 @@ export async function getMessages(conversationId) {
 }
 
 /** POST /api/v1/chat/conversations/{id}/messages */
-export async function sendMessage({ conversation_id, sender_id, sender_name, sender_initials, text }) {
+export async function sendMessage({ conversation_id, sender_id, sender_name, sender_initials, sender_profile_image_url, text }) {
   await simulateLatency()
   ensureSeeded()
 
@@ -142,6 +142,7 @@ export async function sendMessage({ conversation_id, sender_id, sender_name, sen
     sender_id,
     sender_name,
     sender_initials,
+    sender_profile_image_url: sender_profile_image_url || null,
     text,
     created_at: now,
     is_read: true,

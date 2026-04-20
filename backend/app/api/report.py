@@ -17,8 +17,9 @@ from fastapi.responses import StreamingResponse, Response
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
+from app.dependencies import get_db, get_current_org_member
 from app.models.report import Report
+from app.models.site import Site
 from app.schemas.report import (
     ReportRequest,
     ReportResponse,
@@ -83,10 +84,21 @@ async def preview_report(
 @router.post("/save", response_model=ReportSavedResponse, status_code=201)
 async def save_report(
     payload: ReportSaveRequest,
+    org_tuple=Depends(get_current_org_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """생성된 보고서를 DB에 저장"""
+    """생성된 보고서를 DB에 저장 (site_id 조직 검증)"""
+    user, member, org = org_tuple
+    # site_id가 있으면 소속 조직 검증
+    if payload.site_id:
+        site = await db.scalar(
+            select(Site.id).where(Site.id == payload.site_id, Site.organization_id == org.id)
+        )
+        if not site:
+            raise HTTPException(status_code=404, detail="해당 현장을 찾을 수 없습니다.")
+
     report = Report(
+        site_id=payload.site_id,
         title=payload.title,
         building_name=payload.building_name,
         inspector_name=payload.inspector_name,
@@ -103,11 +115,20 @@ async def save_report(
 
 
 @router.get("", response_model=ReportListResponse)
-async def list_reports(db: AsyncSession = Depends(get_db)):
-    """저장된 보고서 목록 조회 (최신순)"""
-    total = await db.scalar(select(func.count()).select_from(Report))
+async def list_reports(
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """저장된 보고서 목록 조회 (소속 조직 한정, 최신순)"""
+    user, member, org = org_tuple
+    org_filter = Report.site_id.in_(
+        select(Site.id).where(Site.organization_id == org.id)
+    )
+    total = await db.scalar(
+        select(func.count()).select_from(select(Report).where(org_filter).subquery())
+    )
     result = await db.execute(
-        select(Report).order_by(desc(Report.created_at))
+        select(Report).where(org_filter).order_by(desc(Report.created_at))
     )
     items = result.scalars().all()
     return ReportListResponse(
@@ -117,9 +138,21 @@ async def list_reports(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{report_id}", response_model=ReportSavedResponse)
-async def get_report(report_id: UUID, db: AsyncSession = Depends(get_db)):
-    """보고서 단건 조회"""
-    result = await db.execute(select(Report).where(Report.id == report_id))
+async def get_report(
+    report_id: UUID,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """보고서 단건 조회 (소속 조직 검증)"""
+    user, member, org = org_tuple
+    result = await db.execute(
+        select(Report).where(
+            Report.id == report_id,
+            Report.site_id.in_(
+                select(Site.id).where(Site.organization_id == org.id)
+            ),
+        )
+    )
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="보고서를 찾을 수 없습니다.")
@@ -127,9 +160,21 @@ async def get_report(report_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{report_id}/download")
-async def download_report(report_id: UUID, db: AsyncSession = Depends(get_db)):
-    """보고서 마크다운 파일 다운로드"""
-    result = await db.execute(select(Report).where(Report.id == report_id))
+async def download_report(
+    report_id: UUID,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """보고서 마크다운 파일 다운로드 (소속 조직 검증)"""
+    user, member, org = org_tuple
+    result = await db.execute(
+        select(Report).where(
+            Report.id == report_id,
+            Report.site_id.in_(
+                select(Site.id).where(Site.organization_id == org.id)
+            ),
+        )
+    )
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="보고서를 찾을 수 없습니다.")
@@ -143,9 +188,21 @@ async def download_report(report_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{report_id}", status_code=204)
-async def delete_report(report_id: UUID, db: AsyncSession = Depends(get_db)):
-    """보고서 삭제"""
-    result = await db.execute(select(Report).where(Report.id == report_id))
+async def delete_report(
+    report_id: UUID,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """보고서 삭제 (소속 조직 검증)"""
+    user, member, org = org_tuple
+    result = await db.execute(
+        select(Report).where(
+            Report.id == report_id,
+            Report.site_id.in_(
+                select(Site.id).where(Site.organization_id == org.id)
+            ),
+        )
+    )
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="보고서를 찾을 수 없습니다.")

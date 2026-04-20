@@ -39,9 +39,17 @@ export default function MessageBubble({ message, showAvatar }) {
     <div className="flex gap-2 mb-1 px-4">
       {/* 아바타 (연속 메시지면 빈 공간) */}
       {showAvatar ? (
-        <div className="w-9 h-9 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
-          {message.sender_initials}
-        </div>
+        message.sender_profile_image_url ? (
+          <img
+            src={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}${message.sender_profile_image_url}`}
+            alt={message.sender_name}
+            className="w-9 h-9 rounded-full object-cover shrink-0 mt-0.5"
+          />
+        ) : (
+          <div className="w-9 h-9 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+            {message.sender_initials}
+          </div>
+        )
       ) : (
         <div className="w-9 shrink-0" />
       )}

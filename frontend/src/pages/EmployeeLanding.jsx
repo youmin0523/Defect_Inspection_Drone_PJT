@@ -17,8 +17,8 @@
  *     → DB 연결 시 MOCK_* 상수를 각 API 훅 호출로 교체 (키·타입 동일하게 유지)
  */
 
-import { useEffect, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -26,19 +26,23 @@ import {
   Bell,
   Building,
   Calendar,
+  Camera,
   CheckCircle,
   Clock,
   FileText,
   LogOut,
   MapPin,
   Play,
+  Trash2,
   TrendingUp,
   Upload,
   UserCheck,
   Users,
   Activity,
   MessageSquare,
+  Shield,
 } from 'lucide-react'
+import useAuthStore from '../store/authStore.js'
 import useDefectStore from '../store/defectStore.js'
 import useDroneStore from '../store/droneStore.js'
 import useSessionStore from '../store/sessionStore.js'
@@ -190,10 +194,36 @@ export default function EmployeeLanding() {
    ────────────────────────────────────────────────────────────── */
 
 function EmployeeHeader({ operatorName }) {
-  const displayName = operatorName || '게스트'
-  const initials = (operatorName?.slice(0, 2) || 'GU').toUpperCase()
+  const navigate = useNavigate()
+  const logout = useAuthStore((s) => s.logout)
+  const token = useAuthStore((s) => s.token)
+  const currentOrg = useAuthStore((s) => s.currentOrg)
+  const user = useAuthStore((s) => s.user)
+  const displayName = user?.name || operatorName || '게스트'
+  const initials = (displayName?.slice(0, 2) || 'GU').toUpperCase()
   const { unreadCount, toggleDropdown } = useNotificationStore()
   const chatUnread = useChatStore((s) => s.unreadTotal)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [editProfileOpen, setEditProfileOpen] = useState(false)
+  const profileRef = useRef(null)
+
+  const isAdmin = currentOrg && ['owner', 'admin'].includes(currentOrg.role)
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login', { replace: true })
+  }
+
+  // 외부 클릭 시 드롭다운 닫기
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (profileRef.current && !profileRef.current.contains(e.target)) {
+        setProfileOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   return (
     <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-sm">
@@ -251,28 +281,338 @@ function EmployeeHeader({ operatorName }) {
             </button>
             <NotificationDropdown theme="light" />
           </div>
-          <div className="hidden md:flex items-center gap-3 pl-3 border-l border-gray-200">
-            <div className="text-right leading-tight">
-              <p className="text-sm font-bold text-slate-800">{displayName}</p>
-              <p className="text-[11px] text-gray-500">안전진단 1팀</p>
-            </div>
-            <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shadow">
-              {initials}
-            </div>
+          {/* 프로필 드롭다운 */}
+          <div className="relative pl-3 border-l border-gray-200" ref={profileRef}>
+            <button
+              type="button"
+              onClick={() => setProfileOpen((v) => !v)}
+              className="flex items-center gap-3 hover:opacity-80 transition focus:outline-none"
+            >
+              <div className="hidden md:block text-right leading-tight">
+                <p className="text-sm font-bold text-slate-800">{displayName}</p>
+                <p className="text-[11px] text-gray-500">
+                  {currentOrg ? currentOrg.name : '소속 없음'}
+                </p>
+              </div>
+              {user?.profile_image_url ? (
+                <img
+                  src={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}${user.profile_image_url}`}
+                  alt="프로필"
+                  className="w-9 h-9 rounded-full object-cover shadow cursor-pointer"
+                />
+              ) : (
+                <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shadow cursor-pointer">
+                  {initials}
+                </div>
+              )}
+            </button>
+
+            {profileOpen && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-50">
+                {/* 사용자 정보 */}
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <p className="font-semibold text-slate-900 text-sm">{displayName}</p>
+                  <p className="text-xs text-gray-500 truncate">{user?.email}</p>
+                  {currentOrg && (
+                    <span className={`inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                      currentOrg.role === 'owner' ? 'bg-amber-100 text-amber-700' :
+                      currentOrg.role === 'admin' ? 'bg-blue-100 text-blue-700' :
+                      'bg-gray-100 text-gray-600'
+                    }`}>
+                      {currentOrg.role === 'owner' ? '소유자' : currentOrg.role === 'admin' ? '관리자' : '멤버'}
+                      {currentOrg.department ? ` · ${currentOrg.department}` : ''}
+                    </span>
+                  )}
+                </div>
+
+                {/* 메뉴 항목 */}
+                <div className="py-1">
+                  <button
+                    onClick={() => { setProfileOpen(false); setEditProfileOpen(true) }}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition"
+                  >
+                    <UserCheck size={16} className="text-gray-400" />
+                    내 정보 수정
+                  </button>
+
+                  {isAdmin && (
+                    <button
+                      onClick={() => { setProfileOpen(false); navigate('/employee/admin/members') }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition"
+                    >
+                      <Users size={16} className="text-gray-400" />
+                      멤버 관리
+                    </button>
+                  )}
+                </div>
+
+                {/* 로그아웃 */}
+                <div className="border-t border-gray-100 pt-1">
+                  <button
+                    onClick={() => { setProfileOpen(false); handleLogout() }}
+                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition"
+                  >
+                    <LogOut size={16} className="text-red-400" />
+                    로그아웃
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-          <button
-            type="button"
-            className="p-2 rounded-full hover:bg-gray-100 transition focus:outline-none focus:ring-2 focus:ring-blue-400"
-            aria-label="로그아웃"
-            title="로그아웃 (세션 연동 전 임시 버튼)"
-          >
-            <LogOut size={18} className="text-gray-500" />
-          </button>
         </div>
       </div>
+
+      {/* 내 정보 수정 모달 */}
+      {editProfileOpen && (
+        <EditProfileModal user={user} token={token} onClose={() => setEditProfileOpen(false)} />
+      )}
     </header>
   )
 }
+
+
+/* ──────────────────────────────────────────────────────────────
+   1-1. 내 정보 수정 모달
+   ────────────────────────────────────────────────────────────── */
+
+function EditProfileModal({ user, token, onClose }) {
+  const setAuth = useAuthStore((s) => s.setAuth)
+  const [form, setForm] = useState({
+    name: user?.name || '',
+    phone: user?.phone || '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [imageLoading, setImageLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
+  const fileInputRef = useRef(null)
+
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+  const initials = (user?.name?.slice(0, 2) || 'GU').toUpperCase()
+
+  // 프로필 이미지 업로드
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      setError('이미지 파일만 업로드할 수 있습니다.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('이미지 크기는 5MB 이하만 가능합니다.')
+      return
+    }
+
+    setImageLoading(true)
+    setError('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch(`${API_BASE}/api/v1/auth/me/profile-image`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || '이미지 업로드에 실패했습니다.')
+      }
+      const updated = await res.json()
+      setAuth(token, updated)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setImageLoading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  // 프로필 이미지 삭제
+  const handleImageDelete = async () => {
+    setImageLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/me/profile-image`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || '이미지 삭제에 실패했습니다.')
+      }
+      const updated = await res.json()
+      setAuth(token, updated)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setImageLoading(false)
+    }
+  }
+
+  const handleSave = async () => {
+    if (!form.name.trim()) return setError('이름을 입력해주세요.')
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/me`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ name: form.name.trim(), phone: form.phone.trim() }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || '수정에 실패했습니다.')
+      }
+      // 최신 사용자 정보 반영
+      const meRes = await fetch(`${API_BASE}/api/v1/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const meData = await meRes.json()
+      setAuth(token, meData)
+      setSuccess(true)
+      setTimeout(onClose, 800)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 실시간 반영된 user 가져오기 (이미지 업로드 후 store가 갱신되므로)
+  const currentUser = useAuthStore((s) => s.user)
+  const profileImageUrl = currentUser?.profile_image_url
+    ? `${API_BASE}${currentUser.profile_image_url}`
+    : null
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-bold text-slate-900 mb-5">내 정보 수정</h3>
+
+        {error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg">{error}</div>}
+        {success && <div className="mb-4 p-3 bg-green-50 text-green-600 text-sm rounded-lg">저장되었습니다.</div>}
+
+        {/* 프로필 이미지 영역 */}
+        <div className="flex flex-col items-center mb-6">
+          <div className="relative group">
+            {profileImageUrl ? (
+              <img
+                src={profileImageUrl}
+                alt="프로필"
+                className="w-24 h-24 rounded-full object-cover border-4 border-gray-100 shadow"
+              />
+            ) : (
+              <div className="w-24 h-24 rounded-full bg-blue-600 text-white flex items-center justify-center text-2xl font-bold border-4 border-gray-100 shadow">
+                {initials}
+              </div>
+            )}
+            {/* 카메라 오버레이 */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={imageLoading}
+              className="absolute inset-0 rounded-full bg-black/0 group-hover:bg-black/40 flex items-center justify-center transition cursor-pointer"
+            >
+              <Camera size={24} className="text-white opacity-0 group-hover:opacity-100 transition" />
+            </button>
+            {imageLoading && (
+              <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center">
+                <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            className="hidden"
+            onChange={handleImageUpload}
+          />
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={imageLoading}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium transition"
+            >
+              사진 변경
+            </button>
+            {currentUser?.profile_image_url && (
+              <>
+                <span className="text-gray-300">|</span>
+                <button
+                  type="button"
+                  onClick={handleImageDelete}
+                  disabled={imageLoading}
+                  className="text-xs text-red-500 hover:text-red-700 font-medium transition flex items-center gap-1"
+                >
+                  <Trash2 size={12} /> 삭제
+                </button>
+              </>
+            )}
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">JPEG, PNG, WebP, GIF / 최대 5MB</p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">이메일</label>
+            <input
+              type="text"
+              value={user?.email || ''}
+              disabled
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">이름</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">전화번호</label>
+            <input
+              type="text"
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              placeholder="010-0000-0000"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+          >
+            취소
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={loading}
+            className="flex-1 px-4 py-2.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition disabled:opacity-50"
+          >
+            {loading ? '저장 중...' : '저장'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 /* ──────────────────────────────────────────────────────────────
    2. 환영 배너 — 다크 slate-900 (랜딩 ServiceIntroSection 동일 감성)
@@ -404,19 +744,34 @@ const ACTION_ACCENT = {
   indigo: { border: 'border-t-4 border-indigo-600', panel: 'bg-indigo-50', iconBg: 'bg-indigo-600', text: 'text-indigo-700', hoverBg: 'group-hover:bg-indigo-100' },
   violet: { border: 'border-t-4 border-violet-600', panel: 'bg-violet-50', iconBg: 'bg-violet-600', text: 'text-violet-700', hoverBg: 'group-hover:bg-violet-100' },
   cyan:   { border: 'border-t-4 border-cyan-600',   panel: 'bg-cyan-50',   iconBg: 'bg-cyan-600',   text: 'text-cyan-700',   hoverBg: 'group-hover:bg-cyan-100' },
+  amber:  { border: 'border-t-4 border-amber-600',  panel: 'bg-amber-50',  iconBg: 'bg-amber-600',  text: 'text-amber-700',  hoverBg: 'group-hover:bg-amber-100' },
 }
 
 function QuickActionsSection() {
+  const currentOrg = useAuthStore((s) => s.currentOrg)
+  const isAdmin = currentOrg && ['owner', 'admin'].includes(currentOrg.role)
+
+  const actions = isAdmin
+    ? [...QUICK_ACTIONS, {
+        key: 'admin-members',
+        title: '멤버 관리',
+        desc: '조직 멤버를 관리하고 미소속 사용자를 배정합니다.',
+        to: '/employee/admin/members',
+        icon: Shield,
+        accent: 'amber',
+      }]
+    : QUICK_ACTIONS
+
   return (
     <section>
       <SectionHeader
         eyebrow="QUICK ACTIONS"
-        title="자주 사용하는 작업"
+        title={currentOrg ? `${currentOrg.name} — 자주 사용하는 작업` : '자주 사용하는 작업'}
         desc="클릭 한 번으로 사무실 업무와 현장 점검을 시작하세요."
       />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mt-6">
-        {QUICK_ACTIONS.map((action) => {
-          const style = ACTION_ACCENT[action.accent]
+        {actions.map((action) => {
+          const style = ACTION_ACCENT[action.accent] || ACTION_ACCENT.yellow
           const Icon = action.icon
           const body = (
             <div className="p-6 flex-1 flex flex-col">

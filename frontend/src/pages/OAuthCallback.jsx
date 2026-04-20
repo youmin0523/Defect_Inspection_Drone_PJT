@@ -8,7 +8,7 @@
  *       4) employee 페이지로 리다이렉트
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { oauthLogin } from '../api/authApi'
 import useAuthStore from '../store/authStore'
@@ -19,8 +19,13 @@ export default function OAuthCallback() {
   const navigate = useNavigate()
   const setAuth = useAuthStore((s) => s.setAuth)
   const [error, setError] = useState('')
+  const calledRef = useRef(false)
 
   useEffect(() => {
+    // React 18 Strict Mode 이중 실행 방지 (인가 코드는 1회만 사용 가능)
+    if (calledRef.current) return
+    calledRef.current = true
+
     const code = searchParams.get('code')
     if (!code) {
       setError('인가 코드가 없습니다.')
@@ -33,7 +38,8 @@ export default function OAuthCallback() {
       .then((res) => {
         const { access_token, user } = res.data
         setAuth(access_token, user)
-        navigate('/employee', { replace: true })
+        const hasOrg = user.organizations && user.organizations.length > 0
+        navigate(hasOrg ? '/employee' : '/employee/onboarding', { replace: true })
       })
       .catch((err) => {
         console.error('OAuth 로그인 실패:', err)
