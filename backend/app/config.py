@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     RECORDING_FPS: float = 30.0
     RECORDING_CODEC: str = "mp4v"
 
+    # ── Email (SMTP) ─────────────────────────
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@droneinspect.com"
+    SMTP_FROM_NAME: str = "DRONE INSPECT"
+
     # ── CORS ─────────────────────────────────
     CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
 

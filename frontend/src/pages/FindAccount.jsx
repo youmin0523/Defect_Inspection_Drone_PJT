@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import logoDark from '../assets/logo/logo_transparent-removebg-preview.png'
+import { findId, findPassword } from '../api/authApi'
 
 // 사용자 유형 (개인 / 사업자) — Login/Signup 과 동일한 용어 유지
 const USER_TYPES = [
@@ -105,35 +106,26 @@ export default function FindAccount() {
 
     setStatus({ state: 'loading', message: '메일 발송 중...' })
 
-    // 백엔드 API 페이로드 — backend/app.js 의 /api/find-id, /api/find-pw 와 정렬
     const payload = {
       type: userType,
       email: form.email.trim(),
       ...(isBusiness && { bizNumber: form.bizNumber.trim() }),
       ...(mode === 'id' ? { name: form.name.trim() } : { userId: form.userId.trim() }),
     }
-    const endpoint = mode === 'id' ? '/api/find-id' : '/api/find-pw'
 
     try {
-      // TODO: 백엔드 연동 완료 시 실제 fetch 로 교체
-      // const res = await fetch(endpoint, {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify(payload),
-      // })
-      // const data = await res.json()
-      // if (!res.ok) throw new Error(data.message || '요청이 실패했습니다.')
-      console.log(`[MOCK] POST ${endpoint}`, payload)
-      await new Promise((r) => setTimeout(r, 600))
+      const { data } = mode === 'id'
+        ? await findId(payload)
+        : await findPassword(payload)
+
       setStatus({
         state: 'success',
-        message:
-          mode === 'id'
-            ? '입력하신 이메일로 아이디를 발송했습니다.'
-            : '입력하신 이메일로 임시 비밀번호를 발송했습니다.',
+        message: data.message,
       })
     } catch (err) {
-      setStatus({ state: 'error', message: err.message || '요청 처리 중 오류가 발생했습니다.' })
+      const detail = err?.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : '요청 처리 중 오류가 발생했습니다.'
+      setStatus({ state: 'error', message: msg })
     }
   }
 

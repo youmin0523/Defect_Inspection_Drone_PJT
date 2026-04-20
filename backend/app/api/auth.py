@@ -8,20 +8,27 @@
 #       - GET  /auth/check-username   → 아이디 중복 확인
 # =============================================
 
+import secrets
+import string
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password, verify_password
 from app.core.jwt import create_access_token
+from app.services.email_service import send_found_username_email, send_temp_password_email
 from app.dependencies import get_db, get_current_user
 from app.models.user import User
 from app.models.business_profile import BusinessProfile
 from app.models.term import Term
 from app.models.user_term_agreement import UserTermAgreement
 from app.schemas.user import (
+    AccountRecoveryResponse,
     AvailabilityResponse,
     BusinessInfoResponse,
+    FindIdRequest,
+    FindPasswordRequest,
     LoginRequest,
     TokenResponse,
     UserSignupRequest,
@@ -222,4 +229,94 @@ async def get_me(current_user: User = Depends(get_current_user)):
         name=current_user.name,
         phone=current_user.phone,
         created_at=current_user.created_at,
+    )
+
+
+# ── 아이디 찾기 ────────────────────────────
+@router.post("/find-id", response_model=AccountRecoveryResponse)
+async def find_id(
+    payload: FindIdRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    이름 + ��메일로 사용자 조회 → 아이디를 이메일로 발송.
+    사업자 유형 시 사업자등록번호 추가 검증.
+    보안: 사용자 존재 여부와 무관하게 동일한 응답을 반환하여 계정 열거 방지.
+    """
+    # 이�� + 이메일로 사용자 검색
+    query = select(User).where(User.email == payload.email, User.name == payload.name)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+
+    # 사업자 유형: 사업자등록번호 추가 검증
+    if user and payload.type == "business" and payload.bizNumber:
+        biz_result = await db.execute(
+            select(BusinessProfile).where(
+                BusinessProfile.user_id == user.id,
+                BusinessProfile.biz_number == payload.bizNumber,
+            )
+        )
+        if biz_result.scalar_one_or_none() is None:
+            user = None  # 사업자번호 불일치 시 미발견 처리
+
+    # 사용자를 찾았으면 이메일 발송
+    if user:
+        send_found_username_email(to=user.email, name=user.name, username=user.username)
+
+    # 보안: 결과와 무관하게 동일한 성공 메시지 반환 (계정 ���거 방지)
+    return AccountRecoveryResponse(
+        success=True,
+        message="입력하신 이메일�� 아이디 정보를 발송했습니다. 메일함을 ��인해주세요.",
+    )
+
+
+# ── 비밀번호 찾기 (임시 비밀번호 발급) ────────
+def _generate_temp_password(length: int = 12) -> str:
+    """영문 대소문자 + 숫자 + 특수문자 혼합 임시 비밀번호 생성."""
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    while True:
+        pw = ''.join(secrets.choice(alphabet) for _ in range(length))
+        # 최소 1개씩 포함 보장
+        if (any(c.islower() for c in pw)
+                and any(c.isupper() for c in pw)
+                and any(c.isdigit() for c in pw)
+                and any(c in "!@#$%^&*" for c in pw)):
+            return pw
+
+
+@router.post("/find-pw", response_model=AccountRecoveryResponse)
+async def find_password(
+    payload: FindPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    아이디 + 이메일로 사용자 확인 → 임시 비밀번호 생성 후 이메�� 발송.
+    DB 비밀번호를 임시 비밀번��� 해시로 교체.
+    """
+    # 아이�� + 이메일로 사용자 검색
+    query = select(User).where(User.username == payload.userId, User.email == payload.email)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+
+    # 사업자 유형: 사업자등록번호 추가 검증
+    if user and payload.type == "business" and payload.bizNumber:
+        biz_result = await db.execute(
+            select(BusinessProfile).where(
+                BusinessProfile.user_id == user.id,
+                BusinessProfile.biz_number == payload.bizNumber,
+            )
+        )
+        if biz_result.scalar_one_or_none() is None:
+            user = None
+
+    # 사용자를 찾았으면 임시 비밀번호 발급
+    if user:
+        temp_pw = _generate_temp_password()
+        user.password_hash = hash_password(temp_pw)
+        await db.flush()
+        send_temp_password_email(to=user.email, name=user.name, temp_password=temp_pw)
+
+    return AccountRecoveryResponse(
+        success=True,
+        message="입력하신 이메일로 임시 비밀번호를 발송했습니다. 메일함을 확인해주세요.",
     )

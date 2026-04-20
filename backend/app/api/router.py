@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook, sites
+from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook, sites, notifications, chat, organization
 
 api_router = APIRouter()
 
@@ -86,4 +86,25 @@ api_router.include_router(
     sites.router,
     prefix="/sites",
     tags=["Sites"],
+)
+
+# 알림 관리 CRUD
+api_router.include_router(
+    notifications.router,
+    prefix="/notifications",
+    tags=["Notifications"],
+)
+
+# 조직(회사) 관리 — 멤버 목록 / 초대 / 권한
+api_router.include_router(
+    organization.router,
+    prefix="/organizations",
+    tags=["Organizations"],
+)
+
+# 메신저 / 채팅
+api_router.include_router(
+    chat.router,
+    prefix="/chat",
+    tags=["Chat"],
 )

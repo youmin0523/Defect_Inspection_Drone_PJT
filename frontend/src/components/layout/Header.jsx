@@ -8,9 +8,12 @@
  *       - //* [Modified Code] 텔레메트리는 별도 컴포넌트(DroneStatusCard)로 이동 — 헤더는 가볍게
  */
 
+import { useEffect } from 'react'
 import { Search, Bell } from 'lucide-react'
 import useDroneStore from '../../store/droneStore.js'
 import useDefectStore from '../../store/defectStore.js'
+import useNotificationStore from '../../store/notificationStore.js'
+import NotificationDropdown from '../notification/NotificationDropdown.jsx'
 
 const STATUS_CONFIG = {
   connected:    { label: '연결됨',    dotClass: 'bg-accent-400 animate-pulse' },
@@ -21,6 +24,10 @@ const STATUS_CONFIG = {
 
 export default function Header() {
   const connectionStatus = useDroneStore((s) => s.connectionStatus)
+  const { unreadCount, toggleDropdown, isDropdownOpen } = useNotificationStore()
+  const fetchUnreadCount = useNotificationStore((s) => s.fetchUnreadCount)
+
+  useEffect(() => { fetchUnreadCount() }, [fetchUnreadCount])
 
   const defects = useDefectStore((s) => s.defects)
   const severityCounts = defects.reduce(
@@ -75,16 +82,22 @@ export default function Header() {
         </div>
 
         {/* 알림 */}
-        <button
-          type="button"
-          className="icon-btn relative"
-          aria-label="알림"
-        >
-          <Bell size={18} />
-          {severityCounts.HIGH > 0 && (
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-dashboard-surface" />
-          )}
-        </button>
+        <div className="relative">
+          <button
+            type="button"
+            className="icon-btn relative"
+            aria-label="알림"
+            onClick={toggleDropdown}
+          >
+            <Bell size={18} />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1 border-2 border-dashboard-surface">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </button>
+          <NotificationDropdown theme="dark" />
+        </div>
 
         {/* 프로필 (TODO: 로그인 연동 시 실제 사용자 정보 바인딩) */}
         <div

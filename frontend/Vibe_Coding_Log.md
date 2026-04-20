@@ -842,6 +842,7 @@ Dashboard (12-col grid)
   - `components/landing/LandingHeader.jsx` — 로고 링크, 네비 앵커, 직원 전용 링크, 로그인 링크, 도입 문의하기 버튼, 햄버거 버튼 총 6개소 `focus:ring-2 focus:ring-*` 제거
   - `components/landing/HeroSection.jsx` — '3D 리포트 샘플 보기', '서비스 도입 문의' 버튼 2개소 `focus:ring-2 focus:ring-*` 제거
 - **유지 항목**: `ContactModal.jsx` input/textarea의 `focus:ring`은 폼 입력 UX용이므로 제거하지 않음.
+- **스크린샷**: (focus ring 제거 전 상태 — 섹션 1️⃣2️⃣ 에서 접근성 이유로 복원)
 
 ---
 
@@ -865,6 +866,15 @@ Dashboard (12-col grid)
     - `isAtTop` 상태에 따라 슬레이트 다크 / 흰색 두 테마 대응
     - `mousedown` 이벤트로 외부 클릭 시 자동 닫힘 (`useRef` 활용)
     - 기존 데스크탑 버튼은 `hidden md:block` 유지
+- **스크린샷**:
+  - 모바일 히어로 + 햄버거 닫힌 상태:
+    ![모바일 헤더 닫힌 상태](/screenshots/02_mobile_header_closed.png)
+  - 모바일 햄버거 메뉴 열린 상태 (다크 테마):
+    ![모바일 햄버거 열림 — 다크](/screenshots/03_mobile_hamburger_open.png)
+  - 스크롤 후 흰 배경 + 햄버거 닫힌 상태:
+    ![스크롤 후 모바일 헤더](/screenshots/08_mobile_scrolled_header.png)
+  - 스크롤 후 햄버거 메뉴 열린 상태 (라이트 테마):
+    ![스크롤 후 햄버거 열림 — 라이트](/screenshots/09_mobile_scrolled_menu_open.png)
 
 ---
 
@@ -899,3 +909,63 @@ Dashboard (12-col grid)
   <i className="ri-corner-up-left-line text-2xl" />
 </button>
 ```
+
+- **스크린샷**:
+  - 로그인 페이지 — 우측 상단 `↩` 뒤로가기 아이콘:
+    ![로그인 뒤로가기 아이콘](/screenshots/04_login_back_icon.png)
+  - 회원가입 페이지 — 우측 상단 `↩` 뒤로가기 아이콘:
+    ![회원가입 뒤로가기 아이콘](/screenshots/05_signup_back_icon.png)
+  - 계정 찾기 페이지 — 우측 상단 `↩` 뒤로가기 아이콘:
+    ![계정찾기 뒤로가기 아이콘](/screenshots/06_find_account_back_icon.png)
+
+---
+
+### 1️⃣2️⃣ 삭제된 주석 · [Modified Code] 어노테이션 · focus:ring 접근성 복원 (2026-04-20, @youminsu0523)
+
+#### ⏱ 2026-04-20 12:38 | SH 머지(#18)에서 유실된 코드 주석·어노테이션·접근성 클래스 복원
+
+- **배경**: SH 브랜치 머지(PR #18, 커밋 `c95358c`) 과정에서 `LandingHeader.jsx`에 있던
+  한글 주석, `[Original Code]`/`[Modified Code]` 변경이력 어노테이션,
+  `focus:ring-2 focus:ring-*` 접근성 클래스가 일괄 삭제됨.
+  `index.css`에 전역 `button:focus { outline: none }` 규칙이 추가되어
+  키보드 포커스 링이 완전히 비활성화됨.
+- **프롬프트**:
+  ```text
+  "기존에 팀원이 임의로 지운 주석이나 Modified Code 내용 다시 살려주면 좋겠어"
+  ```
+- **조치**:
+  1. **`LandingHeader.jsx` 주석 복원 (12개소)**:
+     - `// 네이비 원본(스크롤 후 흰 헤더용) + 흰색(최상단 어두운 히어로용)`
+     - `// 네비 메뉴 항목`, `// 스크롤 전환 기준 (px)` 등 상수 설명
+     - `// 최상단 여부`, `// 도입 문의 모달 open 여부` 상태 설명
+     - `// 로고 클릭: 이미 "/" 경로면 ...` 함수 동작 설명
+     - `// 초기 렌더 시 ...`, `// passive: true → ...` useEffect 설명
+     - `// //* [Modified Code] C 전략: ...` 스타일 전략 어노테이션
+     - `// 네비 링크 텍스트 색: ...`
+  2. **`LandingHeader.jsx` [Modified Code]/[Original Code] 어노테이션 복원 (3개소)**:
+     - `{/* //* [Modified Code] 상태에 따라 흰/네이비 로고 스왑 */}`
+     - `{/* //! [Original Code] 직원 전용 버튼이 세션 셋업으로 직행하던 기존 동작 ... */}`
+     - `{/* //* [Modified Code] 직원 전용 진입 랜딩(/employee)을 거치도록 변경 ... */}`
+     - `{/* CTA: 최상단에서는 살짝 투명 처리, 스크롤 후엔 솔리드 */}`
+  3. **`LandingHeader.jsx` `focus:ring` 클래스 복원 (5개소)**:
+     - 로고 Link: `focus:ring-2 focus:ring-blue-400`
+     - 네비 앵커: `focus:ring-2 focus:ring-blue-400`
+     - 직원 전용 Link: `focus:ring-2 focus:ring-yellow-400`
+     - 로그인 Link: `focus:ring-2 focus:ring-blue-400`
+     - 도입 문의하기 CTA: `focus:ring-2 focus:ring-blue-400`
+  4. **`HeroSection.jsx` `focus:ring` 클래스 복원 (2개소)**:
+     - 3D 리포트 샘플 보기: `focus:ring-2 focus:ring-yellow-300`
+     - 서비스 도입 문의: `focus:ring-2 focus:ring-white`
+  5. **`index.css` 전역 포커스 제거 CSS 삭제**:
+     - `button:focus, button:focus-visible { outline: none }` 삭제
+     - 이유: 키보드 네비게이션 접근성(WCAG 2.1 — 2.4.7 Focus Visible) 위반
+- **수정 파일**:
+  - `components/landing/LandingHeader.jsx` — 주석 12개소 + 어노테이션 3개소 + focus:ring 5개소 복원
+  - `components/landing/HeroSection.jsx` — focus:ring 2개소 복원
+  - `src/index.css` — 전역 `button:focus { outline: none }` 규칙 제거
+- **스크린샷**:
+  - 데스크탑 헤더 — 키보드 Tab 포커스 시 focus ring 표시:
+    ![데스크탑 헤더 focus ring](/screenshots/01_desktop_header_focus_ring.png)
+  - 히어로 CTA 버튼 — focus ring 복원:
+    ![히어로 CTA focus ring](/screenshots/07_hero_cta_focus_ring.png)
+- **상태**: 반영 완료 — 팀원 추가 모바일 햄버거 메뉴 코드는 유지하면서 주석·접근성만 복원

@@ -139,13 +139,13 @@ export default function HeroSection() {
         <div className="flex flex-col sm:flex-row justify-center gap-4">
           <button
             type="button"
-            className="bg-yellow-500 hover:bg-yellow-400 text-slate-900 px-8 py-3.5 rounded-md font-bold text-lg transition shadow-lg focus:outline-none"
+            className="bg-yellow-500 hover:bg-yellow-400 text-slate-900 px-8 py-3.5 rounded-md font-bold text-lg transition shadow-lg focus:outline-none focus:ring-2 focus:ring-yellow-300"
           >
             3D 리포트 샘플 보기
           </button>
           <button
             type="button"
-            className="bg-transparent border-2 border-gray-400 hover:border-white px-8 py-3.5 rounded-md font-bold text-lg transition focus:outline-none"
+            className="bg-transparent border-2 border-gray-400 hover:border-white px-8 py-3.5 rounded-md font-bold text-lg transition focus:outline-none focus:ring-2 focus:ring-white"
           >
             서비스 도입 문의
           </button>
