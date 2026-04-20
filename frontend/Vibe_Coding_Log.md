@@ -1017,10 +1017,10 @@ Dashboard (12-col grid)
 
 ### 1️⃣5️⃣ 프로필 이미지 업로드 + 채팅 아바타 연동 (2026-04-20, @youminsu0523)
 
-> **착수 시각**: 2026-04-20 22:00  
+> **착수 시각**: 2026-04-20 16:00  
 > **목표**: 내 정보 수정에서 프로필 이미지 업로드/삭제 UI 추가. 헤더와 채팅 컴포넌트에서 이니셜 대신 프로필 사진 표시. 채팅에서도 메시지 송신 시 프로필 이미지 URL 전달.
 
-#### ⏱ 22:00 | EditProfileModal 프로필 이미지 업로드 UI
+#### ⏱ 16:00 | EditProfileModal 프로필 이미지 업로드 UI
 
 - **피드백**: "내 정보 수정에서 프로필 이미지를 변경할 수 있게 해줘. 현재는 이름의 앞 두글자를 띄우지만, 회사 특성상 얼굴을 알아야 하는 경우가 있기 때문에 프로필 사진을 넣을 수 있게 해줘. 프로필 사진은 채팅에서도 표현되어야 해."
 - **수정 파일**: `pages/EmployeeLanding.jsx`
@@ -1037,13 +1037,13 @@ Dashboard (12-col grid)
   - 프로필 이미지 업로드 모달 (이니셜 상태):
     ![프로필 이미지 모달](/screenshots/profile_modal_initials.png)
 
-#### ⏱ 22:10 | EmployeeHeader 아바타 프로필 이미지 표시
+#### ⏱ 16:20 | EmployeeHeader 아바타 프로필 이미지 표시
 
 - **수정 파일**: `pages/EmployeeLanding.jsx`
   - 헤더 우측 프로필 아바타: `user.profile_image_url` 존재 시 `<img>` 렌더링, 없으면 기존 이니셜 `<div>` 폴백
   - 이미지 URL: `${VITE_API_BASE_URL}${user.profile_image_url}` 패턴으로 백엔드 StaticFiles 서빙 경로 참조
 
-#### ⏱ 22:15 | 채팅 컴포넌트 4종 프로필 이미지 지원
+#### ⏱ 16:30 | 채팅 컴포넌트 4종 프로필 이미지 지원
 
 - **수정 파일**:
   - `components/chat/MessageBubble.jsx` — `message.sender_profile_image_url` 존재 시 `<img>` 아바타, 없으면 이니셜 폴백. 내 메시지(노란 말풍선)는 아바타 미표시 유지
