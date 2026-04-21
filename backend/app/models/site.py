@@ -78,6 +78,15 @@ class Site(Base):
     # ── 촬영 영상 메타 ────────────────────────
     recordings = Column(JSONB, nullable=True, default=list, comment="촬영 이력 [{id, date, type, duration_sec, url}]")
 
+    # ── 소속 조직 ────────────────────────────
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id"),
+        nullable=True,
+        comment="소속 조직 ID (멀티테넌트 격리 기준)",
+        index=True,
+    )
+
     # ── 등록 정보 ────────────────────────────
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, comment="등록자")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -88,6 +97,7 @@ class Site(Base):
         Index("idx_sites_status", "status"),
         Index("idx_sites_name", "name"),
         Index("idx_sites_created_at", created_at.desc()),
+        Index("idx_sites_org_id", "organization_id"),
     )
 
     def __repr__(self):

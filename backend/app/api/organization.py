@@ -16,19 +16,24 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db, get_current_user
+from app.dependencies import get_db, get_current_user, get_current_org_member, require_role, require_superadmin
+from app.models.department import Department
 from app.models.organization import Organization, OrganizationMember
 from app.models.user import User
 from app.schemas.organization import (
+    AssignMemberRequest,
+    JoinByCodeRequest,
     OrganizationCreate,
     OrganizationResponse,
     OrgMemberResponse,
     OrgMemberListResponse,
     InviteMemberRequest,
+    UnaffiliatedUserResponse,
     UpdateMemberRequest,
 )
 
@@ -68,7 +73,7 @@ async def get_my_organization(
 
     return OrganizationResponse(
         id=org.id, name=org.name, biz_number=org.biz_number,
-        member_count=count, created_at=org.created_at,
+        invite_code=org.invite_code, member_count=count, created_at=org.created_at,
     )
 
 
@@ -99,11 +104,14 @@ async def list_organization_members(
             user_id=user.id,
             name=user.name,
             email=user.email,
+            phone=user.phone,
             initials=user.name[:2].upper() if user.name else "??",
             role=om.role,
             department=om.department,
             position=om.position,
             status=om.status,
+            started_at=om.started_at,
+            ended_at=om.ended_at,
         ))
 
     active_count = sum(1 for m in members if m.status == "active")
@@ -205,11 +213,14 @@ async def invite_member(
         user_id=target_user.id,
         name=target_user.name,
         email=target_user.email,
+        phone=target_user.phone,
         initials=target_user.name[:2].upper() if target_user.name else "??",
         role=new_member.role,
         department=new_member.department,
         position=new_member.position,
         status=new_member.status,
+        started_at=new_member.started_at,
+        ended_at=new_member.ended_at,
     )
 
 
@@ -244,6 +255,14 @@ async def update_member(
         target_member.department = payload.department
     if payload.position is not None:
         target_member.position = payload.position
+    if payload.started_at is not None:
+        target_member.started_at = payload.started_at
+    if payload.ended_at is not None:
+        target_member.ended_at = payload.ended_at
+        # 퇴사일이 과거이면 자동으로 비활성 처리
+        from datetime import datetime, timezone
+        if payload.ended_at <= datetime.now(timezone.utc):
+            target_member.status = "deactivated"
     if payload.status is not None:
         target_member.status = payload.status
     await db.flush()
@@ -252,11 +271,14 @@ async def update_member(
         user_id=target_user.id,
         name=target_user.name,
         email=target_user.email,
+        phone=target_user.phone,
         initials=target_user.name[:2].upper() if target_user.name else "??",
         role=target_member.role,
         department=target_member.department,
         position=target_member.position,
         status=target_member.status,
+        started_at=target_member.started_at,
+        ended_at=target_member.ended_at,
     )
 
 
@@ -285,4 +307,260 @@ async def remove_member(
         raise HTTPException(status_code=400, detail="조직 소유자는 제거할 수 없습니다.")
 
     await db.delete(target)
+    await db.flush()
+
+
+# ── 미소속 사용자 목록 (admin/owner 전용) ────
+@router.get("/unaffiliated-users", response_model=list[UnaffiliatedUserResponse])
+async def list_unaffiliated_users(
+    org_tuple=Depends(require_role("owner", "admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """소속 조직이 없는 사용자 목록 (admin/owner 전용)"""
+    affiliated_subq = (
+        select(OrganizationMember.user_id)
+        .where(OrganizationMember.status == "active")
+    ).subquery()
+
+    result = await db.execute(
+        select(User)
+        .where(User.id.notin_(select(affiliated_subq.c.user_id)))
+        .order_by(User.created_at.desc())
+    )
+    users = result.scalars().all()
+    return [UnaffiliatedUserResponse.model_validate(u) for u in users]
+
+
+# ── 미소속 사용자 조직 배정 (admin/owner 전용) ─
+@router.post("/members/assign", response_model=OrgMemberResponse, status_code=201)
+async def assign_member(
+    payload: AssignMemberRequest,
+    org_tuple=Depends(require_role("owner", "admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """미소속 사용자를 현재 조직에 배정 (admin/owner 전용)"""
+    user, member, org = org_tuple
+
+    # 배정 대상 사용자 확인
+    target_user = await db.scalar(select(User).where(User.id == payload.user_id))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="해당 사용자를 찾을 수 없습니다.")
+
+    # 이미 소속 여부 확인
+    existing = await db.scalar(
+        select(OrganizationMember.id)
+        .where(OrganizationMember.organization_id == org.id)
+        .where(OrganizationMember.user_id == payload.user_id)
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="이미 조직에 소속된 사용자입니다.")
+
+    new_member = OrganizationMember(
+        organization_id=org.id,
+        user_id=payload.user_id,
+        role=payload.role,
+        department=payload.department,
+        position=payload.position,
+        status="active",
+    )
+    db.add(new_member)
+    await db.flush()
+
+    return OrgMemberResponse(
+        user_id=target_user.id,
+        name=target_user.name,
+        email=target_user.email,
+        phone=target_user.phone,
+        initials=target_user.name[:2].upper() if target_user.name else "??",
+        role=new_member.role,
+        department=new_member.department,
+        position=new_member.position,
+        status=new_member.status,
+        started_at=new_member.started_at,
+        ended_at=new_member.ended_at,
+    )
+
+
+# ── 초대코드로 조직 가입 ─────────────────────
+@router.post("/join", response_model=OrganizationResponse)
+async def join_by_invite_code(
+    payload: JoinByCodeRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """초대 코드로 조직 가입 (미소속 사용자용)"""
+    org = await db.scalar(
+        select(Organization).where(Organization.invite_code == payload.invite_code.upper())
+    )
+    if not org:
+        raise HTTPException(status_code=404, detail="유효하지 않은 초대 코드입니다.")
+
+    # 이미 소속 여부 확인
+    existing = await db.scalar(
+        select(OrganizationMember.id)
+        .where(OrganizationMember.organization_id == org.id)
+        .where(OrganizationMember.user_id == current_user.id)
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="이미 해당 조직에 소속되어 있습니다.")
+
+    db.add(OrganizationMember(
+        organization_id=org.id,
+        user_id=current_user.id,
+        role="member",
+        status="active",
+    ))
+    await db.flush()
+
+    count = await db.scalar(
+        select(func.count(OrganizationMember.id))
+        .where(OrganizationMember.organization_id == org.id)
+        .where(OrganizationMember.status == "active")
+    )
+
+    return OrganizationResponse(
+        id=org.id, name=org.name, biz_number=org.biz_number,
+        invite_code=org.invite_code, member_count=count, created_at=org.created_at,
+    )
+
+
+# ══════════════════════════════════════════════
+# 슈퍼어드민 전용: 전체 사용자 목록
+# ══════════════════════════════════════════════
+
+class _AllUserResponse(BaseModel):
+    id: UUID
+    name: str
+    email: str
+    phone: str
+    account_type: str
+    is_superadmin: bool
+    created_at: object
+    organization_name: str | None = None
+    role: str | None = None
+    department: str | None = None
+    position: str | None = None
+    status: str | None = None
+
+
+@router.get("/admin/all-users", response_model=list[_AllUserResponse])
+async def list_all_users(
+    search: str = Query(None, description="이름/이메일/전화번호 검색"),
+    superadmin=Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """플랫폼 전체 사용자 목록 (슈퍼어드민 전용). 조직·역할 정보 포함."""
+    from sqlalchemy.orm import aliased
+    OrgMem = aliased(OrganizationMember)
+    Org = aliased(Organization)
+
+    query = (
+        select(User, OrgMem, Org)
+        .outerjoin(OrgMem, (OrgMem.user_id == User.id) & (OrgMem.status == "active"))
+        .outerjoin(Org, Org.id == OrgMem.organization_id)
+        .order_by(User.created_at.desc())
+    )
+
+    if search:
+        query = query.where(
+            User.name.ilike(f"%{search}%")
+            | User.email.ilike(f"%{search}%")
+            | User.phone.ilike(f"%{search}%")
+        )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    return [
+        _AllUserResponse(
+            id=u.id, name=u.name, email=u.email, phone=u.phone,
+            account_type=u.account_type, is_superadmin=u.is_superadmin,
+            created_at=u.created_at,
+            organization_name=org.name if org else None,
+            role=om.role if om else None,
+            department=om.department if om else None,
+            position=om.position if om else None,
+            status=om.status if om else None,
+        )
+        for u, om, org in rows
+    ]
+
+
+# ══════════════════════════════════════════════
+# 부서 CRUD — 조직별 부서 관리
+# 각 조직이 자체 부서명을 departments 테이블에서 관리.
+# 조직 admin/owner가 추가/삭제/이름변경 가능.
+# ══════════════════════════════════════════════
+
+class _DeptRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+
+class _DeptResponse(BaseModel):
+    id: UUID
+    organization_id: UUID
+    name: str
+    created_at: object
+
+
+@router.get("/departments", response_model=list[_DeptResponse])
+async def list_departments(
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """현재 조직의 부서 목록"""
+    user, member, org = org_tuple
+    result = await db.execute(
+        select(Department).where(Department.organization_id == org.id).order_by(Department.name)
+    )
+    return [_DeptResponse(id=d.id, organization_id=d.organization_id, name=d.name, created_at=d.created_at) for d in result.scalars()]
+
+
+@router.post("/departments", response_model=_DeptResponse, status_code=201)
+async def create_department(
+    payload: _DeptRequest,
+    org_tuple=Depends(require_role("owner", "admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """부서 추가 (admin/owner 전용)"""
+    user, member, org = org_tuple
+    existing = await db.scalar(
+        select(Department.id).where(Department.organization_id == org.id, Department.name == payload.name)
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="이미 존재하는 부서명입니다.")
+    dept = Department(organization_id=org.id, name=payload.name)
+    db.add(dept)
+    await db.flush()
+    return _DeptResponse(id=dept.id, organization_id=dept.organization_id, name=dept.name, created_at=dept.created_at)
+
+
+@router.patch("/departments/{dept_id}", response_model=_DeptResponse)
+async def update_department(
+    dept_id: UUID,
+    payload: _DeptRequest,
+    org_tuple=Depends(require_role("owner", "admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """부서 이름 변경 (admin/owner 전용)"""
+    user, member, org = org_tuple
+    dept = await db.scalar(select(Department).where(Department.id == dept_id, Department.organization_id == org.id))
+    if not dept:
+        raise HTTPException(status_code=404, detail="부서를 찾을 수 없습니다.")
+    dept.name = payload.name
+    await db.flush()
+    return _DeptResponse(id=dept.id, organization_id=dept.organization_id, name=dept.name, created_at=dept.created_at)
+
+
+@router.delete("/departments/{dept_id}", status_code=204)
+async def delete_department(
+    dept_id: UUID,
+    org_tuple=Depends(require_role("owner", "admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """부서 삭제 (admin/owner 전용)"""
+    user, member, org = org_tuple
+    dept = await db.scalar(select(Department).where(Department.id == dept_id, Department.organization_id == org.id))
+    if not dept:
+        raise HTTPException(status_code=404, detail="부서를 찾을 수 없습니다.")
+    await db.delete(dept)
     await db.flush()

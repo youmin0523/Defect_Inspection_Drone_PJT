@@ -65,9 +65,17 @@ export default function ParticipantPanel() {
             return (
               <div key={m.user_id} className="flex items-center gap-2.5 py-2 px-2 rounded-lg hover:bg-gray-50 transition">
                 <div className="relative">
-                  <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold">
-                    {m.initials}
-                  </div>
+                  {m.profile_image_url ? (
+                    <img
+                      src={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}${m.profile_image_url}`}
+                      alt={m.name}
+                      className="w-8 h-8 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold">
+                      {m.initials}
+                    </div>
+                  )}
                   <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${status.dot}`} />
                 </div>
                 <div className="min-w-0">

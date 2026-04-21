@@ -14,6 +14,16 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
+# ── 조직 정보 (UserResponse 중첩용) ─────────
+class OrgBriefResponse(BaseModel):
+    """사용자 응답에 포함되는 조직 요약 정보"""
+    id: UUID
+    name: str
+    role: str
+    department: Optional[str] = None
+    position: Optional[str] = None
+
+
 # ── 중첩 입력 스키마 ──────────────────────────
 class BusinessInfoInput(BaseModel):
     """사업자 회원 가입 시 추가 제출 필드"""
@@ -91,8 +101,11 @@ class UserResponse(BaseModel):
     username: str
     name: str
     phone: str
+    profile_image_url: Optional[str] = None
+    is_superadmin: bool = False
     created_at: datetime
     business: Optional["BusinessInfoResponse"] = None
+    organizations: list["OrgBriefResponse"] = []
 
     class Config:
         from_attributes = True

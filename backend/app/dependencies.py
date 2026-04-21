@@ -6,10 +6,11 @@
 # 사용: router 함수 파라미터에 Depends(get_db) 등으로 주입
 # =============================================
 
-from typing import AsyncGenerator
+from datetime import datetime, timezone
+from typing import AsyncGenerator, Optional
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +62,100 @@ async def get_current_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="사용자를 찾을 수 없습니다.")
     return user
+
+
+async def get_current_org_member(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    x_organization_id: Optional[str] = Header(None),
+):
+    """
+    현재 사용자의 활성 조직 멤버십을 반환.
+    다중 조직 시 X-Organization-Id 헤더로 선택, 없으면 가장 최근 활성 조직.
+    미소속 또는 계약 만료 시 403 반환.
+    반환: (user, org_member, organization) 튜플
+    """
+    from app.models.organization import Organization, OrganizationMember
+
+    query = (
+        select(OrganizationMember, Organization)
+        .join(Organization, Organization.id == OrganizationMember.organization_id)
+        .where(OrganizationMember.user_id == current_user.id)
+        .where(OrganizationMember.status == "active")
+        .where(
+            (OrganizationMember.ended_at.is_(None))
+            | (OrganizationMember.ended_at > datetime.now(timezone.utc))
+        )
+    )
+    if x_organization_id:
+        query = query.where(Organization.id == UUID(x_organization_id))
+    else:
+        query = query.order_by(OrganizationMember.joined_at.desc())
+
+    result = await db.execute(query)
+    row = result.first()
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="조직에 소속되지 않은 사용자입니다. 관리자에게 문의하세요.",
+        )
+    member, org = row
+    return current_user, member, org
+
+
+async def get_current_user_with_org(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    현재 사용자 + 조직 정보 (nullable) 반환.
+    /auth/me 등 조직 미소속도 허용하는 엔드포인트용.
+    """
+    from app.models.organization import Organization, OrganizationMember
+
+    result = await db.execute(
+        select(OrganizationMember, Organization)
+        .join(Organization, Organization.id == OrganizationMember.organization_id)
+        .where(OrganizationMember.user_id == current_user.id)
+        .where(OrganizationMember.status == "active")
+        .where(
+            (OrganizationMember.ended_at.is_(None))
+            | (OrganizationMember.ended_at > datetime.now(timezone.utc))
+        )
+        .order_by(OrganizationMember.joined_at.desc())
+    )
+    rows = result.all()
+    if not rows:
+        return current_user, []
+    return current_user, [(m, o) for m, o in rows]
+
+
+def require_role(*allowed_roles: str):
+    """
+    특정 조직 역할이 필요한 엔드포인트용 의존성 팩토리.
+    사용: Depends(require_role("owner", "admin"))
+    """
+    async def _check(org_tuple=Depends(get_current_org_member)):
+        user, member, org = org_tuple
+        if member.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"이 작업은 {', '.join(allowed_roles)} 권한이 필요합니다.",
+            )
+        return user, member, org
+    return _check
+
+
+async def require_superadmin(
+    current_user=Depends(get_current_user),
+):
+    """플랫폼 슈퍼어드민 전용 의존성. is_superadmin=False 시 403."""
+    if not current_user.is_superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="플랫폼 관리자 권한이 필요합니다.",
+        )
+    return current_user
 
 
 def get_ws_manager():

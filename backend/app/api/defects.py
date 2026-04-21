@@ -15,8 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db, get_ws_manager
+from app.dependencies import get_db, get_ws_manager, get_current_org_member
 from app.models.defect import DefectLog
+from app.models.site import Site
 from app.schemas.defect import (
     DefectLogCreate,
     DefectLogResponse,
@@ -29,16 +30,27 @@ router = APIRouter()
 
 
 @router.get("/summary", response_model=DefectSummary)
-async def get_defect_summary(db: AsyncSession = Depends(get_db)):
+async def get_defect_summary(
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
     """
-    대시보드용 하자 요약 통계 반환.
+    대시보드용 하자 요약 통계 반환 (소속 조직 한정).
     전체 건수, 심각도별 건수, 영역별 건수, 최신 탐지 결과.
     """
-    total = await db.scalar(select(func.count(DefectLog.id)))
+    user, member, org = org_tuple
+    org_filter = DefectLog.site_id.in_(
+        select(Site.id).where(Site.organization_id == org.id)
+    )
+
+    total = await db.scalar(
+        select(func.count(DefectLog.id)).where(org_filter)
+    )
 
     # 심각도별 카운트
     severity_rows = await db.execute(
         select(DefectLog.severity, func.count(DefectLog.id))
+        .where(org_filter)
         .group_by(DefectLog.severity)
     )
     by_severity = {row[0]: row[1] for row in severity_rows}
@@ -46,13 +58,15 @@ async def get_defect_summary(db: AsyncSession = Depends(get_db)):
     # 영역별 카운트
     area_rows = await db.execute(
         select(DefectLog.area, func.count(DefectLog.id))
+        .where(org_filter)
         .group_by(DefectLog.area)
     )
     by_area = {row[0]: row[1] for row in area_rows}
 
     # 최신 탐지 결과
     latest_result = await db.execute(
-        select(DefectLog).order_by(desc(DefectLog.timestamp)).limit(1)
+        select(DefectLog).where(org_filter)
+        .order_by(desc(DefectLog.timestamp)).limit(1)
     )
     latest = latest_result.scalar_one_or_none()
 
@@ -95,10 +109,16 @@ async def list_defects(
     category_code: Optional[str] = Query(None, description="카테고리 코드 (예: A-01)"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    org_tuple=Depends(get_current_org_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """하자 탐지 로그 목록 조회 (필터링 + 페이지네이션)"""
-    query = select(DefectLog)
+    """하자 탐지 로그 목록 조회 (소속 조직 한정, 필터링 + 페이지네이션)"""
+    user, member, org = org_tuple
+    query = select(DefectLog).where(
+        DefectLog.site_id.in_(
+            select(Site.id).where(Site.organization_id == org.id)
+        )
+    )
 
     if area:
         query = query.where(DefectLog.area == area.upper())
@@ -127,10 +147,20 @@ async def list_defects(
 
 
 @router.get("/{defect_id}", response_model=DefectLogResponse)
-async def get_defect(defect_id: UUID, db: AsyncSession = Depends(get_db)):
-    """하자 탐지 로그 단건 조회"""
+async def get_defect(
+    defect_id: UUID,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """하자 탐지 로그 단건 조회 (소속 조직 검증)"""
+    user, member, org = org_tuple
     result = await db.execute(
-        select(DefectLog).where(DefectLog.id == defect_id)
+        select(DefectLog).where(
+            DefectLog.id == defect_id,
+            DefectLog.site_id.in_(
+                select(Site.id).where(Site.organization_id == org.id)
+            ),
+        )
     )
     defect = result.scalar_one_or_none()
     if not defect:

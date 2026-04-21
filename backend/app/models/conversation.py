@@ -32,6 +32,13 @@ class Conversation(Base):
 
     name = Column(String(200), nullable=True, comment="대화방 이름 (DM은 null)")
 
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id"),
+        nullable=True,
+        comment="소속 조직 ID (같은 조직 멤버만 참여 가능)",
+    )
+
     created_by = Column(
         UUID(as_uuid=True),
         ForeignKey("users.id"),
