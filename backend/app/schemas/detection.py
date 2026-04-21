@@ -61,7 +61,11 @@ class WallpaperPrediction(BaseModel):
     top1_conf: float = Field(..., ge=0.0, le=1.0)
     is_confident: bool = Field(
         ...,
-        description="top1_conf >= WALLPAPER_CONF_THRESHOLD 여부. false면 노이즈로 취급"
+        description=(
+            "(top1_conf >= WALLPAPER_CONF_THRESHOLD) AND "
+            "(top1_conf - top2_conf >= WALLPAPER_MARGIN_THRESHOLD). "
+            "false면 모호/노이즈로 취급하여 severity 판정 보류."
+        )
     )
     top3: List[Top3Prediction] = Field(default_factory=list, max_length=3)
 

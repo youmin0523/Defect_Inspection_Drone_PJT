@@ -96,7 +96,9 @@ class DefectLogResponse(BaseModel):
     lidar_x: Optional[float]
     lidar_y: Optional[float]
     lidar_z: Optional[float]
-    image_crop: Optional[str]
+    image_crop: Optional[str] = Field(None, description="[DEPRECATED] Base64 JPEG. 신규 레코드는 image_crop_url 사용.")
+    image_crop_path: Optional[str] = Field(None, description="크롭 이미지 상대 경로 (uploads/ 기준)")
+    image_crop_url: Optional[str] = Field(None, description="클라이언트 접근 URL (/uploads/...). StaticFiles 서빙.")
     thermal_max: Optional[float]
     thermal_min: Optional[float]
     thermal_avg: Optional[float]

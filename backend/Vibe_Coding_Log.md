@@ -502,3 +502,71 @@ def submit(frame):
 - **싱글 워커 제한**: `stream_inference_worker`는 프로세스 내 싱글톤이라 gunicorn multi-worker 구동 불가. 다중 워커 필요 시 Redis pub/sub 기반 리팩터
 - **드론 좌표**: MAVLink/LiDAR 연동 전이라 `lidar_x/y/z`는 당분간 NULL. TF 연동 완료 후 기존 컬럼에 채울 예정
 - **벽지 분류 정확도 0.54**: `WALLPAPER_CONF_THRESHOLD=0.4`로 보수 필터링. 데이터 추가 수집 후 fine-tuning 필요
+
+---
+
+## 🔧 2026-04-21 추가 세션 — 벽지 분류 오탐 감소 (Issue 1)
+
+### 1️⃣ 배경
+- ResNet50 벽지 분류기 val_acc ≈ 54% (19-way). 단일 `top1_conf >= 0.4` 필터는 모호한 예측(top1/top2 근소차)을 걸러내지 못해 오탐 유입.
+- 재학습 없이 **코드 수정만으로** FP 감소 가능한 지점을 찾음.
+
+### 2️⃣ 적용한 개선 — 이중 게이트 (Top-k Margin 투표)
+`is_confident` 판정에 두 조건 모두 만족 요구:
+1. `top1_conf >= WALLPAPER_CONF_THRESHOLD` (기본 0.35로 완화 — 19-way 특성 반영, 랜덤(1/19≈5%) 대비 6배 이상)
+2. `top1_conf - top2_conf >= WALLPAPER_MARGIN_THRESHOLD` (기본 0.15 신규 — 2위와의 분리도)
+
+근거: 1위 점수 높아도 2위와 근소차면 모델이 헷갈린 상태. 그런 케이스는 `is_confident=false` → severity null로 판정 보류시켜 오탐 차단.
+
+### 3️⃣ 변경 파일
+- [app/config.py](app/config.py) — `WALLPAPER_CONF_THRESHOLD` 0.4 → 0.35, `WALLPAPER_MARGIN_THRESHOLD=0.15` 신규 추가
+- [app/services/inference_pipeline.py](app/services/inference_pipeline.py) — `_run_wallpaper()`에 top1/top2 margin 계산 + 이중 게이트 로직. init / load_models 초기화 값 반영
+- [app/schemas/detection.py](app/schemas/detection.py) — `WallpaperPrediction.is_confident` description 이중 조건으로 갱신
+- [.env.example](.env.example) — 두 임계값 반영
+- [README.md](README.md) — 알려진 제약 섹션에 이중 게이트 설명 추가
+
+### 4️⃣ 추후 튜닝 방향
+- 지금 값(0.35 / 0.15)은 "감"으로 지정. 실제 운영 로그(사람이 오탐 태그한 케이스) 축적 후 임계값 스윕 스크립트로 최적점 재산출 예정
+- 드론 건물 검사 특성(하자 놓치면 안전 문제)상 "미탐 최소화" 쪽으로 더 완화(예: 0.30 / 0.10) 검토 가능
+- 재학습 대안: class-weighted CrossEntropy, RandomRotation/ColorJitter 증강, 19→5 계층적 그룹핑 (외부 학습 파이프라인 필요)
+
+---
+
+## 🛠️ 2026-04-21 추가 — Issue 2 LiDAR 3D 좌표 배선 + 품질 개선 일괄
+
+### 1️⃣ Issue 2: MAVLink/LiDAR 3D 좌표 통합 (하드웨어 없이 배선 완료)
+기존 lidar.py(TF-Luna 9-byte 프레임 파서, 중앙값 필터, compute_3d_position) 이미 존재. **빠진 배선 4개** 연결:
+1. `app/services/telemetry_cache.py` **신규** — 최신 드론 pose 메모리 캐시 싱글톤 (asyncio.Lock, stale 5초 판정)
+2. [app/main.py](app/main.py) — lifespan에 `lidar_service.start()/stop()` 호출 (serial 실패해도 graceful), health에 `lidar.connected/distance_m`, `telemetry_cache.ready/age_sec` 노출
+3. [app/api/telemetry.py](app/api/telemetry.py) — POST /telemetry 수신 시 `telemetry_cache.update()` + `lidar_service.update_attitude()` 호출
+4. [app/core/stream_inference.py](app/core/stream_inference.py) — 프레임 추론 시점에 `_compute_lidar_xyz()` (cache_fresh + lidar distance) 호출, 레거시 `defect.new` 이벤트와 `stream` 페이로드에 `lidar_x/y/z` 주입
+
+좌표 없으면 None 유지 → 드론/LiDAR 없어도 서비스 영향 없음.
+
+### 2️⃣ 이미지 저장소 리팩 (Base64 → 파일시스템)
+- `app/services/image_storage.py` **신규** — `save_base64_jpeg(b64) → rel_path`, `get_url()`, `delete()`. 저장 경로: `./uploads/defects/YYYY-MM-DD/uuid.jpg` (이미 mount된 StaticFiles 경유 서빙)
+- [app/models/defect.py](app/models/defect.py) — `image_crop_path` (String 255) 컬럼 추가, `image_crop`(Text)는 DEPRECATED 표시 유지
+- [alembic/versions/c8f1d2e4a7b9_add_image_crop_path_to_defect_logs.py](alembic/versions/c8f1d2e4a7b9_add_image_crop_path_to_defect_logs.py) **신규 마이그레이션**
+- [app/schemas/defect.py](app/schemas/defect.py) — `image_crop_path`, `image_crop_url` 응답 필드
+- [app/api/ai_webhook.py](app/api/ai_webhook.py), [app/api/defects.py](app/api/defects.py) — Base64 수신 시 파일 저장 → `image_crop=None`, `image_crop_path=rel_path` 기록. `_build_response()` 헬퍼로 `image_crop_url` 채움
+
+효과: DB Text 컬럼 용량 폭증 방지. 1건당 ~100KB → 파일 경로만 저장.
+
+### 3️⃣ 로깅 체계 (structlog + Request ID)
+- `app/core/logging.py` **신규** — `configure_logging(json_output, level)`, `get_logger(name)`, contextvars 통합
+- `app/core/middleware.py` **신규** — `RequestIDMiddleware`: `X-Request-ID` 수신/발행, 모든 로그에 `request_id/method/path` 자동 바인딩, 요청 완료 시 `http.request` 이벤트(status, duration_ms) 로깅
+- [app/config.py](app/config.py) — `LOG_JSON=False`, `LOG_LEVEL=INFO`
+- [requirements.txt](requirements.txt) — `structlog` 추가
+- [app/main.py](app/main.py) — import 시점에 `configure_logging()`, `add_middleware(RequestIDMiddleware)`
+- [.env.example](.env.example) — LOG_JSON/LOG_LEVEL 문서화
+
+### 4️⃣ 테스트 추가 (새 모듈 회귀 방지)
+- `tests/test_telemetry_cache.py` — update/snapshot/stale/clear 7 케이스
+- `tests/test_image_storage.py` — base64 저장/삭제/data URL prefix/에러 8 케이스
+- `tests/test_wallpaper_double_gate.py` — monkeypatch 기반 이중 게이트 로직 5 케이스 (모델 없이 검증)
+
+### 5️⃣ 후속 TODO (다음 이터레이션)
+- 카메라 intrinsics 불필요(1D LiDAR) 구조 유지 중. 멀티빔/3D LiDAR로 교체 시 `compute_3d_position` 확장 필요
+- `image_crop` (Text, deprecated) 컬럼은 충분한 마이그레이션 기간 후 drop 예정
+- 운영 배포 시 `LOG_JSON=true` 전환 + Grafana/Datadog 연동
+- DefectLog 삭제 시 파일 cleanup 훅 (`image_storage.delete(defect.image_crop_path)`) 필요

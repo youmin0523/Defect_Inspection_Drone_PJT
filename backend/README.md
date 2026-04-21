@@ -197,7 +197,8 @@ YOLO_THERMAL_WEIGHTS=yolov8s_crack_moisture_best.pt
 YOLO_DELAM_WEIGHTS=yolov8s_delamination_best.pt
 WALLPAPER_WEIGHTS=resnet50_wallpaper_best.pt
 YOLO_CONF_THRESHOLD=0.25
-WALLPAPER_CONF_THRESHOLD=0.4
+WALLPAPER_CONF_THRESHOLD=0.35
+WALLPAPER_MARGIN_THRESHOLD=0.15
 FRAME_SKIP=3
 DEVICE=auto
 ```
@@ -206,7 +207,10 @@ DEVICE=auto
 
 ## 알려진 제약
 
-- **벽지 분류 val_acc ≈ 54%**: 19-way 분류라 정확도 낮음. `WALLPAPER_CONF_THRESHOLD=0.4`로 보수적으로 필터링하고, `is_confident=false`면 하자 판정 보류 (severity null).
+- **벽지 분류 val_acc ≈ 54%**: 19-way 분류라 정확도 낮음. 이중 게이트로 필터링:
+  - `top1_conf >= WALLPAPER_CONF_THRESHOLD` (기본 0.35, top1 절대 신뢰도)
+  - AND `top1_conf - top2_conf >= WALLPAPER_MARGIN_THRESHOLD` (기본 0.15, top2와의 분리도 — 근소차 예측 차단)
+  - 두 조건 모두 만족해야 `is_confident=true`. 그렇지 않으면 하자 판정 보류 (severity null).
 - **`good` 클래스는 터짐**: 필터링 시 절대 "정상"으로 취급 금지. 위 경고 박스 참조.
 - **단일 워커 프로세스 전제**: `stream_inference_worker`는 프로세스 내 싱글톤. gunicorn multi-worker로 띄우면 워커마다 큐가 생겨 FRAME_SKIP 효과가 배수. uvicorn 단일 워커 또는 Redis pub/sub 기반 리팩터링 필요.
 - **MAVLink/LiDAR 좌표 연동은 아직**: `drone_coordinates`는 당분간 NULL. 추후 TF 연동 시 기존 `lidar_x/y/z` 컬럼에 채움.
