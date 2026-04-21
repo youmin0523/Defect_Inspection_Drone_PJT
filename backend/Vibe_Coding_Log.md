@@ -529,3 +529,44 @@ def submit(frame):
 - 지금 값(0.35 / 0.15)은 "감"으로 지정. 실제 운영 로그(사람이 오탐 태그한 케이스) 축적 후 임계값 스윕 스크립트로 최적점 재산출 예정
 - 드론 건물 검사 특성(하자 놓치면 안전 문제)상 "미탐 최소화" 쪽으로 더 완화(예: 0.30 / 0.10) 검토 가능
 - 재학습 대안: class-weighted CrossEntropy, RandomRotation/ColorJitter 증강, 19→5 계층적 그룹핑 (외부 학습 파이프라인 필요)
+
+---
+
+## 🛠️ 2026-04-21 추가 — Issue 2 LiDAR 3D 좌표 배선 + 품질 개선 일괄
+
+### 1️⃣ Issue 2: MAVLink/LiDAR 3D 좌표 통합 (하드웨어 없이 배선 완료)
+기존 lidar.py(TF-Luna 9-byte 프레임 파서, 중앙값 필터, compute_3d_position) 이미 존재. **빠진 배선 4개** 연결:
+1. `app/services/telemetry_cache.py` **신규** — 최신 드론 pose 메모리 캐시 싱글톤 (asyncio.Lock, stale 5초 판정)
+2. [app/main.py](app/main.py) — lifespan에 `lidar_service.start()/stop()` 호출 (serial 실패해도 graceful), health에 `lidar.connected/distance_m`, `telemetry_cache.ready/age_sec` 노출
+3. [app/api/telemetry.py](app/api/telemetry.py) — POST /telemetry 수신 시 `telemetry_cache.update()` + `lidar_service.update_attitude()` 호출
+4. [app/core/stream_inference.py](app/core/stream_inference.py) — 프레임 추론 시점에 `_compute_lidar_xyz()` (cache_fresh + lidar distance) 호출, 레거시 `defect.new` 이벤트와 `stream` 페이로드에 `lidar_x/y/z` 주입
+
+좌표 없으면 None 유지 → 드론/LiDAR 없어도 서비스 영향 없음.
+
+### 2️⃣ 이미지 저장소 리팩 (Base64 → 파일시스템)
+- `app/services/image_storage.py` **신규** — `save_base64_jpeg(b64) → rel_path`, `get_url()`, `delete()`. 저장 경로: `./uploads/defects/YYYY-MM-DD/uuid.jpg` (이미 mount된 StaticFiles 경유 서빙)
+- [app/models/defect.py](app/models/defect.py) — `image_crop_path` (String 255) 컬럼 추가, `image_crop`(Text)는 DEPRECATED 표시 유지
+- [alembic/versions/c8f1d2e4a7b9_add_image_crop_path_to_defect_logs.py](alembic/versions/c8f1d2e4a7b9_add_image_crop_path_to_defect_logs.py) **신규 마이그레이션**
+- [app/schemas/defect.py](app/schemas/defect.py) — `image_crop_path`, `image_crop_url` 응답 필드
+- [app/api/ai_webhook.py](app/api/ai_webhook.py), [app/api/defects.py](app/api/defects.py) — Base64 수신 시 파일 저장 → `image_crop=None`, `image_crop_path=rel_path` 기록. `_build_response()` 헬퍼로 `image_crop_url` 채움
+
+효과: DB Text 컬럼 용량 폭증 방지. 1건당 ~100KB → 파일 경로만 저장.
+
+### 3️⃣ 로깅 체계 (structlog + Request ID)
+- `app/core/logging.py` **신규** — `configure_logging(json_output, level)`, `get_logger(name)`, contextvars 통합
+- `app/core/middleware.py` **신규** — `RequestIDMiddleware`: `X-Request-ID` 수신/발행, 모든 로그에 `request_id/method/path` 자동 바인딩, 요청 완료 시 `http.request` 이벤트(status, duration_ms) 로깅
+- [app/config.py](app/config.py) — `LOG_JSON=False`, `LOG_LEVEL=INFO`
+- [requirements.txt](requirements.txt) — `structlog` 추가
+- [app/main.py](app/main.py) — import 시점에 `configure_logging()`, `add_middleware(RequestIDMiddleware)`
+- [.env.example](.env.example) — LOG_JSON/LOG_LEVEL 문서화
+
+### 4️⃣ 테스트 추가 (새 모듈 회귀 방지)
+- `tests/test_telemetry_cache.py` — update/snapshot/stale/clear 7 케이스
+- `tests/test_image_storage.py` — base64 저장/삭제/data URL prefix/에러 8 케이스
+- `tests/test_wallpaper_double_gate.py` — monkeypatch 기반 이중 게이트 로직 5 케이스 (모델 없이 검증)
+
+### 5️⃣ 후속 TODO (다음 이터레이션)
+- 카메라 intrinsics 불필요(1D LiDAR) 구조 유지 중. 멀티빔/3D LiDAR로 교체 시 `compute_3d_position` 확장 필요
+- `image_crop` (Text, deprecated) 컬럼은 충분한 마이그레이션 기간 후 drop 예정
+- 운영 배포 시 `LOG_JSON=true` 전환 + Grafana/Datadog 연동
+- DefectLog 삭제 시 파일 cleanup 훅 (`image_storage.delete(defect.image_crop_path)`) 필요

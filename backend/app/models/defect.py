@@ -75,8 +75,11 @@ class DefectLog(Base):
     lidar_z = Column(Float, comment="월드 좌표 Z / 고도 (m)")
 
     # ── 이미지 데이터 ─────────────────────────
-    # Base64 인코딩된 JPEG 크롭 이미지
-    image_crop = Column(Text, comment="하자 영역 크롭 이미지 (Base64 JPEG)")
+    # image_crop (deprecated): Base64 인코딩된 JPEG. DB 용량 이슈로 파일 저장 방식으로 전환 중.
+    # image_crop_path: 파일시스템 상대 경로 (예: "defects/2026-04-21/xxx.jpg"). /uploads/ StaticFiles로 서빙.
+    # 신규 레코드는 image_crop_path만 채움. image_crop은 과거 데이터 호환용으로만 유지.
+    image_crop = Column(Text, comment="[DEPRECATED] Base64 JPEG. 신규는 image_crop_path 사용.")
+    image_crop_path = Column(String(255), comment="하자 크롭 이미지 상대 경로 (uploads/ 기준)")
 
     # ── 열화상 데이터 ─────────────────────────
     thermal_max = Column(Float, comment="하자 ROI 최고 온도 (°C)")

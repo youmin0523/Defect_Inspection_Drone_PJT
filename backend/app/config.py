@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     # 추론 디바이스: 'auto' | 'cuda' | 'cpu'
     DEVICE: str = "auto"
 
+    # 로깅 — JSON 출력은 운영 권장, 개발은 컬러 콘솔
+    LOG_JSON: bool = False
+    LOG_LEVEL: str = "INFO"
+
     # ── Legacy (하위 호환용, 신규 코드에선 사용 금지) ──
     YOLO_WEIGHTS_PATH: str = "./models_weights/aeroinspect_yolov8.pt"
 

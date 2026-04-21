@@ -27,6 +27,8 @@ from app.config import settings
 from app.core.ws_manager import ws_manager
 from app.services.defect_taxonomy import map_to_legacy, xyxy_to_xywhn
 from app.services.inference_pipeline import pipeline
+from app.services.lidar import lidar_service
+from app.services.telemetry_cache import telemetry_cache
 
 
 @dataclass
@@ -145,12 +147,20 @@ class StreamInferenceWorker:
             pipeline.detect, item.frame_bgr, None, False
         )
 
+        # 프레임 캡처 시점의 드론 pose 스냅샷 → 3D 월드 좌표 계산
+        # pose/LiDAR 없으면 좌표 None으로 graceful fallback
+        lidar_xyz = self._compute_lidar_xyz()
+
         now = time.time()
         payload = {
             "type": "detection",
             "timestamp": now,
             "frame_id": item.frame_id,
             "result": json.loads(result.model_dump_json()),
+            "lidar_position": (
+                {"x": lidar_xyz[0], "y": lidar_xyz[1], "z": lidar_xyz[2]}
+                if lidar_xyz is not None else None
+            ),
         }
 
         # 1) /ws/stream 구독자에게 전송 (stream 채널)
@@ -158,13 +168,32 @@ class StreamInferenceWorker:
 
         # 2) 기존 /ws?channel=defects 구독자에게도 전송 (호환)
         #    레거시 포맷 최소 필드로 변환
-        legacy_events = self._to_legacy_events(result, item)
+        legacy_events = self._to_legacy_events(result, item, lidar_xyz)
         for ev in legacy_events:
             await ws_manager.broadcast("defects", ev)
 
     @staticmethod
-    def _to_legacy_events(result, item: QueuedFrame) -> list:
-        """신규 DetectionResult → 기존 'defect.new' 이벤트 리스트."""
+    def _compute_lidar_xyz() -> Optional[tuple]:
+        """
+        최신 드론 pose + LiDAR 전방 거리 → 탐지 대상의 3D 월드 좌표.
+        조건:
+          - telemetry_cache에 fresh pose 있음 (roll/pitch/yaw 포함)
+          - lidar_service 최신 거리 측정값 있음
+        둘 중 하나라도 없으면 None 반환 (좌표 미기록).
+        """
+        pose = telemetry_cache.snapshot_fresh()
+        if pose is None or not pose.has_attitude:
+            return None
+        if lidar_service.latest_distance_m is None:
+            return None
+        return lidar_service.compute_3d_position(pose.pos_x, pose.pos_y, pose.pos_z)
+
+    @staticmethod
+    def _to_legacy_events(result, item: QueuedFrame, lidar_xyz: Optional[tuple] = None) -> list:
+        """신규 DetectionResult → 기존 'defect.new' 이벤트 리스트.
+
+        lidar_xyz: (x, y, z) 월드 좌표. None이면 좌표 필드 생략.
+        """
         events = []
         img_w = result.image_shape.width
         img_h = result.image_shape.height
@@ -172,6 +201,14 @@ class StreamInferenceWorker:
         def _legacy_bbox(xyxy):
             cx, cy, bw, bh = xyxy_to_xywhn(xyxy, img_w, img_h)
             return {"x": cx, "y": cy, "w": bw, "h": bh}
+
+        lidar_fields = {}
+        if lidar_xyz is not None:
+            lidar_fields = {
+                "lidar_x": lidar_xyz[0],
+                "lidar_y": lidar_xyz[1],
+                "lidar_z": lidar_xyz[2],
+            }
 
         for det in result.yolo_thermal:
             area, code, dtype = map_to_legacy("yolo_thermal", det.class_)
@@ -189,6 +226,7 @@ class StreamInferenceWorker:
                     "defect_class_display_en": det.class_display_en,
                     "defect_class_display_ko": det.class_display_ko,
                     "frame_id": item.frame_id,
+                    **lidar_fields,
                 },
             })
         for det in result.yolo_delam:
@@ -207,6 +245,7 @@ class StreamInferenceWorker:
                     "defect_class_display_en": det.class_display_en,
                     "defect_class_display_ko": det.class_display_ko,
                     "frame_id": item.frame_id,
+                    **lidar_fields,
                 },
             })
         # 벽지는 신뢰 높을 때만 이벤트화
@@ -227,6 +266,7 @@ class StreamInferenceWorker:
                     "defect_class_display_en": wc.top1_class_display_en,
                     "defect_class_display_ko": wc.top1_class_display_ko,
                     "frame_id": item.frame_id,
+                    **lidar_fields,
                 },
             })
         return events

@@ -46,6 +46,9 @@ httpx
 websockets
 aiofiles
 
+# ── Logging ────────────────────────────────
+structlog
+
 # ── Test ───────────────────────────────────
 pytest
 pytest-asyncio

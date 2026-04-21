@@ -24,6 +24,15 @@ from app.schemas.defect import (
     ThermalData,
 )
 from app.core.ws_manager import ConnectionManager
+from app.services.image_storage import image_storage
+
+
+def _build_response(defect: DefectLog) -> DefectLogResponse:
+    """ORM → 응답 스키마. image_crop_path가 있으면 URL까지 채움."""
+    resp = DefectLogResponse.model_validate(defect)
+    if defect.image_crop_path:
+        resp.image_crop_url = image_storage.get_url(defect.image_crop_path)
+    return resp
 
 router = APIRouter()
 
@@ -70,6 +79,9 @@ async def receive_detection(
             "lidar_position": {"x": 2.5, "y": 1.0, "z": 1.8},
         })
     """
+    # Base64 이미지 → 파일 저장 (실패하면 None 저장, 하자 기록은 계속)
+    image_crop_path = image_storage.save_base64_jpeg(payload.image_crop)
+
     defect = DefectLog(
         area=payload.area.upper() if payload.area else None,
         defect_source=payload.defect_source,
@@ -87,7 +99,8 @@ async def receive_detection(
         lidar_x=payload.lidar_position.x if payload.lidar_position else None,
         lidar_y=payload.lidar_position.y if payload.lidar_position else None,
         lidar_z=payload.lidar_position.z if payload.lidar_position else None,
-        image_crop=payload.image_crop,
+        image_crop=None,  # Base64는 더이상 DB에 저장 안 함
+        image_crop_path=image_crop_path,
         thermal_max=payload.thermal_data.max if payload.thermal_data else None,
         thermal_min=payload.thermal_data.min if payload.thermal_data else None,
         thermal_avg=payload.thermal_data.avg if payload.thermal_data else None,
@@ -98,7 +111,7 @@ async def receive_detection(
     db.add(defect)
     await db.flush()
 
-    response = DefectLogResponse.model_validate(defect)
+    response = _build_response(defect)
 
     await manager.broadcast("defects", {
         "type": "defect.new",
@@ -137,6 +150,7 @@ async def receive_batch_detections(
     """
     saved = []
     for det in payload.detections:
+        image_crop_path = image_storage.save_base64_jpeg(det.image_crop)
         defect = DefectLog(
             area=det.area.upper(),
             category_code=det.category_code,
@@ -150,7 +164,8 @@ async def receive_batch_detections(
             lidar_x=det.lidar_position.x if det.lidar_position else None,
             lidar_y=det.lidar_position.y if det.lidar_position else None,
             lidar_z=det.lidar_position.z if det.lidar_position else None,
-            image_crop=det.image_crop,
+            image_crop=None,  # Base64는 더이상 DB에 저장 안 함
+            image_crop_path=image_crop_path,
             thermal_max=det.thermal_data.max if det.thermal_data else None,
             thermal_min=det.thermal_data.min if det.thermal_data else None,
             thermal_avg=det.thermal_data.avg if det.thermal_data else None,
@@ -159,7 +174,7 @@ async def receive_batch_detections(
         )
         db.add(defect)
         await db.flush()
-        saved.append(DefectLogResponse.model_validate(defect))
+        saved.append(_build_response(defect))
 
     # 일괄 WS Push
     await manager.broadcast("defects", {

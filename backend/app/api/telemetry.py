@@ -20,6 +20,8 @@ from app.schemas.telemetry import (
     TelemetryListResponse,
 )
 from app.core.ws_manager import ConnectionManager
+from app.services.lidar import lidar_service
+from app.services.telemetry_cache import telemetry_cache
 
 router = APIRouter()
 
@@ -68,6 +70,10 @@ async def create_telemetry(
     """
     드론 텔레메트리 저장 + WebSocket 'telemetry' 채널로 실시간 Push.
     ROS2 브릿지 또는 MAVLink 파서에서 주기적으로 호출.
+
+    추가 동작:
+      - telemetry_cache 갱신 (stream_inference가 프레임 캡처 시점에 snapshot)
+      - LiDAR 서비스에 드론 자세 전파 (3D 좌표 계산용)
     """
     log = TelemetryLog(
         pos_x=payload.pos_x,
@@ -88,6 +94,21 @@ async def create_telemetry(
 
     db.add(log)
     await db.flush()
+
+    # 메모리 캐시 갱신 (실시간 추론 경로에서 DB 조회 없이 O(1) 접근)
+    await telemetry_cache.update(
+        pos_x=payload.pos_x,
+        pos_y=payload.pos_y,
+        pos_z=payload.pos_z,
+        roll=payload.roll,
+        pitch=payload.pitch,
+        yaw=payload.yaw,
+        lidar_distance=payload.lidar_distance,
+    )
+
+    # LiDAR 서비스에 자세 전파 (compute_3d_position에서 사용)
+    if payload.roll is not None and payload.pitch is not None and payload.yaw is not None:
+        lidar_service.update_attitude(payload.roll, payload.pitch, payload.yaw)
 
     response = TelemetryResponse.model_validate(log)
 
