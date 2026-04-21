@@ -48,8 +48,10 @@ class Settings(BaseSettings):
 
     # YOLO 공통 신뢰도 임계값 (crack_moisture + delamination)
     YOLO_CONF_THRESHOLD: float = 0.25
-    # ResNet50 벽지 분류 신뢰도 임계값 (val_acc 54% 감안, 보수적으로 0.4)
-    WALLPAPER_CONF_THRESHOLD: float = 0.4
+    # ResNet50 벽지 분류 신뢰도 임계값 (val_acc 54% 감안, top1 최소 신뢰도)
+    WALLPAPER_CONF_THRESHOLD: float = 0.35
+    # top1 - top2 최소 마진. 모호한 예측(top1/top2 근소차) 차단용
+    WALLPAPER_MARGIN_THRESHOLD: float = 0.15
 
     # WebSocket 스트림 추론 — N프레임 중 1프레임만 추론 (GPU 부하 분산)
     FRAME_SKIP: int = 3
