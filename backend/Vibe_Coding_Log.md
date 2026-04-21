@@ -502,3 +502,30 @@ def submit(frame):
 - **싱글 워커 제한**: `stream_inference_worker`는 프로세스 내 싱글톤이라 gunicorn multi-worker 구동 불가. 다중 워커 필요 시 Redis pub/sub 기반 리팩터
 - **드론 좌표**: MAVLink/LiDAR 연동 전이라 `lidar_x/y/z`는 당분간 NULL. TF 연동 완료 후 기존 컬럼에 채울 예정
 - **벽지 분류 정확도 0.54**: `WALLPAPER_CONF_THRESHOLD=0.4`로 보수 필터링. 데이터 추가 수집 후 fine-tuning 필요
+
+---
+
+## 🔧 2026-04-21 추가 세션 — 벽지 분류 오탐 감소 (Issue 1)
+
+### 1️⃣ 배경
+- ResNet50 벽지 분류기 val_acc ≈ 54% (19-way). 단일 `top1_conf >= 0.4` 필터는 모호한 예측(top1/top2 근소차)을 걸러내지 못해 오탐 유입.
+- 재학습 없이 **코드 수정만으로** FP 감소 가능한 지점을 찾음.
+
+### 2️⃣ 적용한 개선 — 이중 게이트 (Top-k Margin 투표)
+`is_confident` 판정에 두 조건 모두 만족 요구:
+1. `top1_conf >= WALLPAPER_CONF_THRESHOLD` (기본 0.35로 완화 — 19-way 특성 반영, 랜덤(1/19≈5%) 대비 6배 이상)
+2. `top1_conf - top2_conf >= WALLPAPER_MARGIN_THRESHOLD` (기본 0.15 신규 — 2위와의 분리도)
+
+근거: 1위 점수 높아도 2위와 근소차면 모델이 헷갈린 상태. 그런 케이스는 `is_confident=false` → severity null로 판정 보류시켜 오탐 차단.
+
+### 3️⃣ 변경 파일
+- [app/config.py](app/config.py) — `WALLPAPER_CONF_THRESHOLD` 0.4 → 0.35, `WALLPAPER_MARGIN_THRESHOLD=0.15` 신규 추가
+- [app/services/inference_pipeline.py](app/services/inference_pipeline.py) — `_run_wallpaper()`에 top1/top2 margin 계산 + 이중 게이트 로직. init / load_models 초기화 값 반영
+- [app/schemas/detection.py](app/schemas/detection.py) — `WallpaperPrediction.is_confident` description 이중 조건으로 갱신
+- [.env.example](.env.example) — 두 임계값 반영
+- [README.md](README.md) — 알려진 제약 섹션에 이중 게이트 설명 추가
+
+### 4️⃣ 추후 튜닝 방향
+- 지금 값(0.35 / 0.15)은 "감"으로 지정. 실제 운영 로그(사람이 오탐 태그한 케이스) 축적 후 임계값 스윕 스크립트로 최적점 재산출 예정
+- 드론 건물 검사 특성(하자 놓치면 안전 문제)상 "미탐 최소화" 쪽으로 더 완화(예: 0.30 / 0.10) 검토 가능
+- 재학습 대안: class-weighted CrossEntropy, RandomRotation/ColorJitter 증강, 19→5 계층적 그룹핑 (외부 학습 파이프라인 필요)
