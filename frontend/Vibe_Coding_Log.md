@@ -1066,3 +1066,23 @@ Dashboard (12-col grid)
   ```
 
 - **상태**: 반영 완료
+
+---
+
+## 🔧 2026-04-21 | 의존성 재설치로 package-lock.json 동기화
+
+### ⏱ 배경
+- `git pull` 직후 dev 서버 기동 시 Vite 에러: `Failed to resolve import "@react-pdf/renderer" from "src/components/report/ExcelPreviewModal.jsx"`
+- 원인: 최근 PR에서 `@react-pdf/renderer` 의존성이 `package.json`에 추가됐으나 로컬 `node_modules` 미반영
+
+### ⏱ 조치
+- `frontend/` 경로에서 `npm install` 실행
+- `package-lock.json` 갱신 (lockfileVersion/해시 변경)
+- Vite dev 서버 재기동 → ExcelPreviewModal 정상 import
+
+### ⏱ 영향 파일
+- [package-lock.json](package-lock.json) — 자동 갱신 (직접 수정 X)
+
+### ⏱ 비고
+- 앞으로 `git pull` 후에는 `npm install` 한 번 돌려주는 흐름 유지 권장
+- 백엔드도 동일하게 `pip install -r requirements.txt` 확인
