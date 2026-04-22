@@ -233,11 +233,17 @@ async def create_defect(
 
 @router.delete("/{defect_id}", status_code=204)
 async def delete_defect(defect_id: UUID, db: AsyncSession = Depends(get_db)):
-    """하자 탐지 기록 삭제"""
+    """하자 탐지 기록 삭제 (연결된 크롭 파일도 함께 제거)"""
     result = await db.execute(
         select(DefectLog).where(DefectLog.id == defect_id)
     )
     defect = result.scalar_one_or_none()
     if not defect:
         raise HTTPException(status_code=404, detail="하자 탐지 기록을 찾을 수 없습니다.")
+
+    # DB 레코드 먼저 제거 → 파일 정리. 파일 삭제 실패해도 트랜잭션 영향 없음.
+    crop_path = defect.image_crop_path
     await db.delete(defect)
+
+    if crop_path:
+        image_storage.delete(crop_path)

@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook, sites, notifications, chat, organization, detect, ws_stream
+from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook, sites, notifications, chat, organization, detect, ws_stream, coverage
 
 api_router = APIRouter()
 
@@ -121,4 +121,11 @@ api_router.include_router(
     ws_stream.router,
     prefix="",
     tags=["WebSocket"],
+)
+
+# 현장별 점검 커버리지 산출 (텔레메트리 convex hull)
+api_router.include_router(
+    coverage.router,
+    prefix="/coverage",
+    tags=["Coverage"],
 )
