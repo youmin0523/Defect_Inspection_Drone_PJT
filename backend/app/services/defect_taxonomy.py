@@ -156,6 +156,53 @@ def map_to_legacy(
 # 좌표 변환 유틸
 # =============================================
 
+# =============================================
+# 20종 하자 파이프라인 매핑 (신규)
+# =============================================
+# severity_mapper.py의 DEFECT_CATALOG와 1:1 매핑.
+# 각 모델 내부 class_name → (code, display_ko, severity, area)
+
+DEFECT_20_MAP: Dict[str, Tuple[str, str, str, str]] = {
+    # (class_name): (code, display_ko, severity, area)
+    # M1: 구조·방수
+    "crack_structural":       ("A-02", "균열 (구조 균열)",       "HIGH", "A"),
+    "crack_finishing":        ("A-03", "균열 (마감 균열)",        "MED",  "A"),
+    "caulking_defect":        ("B-03", "코킹 누락·불량",         "HIGH", "B"),
+    "waterproof_defect":      ("B-04", "방수층 들뜸 / 누수 흔적", "HIGH", "B"),
+    # M2: 마감·표면
+    "wallpaper_seam":         ("C-01", "도배 이음매 불량",        "MED",  "C"),
+    "wallpaper_bubble":       ("C-02", "도배지 기포·들뜸",        "MED",  "C"),
+    "paint_stain":            ("C-03", "도색 얼룩·붓자국",        "LOW",  "C"),
+    "scratch":                ("C-04", "찍힘·스크래치 (벽·천장)",  "LOW",  "C"),
+    "baseboard_damage":       ("C-05", "걸레받이 오염·파손",      "LOW",  "C"),
+    # M3: 바닥·창호
+    "floor_stain":            ("D-03", "바닥 오염·스크래치",      "LOW",  "D"),
+    "grout_defect":           ("D-04", "줄눈 불량 (타일·마루)",   "LOW",  "D"),
+    "glass_scratch":          ("E-01", "창호 유리 스크래치·파손",  "MED",  "E"),
+    "frame_paint_defect":     ("E-02", "창틀·문틀 도장 불량",     "LOW",  "E"),
+    # M4: 열화상
+    "window_insulation_defect": ("B-01", "창호 단열 불량 (결로·냉교)", "HIGH", "B"),
+    "wall_insulation_gap":      ("B-02", "벽체 단열 공백·탈락",      "HIGH", "B"),
+    "window_airtight_defect":   ("B-05", "창호 기밀 불량 (틈새)",     "MED",  "B"),
+    "floor_heating_defect":     ("D-01", "바닥 난방 불량 (온도 편차)", "HIGH", "D"),
+    # M5+G1: 기하학
+    "vertical_horizontal_defect": ("A-01", "벽·천장 수직·수평도 불량", "HIGH", "A"),
+    "frame_squareness_defect":    ("A-04", "문·창호 틀 직각도 불량",   "MED",  "A"),
+    # D-02: 바닥재 들뜸 (열화상 간접 / 시각적)
+    "floor_lifting":          ("D-02", "바닥재 들뜸 (공명 감지)",  "MED",  "D"),
+}
+
+
+def get_20defect_info(class_name: str) -> Tuple[str, str, str, str]:
+    """
+    20종 class_name → (code, display_ko, severity, area).
+    매핑 없으면 ("X-00", class_name, "MED", "A") 폴백.
+    """
+    if class_name in DEFECT_20_MAP:
+        return DEFECT_20_MAP[class_name]
+    return ("X-00", class_name, "MED", "A")
+
+
 def xyxy_to_xywhn(
     xyxy: List[float],
     img_w: int,

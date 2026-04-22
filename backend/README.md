@@ -205,6 +205,86 @@ DEVICE=auto
 
 전체 목록은 [.env.example](.env.example) 참조.
 
+---
+
+## 20종 하자 검출 파이프라인 (신규)
+
+> `USE_20DEFECT_PIPELINE=true` 설정 시 활성화. 기존 3-모델 파이프라인과 병존.
+
+### 아키텍처: 6-Model + Geometric (ONNX Runtime)
+
+기존 PyTorch 직접 추론에서 **전 모델 ONNX Runtime** 추론으로 전환. 프레임워크 종속성 제거, 추론 속도 ~20% 향상.
+
+| 모델 | 아키텍처 | 커버 하자 | 입력 |
+|------|---------|----------|------|
+| M1 | YOLOv8m → ResNet50 (2-Stage) | A-02 구조균열, A-03 마감균열, B-03 코킹, B-04 방수 | RGB |
+| M2 | YOLOv8m → ResNet50 (2-Stage) | C-01~C-05 (도배/도색/스크래치/걸레받이) | RGB |
+| M3 | YOLOv8m → ResNet50 (2-Stage) | D-03 바닥오염, D-04 줄눈, E-01 유리, E-02 문틀 | RGB |
+| M4 | U-Net (EfficientNet-B3) | B-01 창호단열, B-02 벽체단열, B-05 기밀, D-01 바닥난방 | Thermal+RGB |
+| M5+G1 | YOLOv8m-seg + Hough/RANSAC | A-01 수직수평, A-04 직각도 | RGB+IMU |
+| M6 | PatchCore (Anomalib) | 전체 앙상블 보완 | RGB |
+
+### 2-Stage 구조
+
+YOLO가 하자 영역을 검출(Stage 1) → ROI 크롭 → ResNet50이 하자 유형을 정밀 분류(Stage 2).
+
+### 계층적 실행 (실시간 스트리밍)
+
+```
+Tier 1 (매 3프레임): M1 + M2      → ~50ms  (HIGH severity 즉시 검출)
+Tier 2 (매 6프레임): + M3 + M5+G1  → ~55ms  (MED/LOW + 기하학)
+Tier 3 (매 9프레임): + M4 + M6     → ~70ms  (열화상 + 앙상블)
+```
+
+### 새 환경변수 (.env)
+
+```env
+USE_20DEFECT_PIPELINE=true   # false면 기존 3-모델 사용
+M1_YOLO_ONNX=m1_yolo_structural.onnx
+M1_RESNET_ONNX=m1_resnet_crack_classifier.onnx
+M1_CONF_THRESHOLD=0.15
+# ... (전체 목록은 app/config.py 참조)
+```
+
+### 새 DB 컬럼 (마이그레이션 0003)
+
+```bash
+alembic upgrade head  # deviation_degrees, deviation_mm_per_m, delta_temperature, ensemble_boosted 추가
+```
+
+### `DetectionResult20` 스키마 예시
+
+```json
+{
+  "detections": [
+    {"class":"crack_structural","code":"A-02","class_display_ko":"균열 (구조 균열)",
+     "conf":0.82,"bbox_xyxy":[120,80,340,210],"severity":"HIGH",
+     "defect_source":"yolo_structural"}
+  ],
+  "insulation": [
+    {"class":"wall_insulation_gap","code":"B-02","delta_temperature":4.2,
+     "max_temperature":28.5,"min_temperature":18.2,"severity":"HIGH"}
+  ],
+  "alignment": [
+    {"class":"frame_squareness_defect","code":"A-04",
+     "deviation_degrees":0.35,"deviation_mm_per_m":6.1,"severity":"MED"}
+  ],
+  "anomaly_score": 0.72,
+  "has_defect": true,
+  "defect_count": 3,
+  "image_shape": {"width":640,"height":480},
+  "tier_executed": 3
+}
+```
+
+### ML 학습 가이드
+
+데이터 준비 → 모델 학습 → ONNX 변환 → 배포 전체 과정:
+
+**[training/README.md](training/README.md)** 참조.
+
+---
+
 ## 알려진 제약
 
 - **벽지 분류 val_acc ≈ 54%**: 19-way 분류라 정확도 낮음. 이중 게이트로 필터링:

@@ -98,6 +98,17 @@ class DefectLog(Base):
     # 원시 YOLO 탐지 결과 전체 저장 (디버깅·재분석용)
     raw_payload = Column(JSONB, comment="YOLO 원시 탐지 결과 JSON")
 
+    # ── 20종 파이프라인 확장 컬럼 ────────────
+    # 기하학 하자 (A-01, A-04): 수직수평·직각도 편차
+    deviation_degrees = Column(Float, nullable=True, comment="수직수평/직각도 편차 (도)")
+    deviation_mm_per_m = Column(Float, nullable=True, comment="편차 mm/m 환산")
+
+    # 단열 하자 (B-01, B-02, B-05, D-01): 온도 편차
+    delta_temperature = Column(Float, nullable=True, comment="주변 대비 온도차 (°C)")
+
+    # 앙상블 부스팅 여부
+    ensemble_boosted = Column(String(5), nullable=True, default=None, comment="PatchCore 앙상블 승격 (true/false)")
+
     # ── 인덱스 ───────────────────────────────
     # 필터링 쿼리 최적화: 심각도+시간 / 영역+시간 / 프레임
     __table_args__ = (
