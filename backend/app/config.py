@@ -123,6 +123,17 @@ class Settings(BaseSettings):
     # ── JWT ──────────────────────────────────
     JWT_SECRET: str = "change-me-in-production"
     JWT_EXPIRE_MINUTES: int = 120
+    # Refresh token: 장기 유효 (기본 14일). /auth/refresh 엔드포인트로 access token 재발급용.
+    JWT_REFRESH_EXPIRE_DAYS: int = 14
+
+    # 푸시 알림 프로바이더: "noop" | "fcm" | "apns"
+    # 운영 배포 시 firebase-admin 설치 후 "fcm" 으로 전환.
+    PUSH_PROVIDER: str = "noop"
+
+    # WebSocket 브로드캐스트 백엔드: "memory" (단일 워커) | "redis" (수평 확장)
+    # redis 선택 시 REDIS_URL 필수.
+    WS_BACKEND: str = "memory"
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # ── OAuth (SNS 로그인) ────────────────────
     GOOGLE_CLIENT_ID: str = ""

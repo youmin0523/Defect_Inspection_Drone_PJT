@@ -45,3 +45,23 @@ class FloorplanListResponse(BaseModel):
     """평면도 목록 응답"""
     items: list[FloorplanUploadResponse]
     total: int
+
+
+# ── FR-015 스케일 보정 ──────────────────────────
+class FloorplanCalibrateRequest(BaseModel):
+    """
+    평면도 위 두 점 + 실측 거리 → px/m 환산.
+    p1, p2: 평면도 이미지 픽셀 좌표 (원본 해상도 기준)
+    real_length_m: p1-p2 구간의 실제 길이(미터)
+    """
+    p1: list[float] = Field(..., min_length=2, max_length=2, description="[x, y] 픽셀 좌표")
+    p2: list[float] = Field(..., min_length=2, max_length=2, description="[x, y] 픽셀 좌표")
+    real_length_m: float = Field(..., gt=0, description="p1-p2 구간 실측 길이 (m)")
+
+
+class FloorplanCalibrateResponse(BaseModel):
+    """스케일 보정 결과"""
+    id: UUID
+    scale_px_per_meter: float = Field(..., description="1m 당 픽셀 수")
+    pixel_length: float = Field(..., description="p1-p2 픽셀 거리 (검증용)")
+    real_length_m: float

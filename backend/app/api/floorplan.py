@@ -8,6 +8,7 @@
 #       - DELETE /floorplan/{id}      → 삭제
 # =============================================
 
+import math
 import os
 import uuid as uuid_mod
 from uuid import UUID
@@ -17,9 +18,11 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
 from app.models.floorplan import Floorplan
 from app.schemas.floorplan import (
+    FloorplanCalibrateRequest,
+    FloorplanCalibrateResponse,
     FloorplanUploadResponse,
     FloorplanProcessResponse,
     FloorplanAnalyzeResponse,
@@ -42,7 +45,10 @@ ALLOWED_CONTENT_TYPES = {
 
 
 @router.get("", response_model=FloorplanListResponse)
-async def list_floorplans(db: AsyncSession = Depends(get_db)):
+async def list_floorplans(
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),  # TODO: site/org FK 추가 시 org 스코프로 전환
+):
     """업로드된 평면도 목록 조회"""
     total = await db.scalar(select(func.count()).select_from(Floorplan))
     result = await db.execute(
@@ -57,7 +63,11 @@ async def list_floorplans(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{floorplan_id}", response_model=FloorplanUploadResponse)
-async def get_floorplan(floorplan_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_floorplan(
+    floorplan_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
+):
     """평면도 상세 조회"""
     result = await db.execute(
         select(Floorplan).where(Floorplan.id == floorplan_id)
@@ -72,6 +82,7 @@ async def get_floorplan(floorplan_id: UUID, db: AsyncSession = Depends(get_db)):
 async def upload_floorplan(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
 ):
     """
     평면도 이미지(JPG/PNG/PDF/DXF) 업로드.
@@ -114,6 +125,7 @@ async def upload_floorplan(
 async def process_floorplan(
     floorplan_id: UUID,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
 ):
     """
     업로드된 평면도에서 벽체 라인 추출 트리거.
@@ -156,7 +168,10 @@ async def process_floorplan(
 
 
 @router.post("/analyze", response_model=FloorplanAnalyzeResponse)
-async def analyze_floorplan(file: UploadFile = File(...)):
+async def analyze_floorplan(
+    file: UploadFile = File(...),
+    _user=Depends(get_current_user),
+):
     """
     평면도 이미지에서 벽체 라인 추출 (Stateless — DB 불필요).
     JPG/PNG/WEBP 이미지를 받아 OpenCV로 처리 후 정규화 벽체 좌표 JSON 반환.
@@ -178,10 +193,55 @@ async def analyze_floorplan(file: UploadFile = File(...)):
     return FloorplanAnalyzeResponse(**result)
 
 
+@router.post("/{floorplan_id}/calibrate", response_model=FloorplanCalibrateResponse)
+async def calibrate_floorplan_scale(
+    floorplan_id: UUID,
+    payload: FloorplanCalibrateRequest,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    """
+    평면도 스케일 보정 (FR-015).
+    사용자가 찍은 두 점(p1, p2) + 실측 거리(real_length_m) →
+      scale_px_per_meter = pixel_length / real_length_m
+    이후 벽체 길이·면적을 미터 단위로 표기 가능.
+    """
+    result = await db.execute(select(Floorplan).where(Floorplan.id == floorplan_id))
+    fp = result.scalar_one_or_none()
+    if not fp:
+        raise HTTPException(status_code=404, detail="평면도를 찾을 수 없습니다.")
+
+    dx = payload.p2[0] - payload.p1[0]
+    dy = payload.p2[1] - payload.p1[1]
+    pixel_length = math.hypot(dx, dy)
+    if pixel_length < 1e-6:
+        raise HTTPException(
+            status_code=400,
+            detail="두 점이 동일합니다. 서로 다른 지점을 지정하세요.",
+        )
+
+    px_per_m = pixel_length / payload.real_length_m
+    fp.scale_px_per_meter = px_per_m
+    fp.scale_reference = {
+        "p1": list(payload.p1),
+        "p2": list(payload.p2),
+        "real_length_m": payload.real_length_m,
+    }
+    await db.flush()
+
+    return FloorplanCalibrateResponse(
+        id=fp.id,
+        scale_px_per_meter=round(px_per_m, 4),
+        pixel_length=round(pixel_length, 2),
+        real_length_m=payload.real_length_m,
+    )
+
+
 @router.delete("/{floorplan_id}", status_code=204)
 async def delete_floorplan(
     floorplan_id: UUID,
     db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
 ):
     """평면도 및 관련 파일 삭제"""
     result = await db.execute(

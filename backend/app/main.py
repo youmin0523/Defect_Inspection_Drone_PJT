@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.core.logging import configure_logging, get_logger
+from app.core.metrics import PrometheusMiddleware, render_metrics
 from app.core.middleware import RequestIDMiddleware
 from app.db.init_db import init_db
 from app.api.router import api_router
@@ -125,6 +126,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(PrometheusMiddleware)
 
 # ── 라우터 마운트 ─────────────────────────────
 app.include_router(api_router, prefix="/api/v1")
@@ -139,6 +141,16 @@ app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
 async def root():
     """서버 상태 확인용 헬스체크 엔드포인트"""
     return {"status": "ok", "service": "AeroInspect API", "version": "1.3.0"}
+
+
+@app.get("/metrics", tags=["Observability"], include_in_schema=False)
+async def prometheus_metrics():
+    """
+    Prometheus 스크래퍼용 메트릭 (OpenMetrics 텍스트).
+    Grafana → Prometheus datasource → aeroinspect_* 시리즈로 조회.
+    Swagger 스키마에서 제외 (include_in_schema=False) — 스크래퍼 전용.
+    """
+    return render_metrics()
 
 
 @app.get("/health", tags=["Health"])

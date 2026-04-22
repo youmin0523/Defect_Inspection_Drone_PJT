@@ -718,3 +718,97 @@ def submit(frame):
 - **alembic heads 병합**: `alembic merge -m "merge 20defect + image_crop_path + site_id chains" 0003 e4c9a8b27f10`
 - **ROS2 브리지/MAVLink 파서** 에서 `POST /telemetry` 호출 시 현재 세션 `site_id` 주입 — 스키마는 준비됨, 호출자 수정 필요
 - 스윕 스크립트용 운영 JSONL 로그 수집 파이프라인 (`logs/wallpaper_predictions.jsonl`) 분리
+
+---
+
+## 🔐 2026-04-22 3rd 세션 — 운영 배포 전 남은 인증·관측·확장 일괄 (@Hijin554)
+
+> **착수 시각**: 2026-04-22 저녁
+> **작업 브랜치**: `Hijin`
+> **목표**: 드론 실기 연동 없이도 가능한 운영 배포 준비 항목 7개 일괄 처리
+> **배경**: "백엔드 드론 없이 할 수 있는 것" 중 고·중 우선순위. MS 브랜치(20종 파이프라인)와 비충돌.
+
+### 1️⃣ Refresh Token
+
+- [app/core/jwt.py](app/core/jwt.py) — `create_refresh_token` / `decode_refresh_token` 추가. payload 에 `type` 클레임(`access` | `refresh`) 분리 → 교차 사용 차단. type 미포함 레거시 토큰은 access 로 호환 허용
+- [app/api/auth.py](app/api/auth.py) `POST /auth/refresh` — 유효 refresh → 새 access 발급. 사용자 존재 재확인 (계정 삭제 케이스 대비)
+- [app/api/auth.py](app/api/auth.py) / [app/api/oauth.py](app/api/oauth.py) — 로그인 응답(`TokenResponse`)에 `refresh_token` 포함. OAuth 3종(Google/Kakao/Naver)도 동일 적용
+- [app/schemas/user.py](app/schemas/user.py) — `TokenResponse.refresh_token`, `RefreshTokenRequest`, `RefreshTokenResponse`
+- [app/config.py](app/config.py) — `JWT_REFRESH_EXPIRE_DAYS: int = 14`
+- 테스트 9개 (roundtrip / 교차 사용 거절 / 레거시 호환 / 만료·변조·서명 오류)
+
+### 2️⃣ SLAM/Floorplan/Telemetry auth 가드 감사
+
+기존에 인증 없이 뚫려 있던 11개 엔드포인트에 `get_current_user` Depends 추가:
+
+| 라우터 | 엔드포인트 | 적용 |
+|--------|-----------|------|
+| SLAM | GET ""  / GET /{id} / POST "" / PATCH /{id} / DELETE /{id} | 전부 |
+| Floorplan | GET "" / GET /{id} / POST /upload / POST /{id}/process / POST /analyze / DELETE /{id} | 전부 |
+| Telemetry | GET /latest / GET "" | GET만 |
+| Telemetry | POST "" | **의도적 오픈** — ROS2 브리지 내부 호출. 주석으로 보안 메모 남김 (향후 `INTERNAL_API_TOKEN` 예정) |
+
+TODO 주석: SLAM/Floorplan 은 site/org FK 추가 후 `get_current_org_member` 로 승격 예정.
+
+### 3️⃣ Prometheus `/metrics`
+
+- [app/core/metrics.py](app/core/metrics.py) **신규** — `CollectorRegistry` 모듈 싱글톤. `http_requests_total`(Counter) / `http_request_duration_seconds`(Histogram) / 추론 워커 카운터 / 결함 카운터 / LiDAR·telemetry·queue gauge
+- `PrometheusMiddleware` — 모든 요청 수/지연 자동 기록. `request.scope["route"].path` 로 템플릿 라벨링 → cardinality 폭증 방지
+- `refresh_sensor_gauges()` — `/metrics` 스크랩 시마다 센서 싱글톤 스냅샷 → Gauge 반영. 미연결 시 -1 sentinel
+- [app/main.py](app/main.py) — 미들웨어 등록 + `/metrics` 엔드포인트 (OpenMetrics 텍스트, `include_in_schema=False`)
+- `prometheus-client` 라이브러리 추가
+- 테스트 5개 (Counter 라벨 증감 / Gauge set / OpenMetrics 렌더 / sentinel / 실값 반영)
+
+### 4️⃣ LOG_JSON 출력 유효성 테스트
+
+- [tests/test_logging_json.py](tests/test_logging_json.py) **신규** — `caplog` fixture 로 structlog 렌더링 결과 회수
+- JSON 라인이 `json.loads` 로 파싱되는지, `event`/`level`/`timestamp` 필드 존재 여부, bound contextvars (`request_id`, `path`) 자동 병합 검증
+- `LOG_JSON=false` 출력은 JSON 파싱 실패해야 함 (구분 확증)
+- 테스트 3개
+
+### 5️⃣ 평면도 스케일 보정 (FR-015)
+
+- [app/models/floorplan.py](app/models/floorplan.py) — `scale_px_per_meter`(Float) + `scale_reference`(JSONB) 컬럼 추가
+- [alembic/versions/f3d1b6c09a12_add_scale_to_floorplans.py](alembic/versions/f3d1b6c09a12_add_scale_to_floorplans.py) **신규**
+- [app/schemas/floorplan.py](app/schemas/floorplan.py) — `FloorplanCalibrateRequest/Response`
+- [app/api/floorplan.py](app/api/floorplan.py) `POST /{id}/calibrate` — `p1`, `p2`, `real_length_m` 입력 → `math.hypot` 픽셀 거리 / 실측 길이 = px/m 환산. 동일 점이면 400
+- 테스트 7개 (가로·대각선 스케일 / 동일점 None / Pydantic 검증: 음수·0·잘못된 좌표 모양)
+
+### 6️⃣ 푸시 알림 (FCM/APNs) 스켈레톤
+
+- [app/models/device_token.py](app/models/device_token.py) **신규** — `device_tokens` 테이블. 사용자 × 토큰 UNIQUE, platform(fcm|apns|web) 구분, `is_active` soft disable
+- [alembic/versions/c7e2d5f3a18b_add_device_tokens.py](alembic/versions/c7e2d5f3a18b_add_device_tokens.py) **신규**
+- [app/services/push_notifications.py](app/services/push_notifications.py) **신규** — `PushNotificationService` 싱글톤. `provider = noop | fcm | apns` 디스패처. 실패 시 `is_active=False` 자동 처리. `_send_fcm`/`_send_apns` 는 TODO 주석 처리된 스켈레톤 (firebase-admin 연결 시 구현)
+- [app/api/notifications.py](app/api/notifications.py):
+  - `POST /notifications/tokens` — 토큰 등록/재활성 (upsert)
+  - `DELETE /notifications/tokens/{id}` — 로그아웃 시 제거 (소유자 검증)
+  - `POST /notifications/push/test` — 본인 디바이스 테스트 발송
+- [app/config.py](app/config.py) `PUSH_PROVIDER: str = "noop"` 기본값
+- [app/models/__init__.py](app/models/__init__.py) — `DeviceToken` export
+- 테스트 3개 (noop 경로 / 디바이스 0건 / 싱글톤 기본값)
+
+### 7️⃣ Redis pub/sub 수평 확장 추상화
+
+- [app/core/ws_manager_redis.py](app/core/ws_manager_redis.py) **신규** — `RedisConnectionManager(ConnectionManager)` — `broadcast` 시 Redis `publish`, 각 워커가 `subscriber_task` 로 수신 후 로컬 연결로 재분배
+- 기존 `ConnectionManager` 상속 구조 → 라우터 코드 수정 불필요
+- `create_ws_manager(backend, redis_url)` 팩토리. 기본 `memory`, `WS_BACKEND=redis` 로 전환
+- Redis 미기동 상태에서 `broadcast` 호출 시 예외 삼키고 로컬 폴백 (개발 편의)
+- [app/config.py](app/config.py) — `WS_BACKEND`, `REDIS_URL` 추가
+- 테스트 6개 (팩토리 분기 / URL 누락 ValueError / 잘못된 backend / Redis 없이 호출 폴백 / publish 실패 폴백)
+
+### 🧪 전체 회귀
+- `test_coverage_* / test_defect_* / test_defects_api / test_floorplan_calibration / test_image_storage / test_inference_pipeline / test_logging_json / test_metrics / test_push_service / test_refresh_token / test_telemetry_cache / test_wallpaper_double_gate / test_ws_manager / test_ws_manager_redis` → **100/100 통과**
+- 제외: `test_yolo_inference.py` (가중치 미배치 환경)
+
+### 📦 신규 의존성
+- `prometheus-client` (설치 완료)
+- `redis` (설치 선택 — `WS_BACKEND=redis` 로 전환할 때만 필요)
+- `firebase-admin` (나중 푸시 실 발송 시 필요)
+
+### ⚠️ 배포 전 필수 조치
+- **alembic heads 정리** — 신규 2개(`f3d1b6c09a12`, `c7e2d5f3a18b`) 추가로 체인이 더 길어짐. `0003` 과 merge 필요
+- **운영 전환 시 환경변수 점검**:
+  - `LOG_JSON=true`
+  - `PUSH_PROVIDER=fcm` (firebase-admin 연결 후)
+  - `WS_BACKEND=redis` + `REDIS_URL` (수평 확장 시)
+- Telemetry POST 오픈 상태 확인 — VPC/방화벽 레벨 접근 제어 전제
