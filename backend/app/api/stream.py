@@ -28,6 +28,7 @@ from app.services.recording import RecordingService
 from app.core.streaming import mjpeg_generator, mjpeg_blend_generator
 from app.core.stream_inference import stream_inference_worker
 from app.core.ws_manager import ConnectionManager
+from app.schemas.monitoring import StreamStatsResponse
 from app.services.lidar import lidar_service
 from app.services.telemetry_cache import telemetry_cache
 
@@ -115,26 +116,26 @@ async def get_stream_mode():
     return {"mode": _active_mode}
 
 
-@router.get("/stats")
-async def get_stream_stats():
+@router.get("/stats", response_model=StreamStatsResponse)
+async def get_stream_stats() -> StreamStatsResponse:
     """
     WebSocket 실시간 추론 워커 상태 + LiDAR/telemetry 헬스 조회.
     대시보드 좌측 상단 배지 및 운영 모니터링 용도.
     """
-    return {
-        "worker": {
+    return StreamStatsResponse(
+        worker={
             "running": stream_inference_worker.is_running,
             **stream_inference_worker.stats,
         },
-        "telemetry_cache": {
+        telemetry_cache={
             "ready": telemetry_cache.is_ready,
             "age_sec": telemetry_cache.age_sec,
         },
-        "lidar": {
+        lidar={
             "connected": lidar_service.latest_distance_m is not None,
             "distance_m": lidar_service.latest_distance_m,
         },
-    }
+    )
 
 
 # ── 녹화 제어 엔드포인트 ─────────────────────────────

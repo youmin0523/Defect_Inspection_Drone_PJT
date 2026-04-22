@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_org_member, get_db
 from app.models.site import Site
 from app.models.telemetry import TelemetryLog
+from app.schemas.monitoring import CoverageResponse
 
 router = APIRouter()
 
@@ -65,7 +66,7 @@ def _polygon_area(poly: List[Tuple[float, float]]) -> float:
 
 
 # ── 엔드포인트 ──────────────────────────────────────
-@router.get("/{site_id}")
+@router.get("/{site_id}", response_model=CoverageResponse)
 async def get_site_coverage(
     site_id: UUID,
     sample_limit: int = Query(
@@ -76,7 +77,7 @@ async def get_site_coverage(
     ),
     org_tuple=Depends(get_current_org_member),
     db: AsyncSession = Depends(get_db),
-):
+) -> CoverageResponse:
     """
     현장별 점검 커버리지 산출.
 
@@ -114,16 +115,16 @@ async def get_site_coverage(
     ]
 
     if len(points) < 3:
-        return {
-            "site_id": str(site.id),
-            "covered_area_m2": 0.0,
-            "supplied_area_m2": site.total_area,
-            "coverage_ratio": None,
-            "uncovered_area_m2": site.total_area,
-            "sample_count": len(points),
-            "hull": [],
-            "note": "convex hull 계산에 필요한 텔레메트리(≥3점)가 부족합니다.",
-        }
+        return CoverageResponse(
+            site_id=site.id,
+            covered_area_m2=0.0,
+            supplied_area_m2=site.total_area,
+            coverage_ratio=None,
+            uncovered_area_m2=site.total_area,
+            sample_count=len(points),
+            hull=[],
+            note="convex hull 계산에 필요한 텔레메트리(≥3점)가 부족합니다.",
+        )
 
     hull = _convex_hull(points)
     covered = _polygon_area(hull)
@@ -135,12 +136,12 @@ async def get_site_coverage(
         ratio = max(0.0, min(1.0, covered / supplied))
         uncovered = max(0.0, supplied - covered)
 
-    return {
-        "site_id": str(site.id),
-        "covered_area_m2": round(covered, 3),
-        "supplied_area_m2": supplied,
-        "coverage_ratio": round(ratio, 4) if ratio is not None else None,
-        "uncovered_area_m2": round(uncovered, 3) if uncovered is not None else None,
-        "sample_count": len(points),
-        "hull": [[round(x, 3), round(y, 3)] for x, y in hull],
-    }
+    return CoverageResponse(
+        site_id=site.id,
+        covered_area_m2=round(covered, 3),
+        supplied_area_m2=supplied,
+        coverage_ratio=round(ratio, 4) if ratio is not None else None,
+        uncovered_area_m2=round(uncovered, 3) if uncovered is not None else None,
+        sample_count=len(points),
+        hull=[[round(x, 3), round(y, 3)] for x, y in hull],
+    )

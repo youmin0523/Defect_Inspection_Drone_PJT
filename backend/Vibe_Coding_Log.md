@@ -606,3 +606,69 @@ def submit(frame):
 ### 2️⃣ 피드백 반영 (⏱ 2026-04-22)
 - `.gitignore` 정리: 대용량 바이너리(`*.onnx.data`, `*.npy`), 학습 로그(`*_log.txt`), YOLO 학습 결과(`runs/`), lock 파일을 gitignore에 추가
 - staged에서 불필요 파일 129개 제거 (172개 → 40개)
+
+---
+
+## 🧹 2026-04-22 추가 — 후속 TODO 소진 & 모니터링 엔드포인트 (@Hijin554)
+
+> **착수 시각**: 2026-04-22 오후
+> **작업 브랜치**: `Hijin`
+> **목표**: LiDAR 세션(2026-04-21)에서 남긴 후속 TODO 소진 + 운영 모니터링 기반 마련
+> **배경**: "백엔드 할 거 뭐 있냐"는 질문에 대한 잔여 작업 정리. MS 브랜치(20종 파이프라인)와 겹치지 않는 영역만.
+
+### 1️⃣ 후속 TODO 소진 (LiDAR 세션에서 남김)
+
+#### DefectLog 삭제 시 파일 cleanup 훅
+- [app/api/defects.py](app/api/defects.py) `delete_defect` — DB 레코드 제거 후 `image_storage.delete(defect.image_crop_path)` 호출. DB 트랜잭션 성공 후에만 파일 지움 → 롤백 시 orphan 방지
+- **+ 조직 스코프 적용**: 기존엔 인증만 걸려 있고 `get_current_org_member` 누락 → 다른 조직 레코드까지 UUID만 알면 삭제되는 버그였음. 내 조직 site에 연결된 레코드만 삭제되게 수정
+
+### 2️⃣ 운영 모니터링 API 신규
+
+#### `GET /api/v1/stream/stats`
+- [app/api/stream.py](app/api/stream.py) — `stream_inference_worker.stats` + `telemetry_cache` ready/age + `lidar` connected/distance를 한 번에 반환
+- 대시보드 좌측 상단 배지 / 운영 헬스 체크용. `/health`보다 실시간 추론 파이프라인에 특화
+- 응답은 `StreamStatsResponse` Pydantic 스키마로 타입 고정 → Swagger에 전체 필드 구조 노출
+
+#### `GET /api/v1/coverage/{site_id}`
+- [app/api/coverage.py](app/api/coverage.py) **신규** — 텔레메트리 좌표(pos_x/pos_y)의 convex hull 면적 vs `sites.total_area` 대비 커버리지율
+- **순수 Python Andrew's monotone chain** 구현 (scipy 의존 회피). Shoelace로 면적 산출
+- `sample_limit` 쿼리 파라미터로 최근 N개 샘플 제어 (기본 2000, 최대 20000)
+- 샘플 < 3점이면 `note` 필드로 부족 안내하는 graceful fallback
+- 응답은 `CoverageResponse` Pydantic 스키마. `hull` 필드를 프론트 3D 미니맵 음영 영역용으로 그대로 전달
+
+#### 스키마 모듈 신설
+- [app/schemas/monitoring.py](app/schemas/monitoring.py) **신규** — `StreamStatsResponse`, `CoverageResponse`, `WorkerStats`, `TelemetryCacheStats`, `LidarStats`
+- 기존 `app/schemas/defect.py` 등과 일관된 `from_attributes` 스타일 대신, 모니터링 응답은 완전 DTO라 Plain BaseModel
+
+### 3️⃣ 벽지 임계값 튜닝 스윕 스크립트
+- [scripts/sweep_wallpaper_thresholds.py](scripts/sweep_wallpaper_thresholds.py) **신규**
+- 입력: JSONL (`{"top1_conf": 0.62, "top2_conf": 0.41, "label": "defect"}`)
+- `WALLPAPER_CONF_THRESHOLD × WALLPAPER_MARGIN_THRESHOLD` 격자 탐색 → precision / recall / F1 / TP / FP / FN / TN 테이블
+- F1 내림차순 정렬, 동점이면 recall 우선 (건물 검사 특성상 미탐 < 오탐)
+- `--out sweep.csv`로 결과 저장 옵션
+
+### 4️⃣ 운영 로그 전환 준비
+- [.env.example](.env.example) — `LOG_JSON` / `LOG_LEVEL` 주석 보강. 운영 전환 방법과 Grafana/Datadog 적재 시나리오 명시
+- [README.md](README.md) — "운영 모니터링 & 관측성" 섹션 신설 (`/health` / `/stream/stats` / `/coverage/{id}` 비교표, structlog 설정, 스윕 스크립트 사용법)
+
+### 5️⃣ 회귀 테스트 & 품질 강화
+- `tests/test_coverage_geometry.py` **신규** — convex hull (사각형/삼각형/중복점/공선/45도 회전), shoelace 면적 (6 케이스)
+- `tests/test_defect_delete_cleanup.py` **신규** — storage.delete 호출 여부, 경로 None 스킵, DB→파일 순서, 404 경로 (4 케이스, `unittest.mock` 기반 DB·storage 독립 검증)
+- `tests/test_coverage_response_shape.py` **신규** — `CoverageResponse` / `StreamStatsResponse` Pydantic 스키마 직렬화 (5 케이스)
+- **pre-existing 테스트 버그 수정**: `tests/test_wallpaper_double_gate.py::test_edge_exact_thresholds` — float 정밀도로 `0.35 - 0.20 = 0.14999...`가 되어 경계값 비교 실패. 경계 바로 위(0.36/0.20) 값으로 대체하고 테스트명도 `test_edge_just_above_thresholds`로 정정
+
+### 6️⃣ config.py 잔존 merge conflict 해소
+- [app/config.py](app/config.py) — `<<<<<<< Updated upstream ... =======  ... >>>>>>> Stashed changes` 마커가 그대로 커밋돼 있어 `SyntaxError`로 venv 기동 불가 상태였음
+- 양쪽 변경(로깅 설정 + 20종 ONNX 파이프라인 설정)이 상호 독립이라 **둘 다 보존**하고 마커만 제거
+
+### 🧪 회귀 결과
+- 새 테스트 3종 (15개 케이스) 모두 통과
+- 전체 regression: `test_coverage_geometry / test_coverage_response_shape / test_defect_delete_cleanup / test_image_storage / test_inference_pipeline / test_telemetry_cache / test_wallpaper_double_gate / test_ws_manager` → **59/59 통과**
+- 제외한 2개 파일은 내 변경과 무관한 pre-existing 이슈:
+  - `test_yolo_inference.py`: 가중치 파일(`models_weights/*.pt`) 미배치 환경
+  - `test_defects_api.py`: 선대 멀티테넌트 org-scoping 적용 이후 인증 토큰 없이 돌리면 401 반환 — 테스트 쪽이 옛 버전
+
+### 📋 이번 세션 후속 TODO
+- `test_defects_api.py` auth 토큰 fixture 달아서 org-scoping과 함께 작동하도록 갱신 (그동안 CI에서도 계속 빨간 불)
+- coverage 엔드포인트를 `site_id`별 telemetry 분리(`telemetry_logs.site_id` FK 추가)로 확장. 현재는 전역 최근 샘플 기반
+- 스윕 스크립트를 재학습 대신 threshold 조정 근거로 쓰려면 운영 JSONL 로그 수집 파이프라인(`logs/wallpaper_predictions.jsonl`) 분리 필요

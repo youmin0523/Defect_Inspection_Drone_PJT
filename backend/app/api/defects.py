@@ -232,10 +232,25 @@ async def create_defect(
 
 
 @router.delete("/{defect_id}", status_code=204)
-async def delete_defect(defect_id: UUID, db: AsyncSession = Depends(get_db)):
-    """하자 탐지 기록 삭제 (연결된 크롭 파일도 함께 제거)"""
+async def delete_defect(
+    defect_id: UUID,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    하자 탐지 기록 삭제 (연결된 크롭 파일도 함께 제거).
+    소속 조직의 site에 연결된 레코드만 삭제 가능.
+    """
+    user, member, org = org_tuple
+
+    # 내 조직 site에 연결된 것만 조회 — 다른 조직 데이터 노출·파일 삭제 방지
     result = await db.execute(
-        select(DefectLog).where(DefectLog.id == defect_id)
+        select(DefectLog).where(
+            DefectLog.id == defect_id,
+            DefectLog.site_id.in_(
+                select(Site.id).where(Site.organization_id == org.id)
+            ),
+        )
     )
     defect = result.scalar_one_or_none()
     if not defect:
