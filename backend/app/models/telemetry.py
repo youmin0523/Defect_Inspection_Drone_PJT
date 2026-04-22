@@ -11,7 +11,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, String, Float, Integer,
-    DateTime, Boolean, Index, func
+    DateTime, Boolean, Index, ForeignKey, func
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
@@ -27,6 +27,17 @@ class TelemetryLog(Base):
 
     # ── 기본 키 ──────────────────────────────
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+
+    # ── 현장 연결 (커버리지 산출용) ───────────
+    # nullable: 드론이 site 정보 없이 기동할 수 있어야 함 (테스트/디버그 비행 등)
+    # 인덱스: /api/v1/coverage/{site_id} 쿼리 최적화
+    site_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("sites.id"),
+        nullable=True,
+        index=True,
+        comment="연결 현장 ID (nullable — 현장 미지정 비행 허용)",
+    )
 
     # ── 위치 (월드 좌표계, 미터) ──────────────
     pos_x = Column(Float, nullable=False, comment="드론 X 좌표 (m)")

@@ -5,8 +5,10 @@
 #       - sites.total_area(공급 면적) 대비 커버리지율 반환
 #       - 미점검 구역은 보고서·3D 미니맵 음영 처리 재료로 쓰임
 #
-# 주의: 현재는 site_id별 텔레메트리 구분이 없어 최근 N개 샘플로 추정.
-#       site ↔ telemetry 연결 스키마 정리되면 WHERE site_id = ... 로 교체.
+# 텔레메트리 필터 정책 (마이그레이션 e4c9a8b27f10 이후):
+#   - 우선: telemetry_logs.site_id == :site_id 레코드만 사용
+#   - fallback: 해당 site의 telemetry가 0건이면 전역 최근 N건으로 계산
+#     (기존 비행 데이터 호환 — site_id FK 추가 전 로그 보존)
 # =============================================
 
 from __future__ import annotations
@@ -101,10 +103,14 @@ async def get_site_coverage(
     if site is None:
         raise HTTPException(status_code=404, detail="현장을 찾을 수 없습니다.")
 
-    # 2) 텔레메트리 최근 N건 로드 (site 분리 스키마 나오기 전까지 전역 최근)
+    # 2) 텔레메트리 로드. 우선순위:
+    #    a) telemetry_logs.site_id == site.id 인 레코드 (신규 경로)
+    #    b) 해당 site 레코드 0건이면 전역 최근 N건 (마이그레이션 이전 비행 호환)
     #    pos_x/pos_y는 월드 좌표계(m) — LiDAR 3D 좌표 배선 때와 동일 기준
+    used_fallback = False
     rows = await db.execute(
         select(TelemetryLog.pos_x, TelemetryLog.pos_y)
+        .where(TelemetryLog.site_id == site.id)
         .order_by(desc(TelemetryLog.timestamp))
         .limit(sample_limit)
     )
@@ -113,6 +119,20 @@ async def get_site_coverage(
         for x, y in rows.all()
         if x is not None and y is not None
     ]
+
+    if not points:
+        # fallback: 기존 비행 데이터(site_id=NULL)에서 최근 N건
+        used_fallback = True
+        rows = await db.execute(
+            select(TelemetryLog.pos_x, TelemetryLog.pos_y)
+            .order_by(desc(TelemetryLog.timestamp))
+            .limit(sample_limit)
+        )
+        points = [
+            (float(x), float(y))
+            for x, y in rows.all()
+            if x is not None and y is not None
+        ]
 
     if len(points) < 3:
         return CoverageResponse(
@@ -136,6 +156,12 @@ async def get_site_coverage(
         ratio = max(0.0, min(1.0, covered / supplied))
         uncovered = max(0.0, supplied - covered)
 
+    fallback_note = (
+        "이 현장에 연결된 텔레메트리가 없어 전역 최근 샘플로 계산된 근사치입니다."
+        if used_fallback
+        else None
+    )
+
     return CoverageResponse(
         site_id=site.id,
         covered_area_m2=round(covered, 3),
@@ -144,4 +170,5 @@ async def get_site_coverage(
         uncovered_area_m2=round(uncovered, 3) if uncovered is not None else None,
         sample_count=len(points),
         hull=[[round(x, 3), round(y, 3)] for x, y in hull],
+        note=fallback_note,
     )

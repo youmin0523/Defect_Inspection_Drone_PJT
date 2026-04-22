@@ -672,3 +672,49 @@ def submit(frame):
 - `test_defects_api.py` auth 토큰 fixture 달아서 org-scoping과 함께 작동하도록 갱신 (그동안 CI에서도 계속 빨간 불)
 - coverage 엔드포인트를 `site_id`별 telemetry 분리(`telemetry_logs.site_id` FK 추가)로 확장. 현재는 전역 최근 샘플 기반
 - 스윕 스크립트를 재학습 대신 threshold 조정 근거로 쓰려면 운영 JSONL 로그 수집 파이프라인(`logs/wallpaper_predictions.jsonl`) 분리 필요
+
+---
+
+## 🪢 2026-04-22 후속 — 후속 TODO 소진 (@Hijin554)
+
+> **착수 시각**: 2026-04-22 늦은 오후
+> **작업 브랜치**: `Hijin`
+> **목표**: 바로 위 블록에서 남긴 "이번 세션 후속 TODO" 중 2개 클로즈
+
+### 1️⃣ `test_defects_api.py` 재작성 — 401 빨간 불 해소
+
+기존 테스트는 `httpx` 클라이언트만 만들고 실제 API 호출 시 JWT 토큰이 없어 모든 요청이 401로 귀결 → CI에서 7개 실패. 근본 원인은 멀티테넌트 org-scoping 적용 후 테스트 대응이 안 된 것.
+
+- **접근 방식**: 실제 DB 띄우지 않고 FastAPI `dependency_overrides`로 `get_current_org_member` / `get_db` 주입
+- `_make_org_tuple()` — 가짜 (user, member, org) `SimpleNamespace` 튜플. role="owner"
+- `_make_empty_db()` — `AsyncMock` 기반 DB. `scalar` 0 / `execute` empty result 반환하도록 구성
+- `authed_client` fixture — 두 override 적용한 `AsyncClient`
+- `unauth_client` fixture — override 없는 순수 클라이언트 → 401 검증용
+- 8 케이스: 200 empty / summary 구조 / severity 필터 / area 필터 / 404 / 무인증 GET 401 / 무인증 summary 401 / **무인증 DELETE 401** (오늘 추가한 DELETE org-scope 회귀 방지)
+
+결과: **8/8 통과**. CI 안정화.
+
+### 2️⃣ `telemetry_logs.site_id` FK 추가 — coverage 정확도 개선
+
+이전 커밋에서 `/api/v1/coverage/{site_id}` 만들 때 텔레메트리에 `site_id` FK가 없어서 **site가 바뀌어도 같은 면적**이 나오던 버그.
+
+- [app/models/telemetry.py](app/models/telemetry.py) — `site_id: UUID → sites.id` FK 컬럼 추가. nullable (현장 미지정 비행 허용), `index=True` (쿼리 최적화)
+- [alembic/versions/e4c9a8b27f10_add_site_id_to_telemetry_logs.py](alembic/versions/e4c9a8b27f10_add_site_id_to_telemetry_logs.py) **신규 마이그레이션**
+  - `down_revision = "c8f1d2e4a7b9"` (Hijin 체인 끝에 체결)
+  - `ondelete="SET NULL"` — site 삭제 시 비행 기록은 보존
+  - ⚠️ 현재 프로젝트는 **마이그레이션 그래프가 2 heads 상태** (`0003` / `c8f1d2e4a7b9`). 통합 배포 전 `alembic merge -m "merge heads" <id1> <id2>` 한 번 실행 필요 — 리비전 파일에도 주석으로 명시
+- [app/schemas/telemetry.py](app/schemas/telemetry.py) — `TelemetryCreate.site_id` / `TelemetryResponse.site_id` Optional 추가
+- [app/api/telemetry.py](app/api/telemetry.py) `create_telemetry` — `site_id=payload.site_id` 반영
+- [app/api/coverage.py](app/api/coverage.py) — 쿼리 전략 이중화:
+  1. 우선 `telemetry_logs.site_id == site.id` 필터로 조회
+  2. 0건이면 마이그레이션 이전 비행 호환을 위해 **전역 최근 N건으로 fallback** + 응답 `note` 필드에 근사치임을 표기 (`"이 현장에 연결된 텔레메트리가 없어 전역 최근 샘플로 계산된 근사치입니다."`)
+- [CoverageResponse](app/schemas/monitoring.py)의 `note` 필드를 실제로 사용하게 됨 — 사용자/프론트가 근사 여부를 판별 가능
+
+### 🧪 회귀 결과
+- `test_coverage_geometry / test_coverage_response_shape / test_defect_delete_cleanup / test_defects_api / test_image_storage / test_inference_pipeline / test_telemetry_cache / test_wallpaper_double_gate / test_ws_manager` → **67/67 통과**
+- 제외한 `test_yolo_inference.py`는 기존부터 가중치 파일 없는 환경에서 실패하던 것 (내 변경 무관)
+
+### 📋 남은 후속 TODO (다음 누군가의 몫)
+- **alembic heads 병합**: `alembic merge -m "merge 20defect + image_crop_path + site_id chains" 0003 e4c9a8b27f10`
+- **ROS2 브리지/MAVLink 파서** 에서 `POST /telemetry` 호출 시 현재 세션 `site_id` 주입 — 스키마는 준비됨, 호출자 수정 필요
+- 스윕 스크립트용 운영 JSONL 로그 수집 파이프라인 (`logs/wallpaper_predictions.jsonl`) 분리

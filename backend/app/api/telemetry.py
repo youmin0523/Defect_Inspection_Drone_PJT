@@ -76,6 +76,7 @@ async def create_telemetry(
       - LiDAR 서비스에 드론 자세 전파 (3D 좌표 계산용)
     """
     log = TelemetryLog(
+        site_id=payload.site_id,
         pos_x=payload.pos_x,
         pos_y=payload.pos_y,
         pos_z=payload.pos_z,
