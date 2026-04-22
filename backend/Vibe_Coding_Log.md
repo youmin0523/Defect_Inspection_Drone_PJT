@@ -570,3 +570,39 @@ def submit(frame):
 - `image_crop` (Text, deprecated) 컬럼은 충분한 마이그레이션 기간 후 drop 예정
 - 운영 배포 시 `LOG_JSON=true` 전환 + Grafana/Datadog 연동
 - DefectLog 삭제 시 파일 cleanup 훅 (`image_storage.delete(defect.image_crop_path)`) 필요
+
+---
+
+## 🔬 20종 결함 분류 ONNX 추론 파이프라인 (2026-04-22)
+
+- 작성자: @youminsu0523
+- 작업 브랜치: `MS`
+
+### 1️⃣ 초기 작업 내용
+
+#### 추론 서비스 (신규)
+- [app/services/onnx_inference.py](app/services/onnx_inference.py) — ONNX Runtime 기반 모델 로더 및 추론 래퍼 (ResNet, PatchCore 지원)
+- [app/services/ensemble.py](app/services/ensemble.py) — 다중 모델 앙상블 투표/가중평균 서비스
+- [app/services/alignment_detector.py](app/services/alignment_detector.py) — 건물 정렬(수직/수평) 감지 서비스
+- [app/services/insulation_detector.py](app/services/insulation_detector.py) — 단열 결함 감지 서비스
+- [app/services/temporal_filter.py](app/services/temporal_filter.py) — 시계열 기반 오탐 필터링
+- [app/services/inference_pipeline_20.py](app/services/inference_pipeline_20.py) — 20종 결함 통합 추론 파이프라인
+
+#### 스키마/모델/마이그레이션
+- [app/models/defect.py](app/models/defect.py) — 20종 결함 컬럼 추가
+- [app/schemas/detection.py](app/schemas/detection.py) — 20종 결함 응답 스키마 확장
+- [app/services/defect_taxonomy.py](app/services/defect_taxonomy.py) — 결함 분류 체계 확장
+- [alembic/versions/0003_add_20defect_pipeline_columns.py](alembic/versions/0003_add_20defect_pipeline_columns.py) — DB 마이그레이션
+- [app/config.py](app/config.py) — ONNX 모델 경로 설정 추가
+- [app/core/stream_inference.py](app/core/stream_inference.py) — 20종 파이프라인 연동
+
+#### 학습 스크립트 & 설정
+- `training/train_m1~m6` — ResNet(m1~m3), Thermal UNet(m4), FrameSeg(m5), PatchCore(m6) 학습 스크립트
+- `training/configs/` — 모델별 YAML 학습 설정
+- `training/eval/` — 벤치마크 및 전체 평가 스크립트
+- `training/export_to_onnx.py` — PyTorch → ONNX 변환
+- `training/AeroInspect_Training.ipynb` — 학습 노트북
+
+### 2️⃣ 피드백 반영 (⏱ 2026-04-22)
+- `.gitignore` 정리: 대용량 바이너리(`*.onnx.data`, `*.npy`), 학습 로그(`*_log.txt`), YOLO 학습 결과(`runs/`), lock 파일을 gitignore에 추가
+- staged에서 불필요 파일 129개 제거 (172개 → 40개)
