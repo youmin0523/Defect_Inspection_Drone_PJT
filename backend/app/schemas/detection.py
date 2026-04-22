@@ -19,6 +19,11 @@ from pydantic import BaseModel, Field
 
 Severity = Literal["HIGH", "MED", "LOW"]
 DefectSource = Literal["yolo_thermal", "yolo_delam", "wallpaper"]
+# 20종 파이프라인 defect source
+DefectSource20 = Literal[
+    "yolo_structural", "yolo_surface", "yolo_floor_window",
+    "thermal_unet", "geometric", "patchcore",
+]
 
 
 class BBox(BaseModel):
@@ -118,3 +123,85 @@ class HealthResponse(BaseModel):
     wallpaper_classes_count: int
     stream_worker_running: bool
     frame_skip: int
+
+
+# =============================================
+# 20종 하자 검출 파이프라인 스키마 (신규)
+# =============================================
+
+class DefectDetection(BaseModel):
+    """20종 파이프라인 통합 검출 단건."""
+    class_: str = Field(..., alias="class", description="severity_mapper class_name")
+    class_display_en: str = ""
+    class_display_ko: str = ""
+    code: str = Field("", description="A-01 ~ E-02 카테고리 코드")
+    conf: float = Field(..., ge=0.0, le=1.0)
+    bbox_xyxy: List[float] = Field(default_factory=list, description="[x1,y1,x2,y2] 픽셀")
+    severity: Optional[Severity] = None
+    defect_source: str = ""
+    ensemble_boosted: bool = False
+
+    model_config = {"populate_by_name": True}
+
+
+class InsulationDetection(BaseModel):
+    """M4 열화상 단열/기밀/난방 하자."""
+    class_: str = Field(..., alias="class")
+    code: str
+    display_ko: str = ""
+    conf: float = Field(..., ge=0.0, le=1.0)
+    bbox_xyxy: List[float] = Field(default_factory=list)
+    delta_temperature: float = Field(..., description="주변 대비 온도차 (°C)")
+    max_temperature: float = 0.0
+    min_temperature: float = 0.0
+    severity: Optional[Severity] = None
+    defect_source: str = "thermal_unet"
+
+    model_config = {"populate_by_name": True}
+
+
+class AlignmentDetection(BaseModel):
+    """M5+G1 기하학 수직수평/직각도 하자."""
+    class_: str = Field(..., alias="class")
+    code: str
+    display_ko: str = ""
+    conf: float = Field(..., ge=0.0, le=1.0)
+    bbox_xyxy: List[float] = Field(default_factory=list)
+    deviation_degrees: float = Field(..., description="편차 각도 (도)")
+    deviation_mm_per_m: float = Field(0.0, description="편차 mm/m")
+    direction: str = Field("", description="vertical | horizontal | both")
+    severity: Optional[Severity] = None
+    defect_source: str = "geometric"
+
+    model_config = {"populate_by_name": True}
+
+
+class DetectionResult20(BaseModel):
+    """
+    20종 하자 통합 추론 응답.
+    기존 DetectionResult와 병존 — USE_20DEFECT_PIPELINE 플래그로 전환.
+    """
+    detections: List[DefectDetection] = Field(default_factory=list)
+    insulation: List[InsulationDetection] = Field(default_factory=list)
+    alignment: List[AlignmentDetection] = Field(default_factory=list)
+    anomaly_score: Optional[float] = None
+    has_defect: bool = False
+    defect_count: int = 0
+    image_shape: ImageShape = Field(
+        ..., description="프레임 W/H"
+    )
+    tier_executed: int = Field(1, description="실행된 최고 Tier (1/2/3)")
+
+
+class ModelsLoadedStatus20(BaseModel):
+    """20종 파이프라인 모델 상태."""
+    m1_yolo: bool = False
+    m1_resnet: bool = False
+    m2_yolo: bool = False
+    m2_resnet: bool = False
+    m3_yolo: bool = False
+    m3_resnet: bool = False
+    m4_unet: bool = False
+    m4_context: bool = False
+    m5_seg: bool = False
+    m6_patchcore: bool = False

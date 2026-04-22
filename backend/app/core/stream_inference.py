@@ -37,6 +37,8 @@ class QueuedFrame:
     frame_bgr: np.ndarray
     frame_id: int
     submitted_at: float  # epoch seconds
+    thermal_map: Optional[np.ndarray] = None   # 20종 파이프라인: 열화상 온도맵
+    imu_data: Optional[dict] = None            # 20종 파이프라인: 드론 IMU {roll, pitch, yaw}
 
 
 class StreamInferenceWorker:
@@ -94,9 +96,19 @@ class StreamInferenceWorker:
         print("[StreamInfer] 워커 종료")
 
     # ── 프레임 제출 ─────────────────────────────
-    def submit(self, frame_bgr: np.ndarray) -> bool:
+    def submit(
+        self,
+        frame_bgr: np.ndarray,
+        thermal_map: Optional[np.ndarray] = None,
+        imu_data: Optional[dict] = None,
+    ) -> bool:
         """
         수신자(ws_stream.py)가 호출. 프레임 스킵 적용 + 드롭 큐에 put.
+
+        Args:
+            frame_bgr: RGB 프레임
+            thermal_map: 열화상 온도맵 (20종 파이프라인에서 사용)
+            imu_data: 드론 IMU 데이터 (20종 파이프라인에서 사용)
 
         Returns:
             True: 큐에 enqueue됨 (추론 예정)
@@ -112,6 +124,8 @@ class StreamInferenceWorker:
             frame_bgr=frame_bgr,
             frame_id=self._submitted_count,
             submitted_at=time.time(),
+            thermal_map=thermal_map,
+            imu_data=imu_data,
         )
         try:
             self._queue.put_nowait(item)
@@ -139,6 +153,11 @@ class StreamInferenceWorker:
 
     async def _process(self, item: QueuedFrame) -> None:
         """단일 프레임 추론 + 양방향 브로드캐스트."""
+        # 20종 파이프라인 활성화 시 분기
+        if settings.USE_20DEFECT_PIPELINE:
+            await self._process_20(item)
+            return
+
         if not pipeline.is_loaded:
             return
 
@@ -171,6 +190,59 @@ class StreamInferenceWorker:
         legacy_events = self._to_legacy_events(result, item, lidar_xyz)
         for ev in legacy_events:
             await ws_manager.broadcast("defects", ev)
+
+    async def _process_20(self, item: QueuedFrame) -> None:
+        """20종 파이프라인 추론 + 브로드캐스트 (계층적 실행)."""
+        from app.services.inference_pipeline_20 import pipeline20
+
+        if not pipeline20.is_loaded:
+            return
+
+        # 계층적 Tier 결정 (프레임 번호 기반)
+        fid = item.frame_id
+        if fid % settings.TIER3_FRAME_SKIP == 0:
+            tier = 3
+        elif fid % settings.TIER2_FRAME_SKIP == 0:
+            tier = 2
+        else:
+            tier = 1
+
+        result = await pipeline20.detect_async(
+            item.frame_bgr,
+            thermal_map=item.thermal_map,
+            imu_data=item.imu_data,
+            tier=tier,
+        )
+
+        now = time.time()
+        payload = {
+            "type": "detection_20",
+            "timestamp": now,
+            "frame_id": item.frame_id,
+            "tier": tier,
+            "result": json.loads(result.model_dump_json()),
+        }
+
+        await ws_manager.broadcast("stream", payload)
+
+        # 기존 defects 채널 호환 이벤트
+        for det in result.detections:
+            await ws_manager.broadcast("defects", {
+                "type": "defect.new",
+                "data": {
+                    "area": None,
+                    "category_code": det.code,
+                    "defect_type": det.class_display_ko,
+                    "severity": det.severity,
+                    "confidence": round(det.conf, 3),
+                    "bbox": None,
+                    "defect_source": det.defect_source,
+                    "defect_class": det.class_,
+                    "defect_class_display_en": det.class_display_en,
+                    "defect_class_display_ko": det.class_display_ko,
+                    "frame_id": item.frame_id,
+                },
+            })
 
     @staticmethod
     def _compute_lidar_xyz() -> Optional[tuple]:
