@@ -26,7 +26,11 @@ from app.dependencies import get_rgb_camera, get_thermal_camera, get_ws_manager,
 from app.services.camera import CameraService
 from app.services.recording import RecordingService
 from app.core.streaming import mjpeg_generator, mjpeg_blend_generator
+from app.core.stream_inference import stream_inference_worker
 from app.core.ws_manager import ConnectionManager
+from app.schemas.monitoring import StreamStatsResponse
+from app.services.lidar import lidar_service
+from app.services.telemetry_cache import telemetry_cache
 
 router = APIRouter()
 
@@ -110,6 +114,28 @@ async def set_stream_mode(
 async def get_stream_mode():
     """현재 활성 카메라 모드 조회"""
     return {"mode": _active_mode}
+
+
+@router.get("/stats", response_model=StreamStatsResponse)
+async def get_stream_stats() -> StreamStatsResponse:
+    """
+    WebSocket 실시간 추론 워커 상태 + LiDAR/telemetry 헬스 조회.
+    대시보드 좌측 상단 배지 및 운영 모니터링 용도.
+    """
+    return StreamStatsResponse(
+        worker={
+            "running": stream_inference_worker.is_running,
+            **stream_inference_worker.stats,
+        },
+        telemetry_cache={
+            "ready": telemetry_cache.is_ready,
+            "age_sec": telemetry_cache.age_sec,
+        },
+        lidar={
+            "connected": lidar_service.latest_distance_m is not None,
+            "distance_m": lidar_service.latest_distance_m,
+        },
+    )
 
 
 # ── 녹화 제어 엔드포인트 ─────────────────────────────

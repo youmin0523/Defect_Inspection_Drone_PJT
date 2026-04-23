@@ -207,6 +207,45 @@ DEVICE=auto
 
 ---
 
+## 운영 모니터링 & 관측성
+
+### 상태 조회 엔드포인트
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/health` | 카메라 / 3-모델 / 스트림 워커 / LiDAR / telemetry 캐시 전체 상태 |
+| `GET` | `/api/v1/stream/stats` | 추론 워커 실시간 메트릭 (submitted/processed/dropped/queue_size) + LiDAR 연결 상태 |
+| `GET` | `/api/v1/coverage/{site_id}` | 현장별 점검 커버리지 (텔레메트리 convex hull → covered/supplied/ratio) |
+
+`/api/v1/stream/stats` 응답 예시:
+```json
+{
+  "worker": {"running": true, "submitted": 18420, "processed": 6123, "dropped": 12, "queue_size": 0, "frame_skip": 3},
+  "telemetry_cache": {"ready": true, "age_sec": 0.12},
+  "lidar": {"connected": true, "distance_m": 2.43}
+}
+```
+
+### 구조화 로깅 (structlog)
+
+- `LOG_JSON=false` (기본): 개발용 컬러 콘솔
+- `LOG_JSON=true`: 운영용 JSON 한 줄 로그 → Grafana Loki / Datadog / CloudWatch 바로 적재
+- 모든 로그에 `request_id`, `method`, `path` 자동 바인딩 ([app/core/middleware.py](app/core/middleware.py))
+- 표준 이벤트: `http.request` (status, duration_ms) / `http.request.failed` (traceback)
+- 클라이언트 → `X-Request-ID` 헤더 전달 시 그대로 재사용, 미전달 시 서버가 16자리 hex 자동 발급
+
+### 벽지 이중 게이트 임계값 튜닝
+
+운영 로그(JSONL) 축적 후 [scripts/sweep_wallpaper_thresholds.py](scripts/sweep_wallpaper_thresholds.py)로 `WALLPAPER_CONF_THRESHOLD` × `WALLPAPER_MARGIN_THRESHOLD` 격자 탐색:
+
+```bash
+python scripts/sweep_wallpaper_thresholds.py --input ops_logs.jsonl --out sweep.csv
+```
+
+입력 한 줄: `{"top1_conf": 0.62, "top2_conf": 0.41, "label": "defect"}` (label은 사람이 태깅한 GT).
+
+---
+
 ## 20종 하자 검출 파이프라인 (신규)
 
 > `USE_20DEFECT_PIPELINE=true` 설정 시 활성화. 기존 3-모델 파이프라인과 병존.

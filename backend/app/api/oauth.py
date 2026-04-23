@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.jwt import create_access_token
+from app.core.jwt import create_access_token, create_refresh_token
 from app.dependencies import get_db
 from app.models.user import User
 from app.schemas.user import OAuthCallbackRequest, OrgBriefResponse, TokenResponse, UserResponse
@@ -175,8 +175,12 @@ async def google_callback(
 
     # 4) JWT 발급
     token = create_access_token(user.id)
+    refresh = create_refresh_token(user.id)
     orgs = await _get_user_orgs(db, user.id)
-    return TokenResponse(access_token=token, user=_build_user_response(user, orgs))
+    return TokenResponse(
+        access_token=token, refresh_token=refresh,
+        user=_build_user_response(user, orgs),
+    )
 
 
 # ── Kakao OAuth ──────────────────────────────
@@ -225,8 +229,12 @@ async def kakao_callback(
 
     # 4) JWT 발급
     token = create_access_token(user.id)
+    refresh = create_refresh_token(user.id)
     orgs = await _get_user_orgs(db, user.id)
-    return TokenResponse(access_token=token, user=_build_user_response(user, orgs))
+    return TokenResponse(
+        access_token=token, refresh_token=refresh,
+        user=_build_user_response(user, orgs),
+    )
 
 
 # ── Naver OAuth ──────────────────────────────
@@ -273,5 +281,9 @@ async def naver_callback(
 
     # 4) JWT 발급
     token = create_access_token(user.id)
+    refresh = create_refresh_token(user.id)
     orgs = await _get_user_orgs(db, user.id)
-    return TokenResponse(access_token=token, user=_build_user_response(user, orgs))
+    return TokenResponse(
+        access_token=token, refresh_token=refresh,
+        user=_build_user_response(user, orgs),
+    )

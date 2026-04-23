@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 class TelemetryCreate(BaseModel):
     """드론 텔레메트리 데이터 저장 요청"""
+    site_id: Optional[UUID] = Field(None, description="연결 현장 ID (없으면 전역 기록)")
     pos_x: float = Field(..., description="드론 X 좌표 (m)")
     pos_y: float = Field(..., description="드론 Y 좌표 (m)")
     pos_z: float = Field(..., description="드론 Z 좌표 / 고도 (m)")
@@ -31,6 +32,7 @@ class TelemetryCreate(BaseModel):
 class TelemetryResponse(BaseModel):
     """드론 텔레메트리 응답"""
     id: UUID
+    site_id: Optional[UUID] = None
     pos_x: float
     pos_y: float
     pos_z: float

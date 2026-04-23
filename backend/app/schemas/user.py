@@ -141,8 +141,20 @@ class OAuthCallbackRequest(BaseModel):
 class TokenResponse(BaseModel):
     """로그인 성공 시 반환하는 JWT 토큰 + 사용자 정보"""
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user: "UserResponse"
+
+
+class RefreshTokenRequest(BaseModel):
+    """/auth/refresh 요청 바디"""
+    refresh_token: str
+
+
+class RefreshTokenResponse(BaseModel):
+    """새 access_token 반환 (refresh_token은 재사용 권장)"""
+    access_token: str
+    token_type: str = "bearer"
 
 
 # 전방 참조 해결

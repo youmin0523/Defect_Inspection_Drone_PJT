@@ -59,11 +59,10 @@ class Settings(BaseSettings):
     # 추론 디바이스: 'auto' | 'cuda' | 'cpu'
     DEVICE: str = "auto"
 
-<<<<<<< Updated upstream
     # 로깅 — JSON 출력은 운영 권장, 개발은 컬러 콘솔
     LOG_JSON: bool = False
     LOG_LEVEL: str = "INFO"
-=======
+
     # ── 20종 하자 검출 ONNX 파이프라인 (6-Model + Geometric) ──
     # M1: 구조·방수 (2-Stage YOLO→ResNet)
     M1_YOLO_ONNX: str = "m1_yolo_structural.onnx"
@@ -113,7 +112,6 @@ class Settings(BaseSettings):
 
     # 신규 파이프라인 활성화 플래그 (기존 파이프라인과 전환용)
     USE_20DEFECT_PIPELINE: bool = False
->>>>>>> Stashed changes
 
     # ── Legacy (하위 호환용, 신규 코드에선 사용 금지) ──
     YOLO_WEIGHTS_PATH: str = "./models_weights/aeroinspect_yolov8.pt"
@@ -125,6 +123,17 @@ class Settings(BaseSettings):
     # ── JWT ──────────────────────────────────
     JWT_SECRET: str = "change-me-in-production"
     JWT_EXPIRE_MINUTES: int = 120
+    # Refresh token: 장기 유효 (기본 14일). /auth/refresh 엔드포인트로 access token 재발급용.
+    JWT_REFRESH_EXPIRE_DAYS: int = 14
+
+    # 푸시 알림 프로바이더: "noop" | "fcm" | "apns"
+    # 운영 배포 시 firebase-admin 설치 후 "fcm" 으로 전환.
+    PUSH_PROVIDER: str = "noop"
+
+    # WebSocket 브로드캐스트 백엔드: "memory" (단일 워커) | "redis" (수평 확장)
+    # redis 선택 시 REDIS_URL 필수.
+    WS_BACKEND: str = "memory"
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # ── OAuth (SNS 로그인) ────────────────────
     GOOGLE_CLIENT_ID: str = ""

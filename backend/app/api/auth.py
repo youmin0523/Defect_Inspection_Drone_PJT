@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password, verify_password
-from app.core.jwt import create_access_token
+from app.core.jwt import create_access_token, create_refresh_token, decode_refresh_token
 from app.services.email_service import send_found_username_email, send_temp_password_email
 from app.dependencies import get_db, get_current_user_with_org
 from app.models.user import User
@@ -36,6 +36,8 @@ from app.schemas.user import (
     FindPasswordRequest,
     LoginRequest,
     OrgBriefResponse,
+    RefreshTokenRequest,
+    RefreshTokenResponse,
     TokenResponse,
     UserSignupRequest,
     UserResponse,
@@ -237,10 +239,12 @@ async def login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
 
     token = create_access_token(user.id)
+    refresh = create_refresh_token(user.id)
     orgs = await _get_user_orgs(db, user.id)
 
     return TokenResponse(
         access_token=token,
+        refresh_token=refresh,
         user=UserResponse(
             id=user.id,
             account_type=user.account_type,
@@ -254,6 +258,35 @@ async def login(
             organizations=orgs,
         ),
     )
+
+
+# ── 리프레시 토큰으로 access 재발급 ──────────
+@router.post("/refresh", response_model=RefreshTokenResponse)
+async def refresh_access_token(
+    payload: RefreshTokenRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    유효한 refresh_token → 새 access_token 재발급.
+    refresh_token 자체는 그대로 재사용 (기간 만료 전까지).
+    """
+    user_id = decode_refresh_token(payload.refresh_token)
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="유효하지 않거나 만료된 리프레시 토큰입니다.",
+        )
+
+    # 사용자 존재·활성 여부 재확인 (refresh 발급 이후 계정 삭제된 케이스 대비)
+    user = await db.scalar(select(User).where(User.id == uuid_mod.UUID(user_id)))
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="사용자를 찾을 수 없습니다.",
+        )
+
+    new_access = create_access_token(user.id)
+    return RefreshTokenResponse(access_token=new_access)
 
 
 # ── 현재 사용자 조회 ────────────────────────
