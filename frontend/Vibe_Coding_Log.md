@@ -1227,3 +1227,57 @@ localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT �
 - **Refresh Token 큐잉**: 동시 다발 401 시 refresh 1회만 실행, 나머지 큐 대기 후 새 토큰으로 재시도
 - **슈퍼어드민 권한 모델**: 조직 소속 없이도 모든 페이지/기능 접근 가능. `is_superadmin`이 `currentOrg` 체크보다 우선
 - **TEST MODE 접근 제한**: admin/owner/superadmin만 카드 노출 (일반 멤버 비노출)
+
+---
+
+## 세션 7 — 조직·멤버 관리 + 채팅 실사용자 전환
+
+- 작성자 (Who): @youminsu0523
+- 작성 일자 (When): 2026-04-24
+- 작업 브랜치: `MS`
+
+### 1️⃣ 프롬프트 / 목표
+> 채팅 컴포넌트의 하드코딩된 CURRENT_USER/CHAT_TEAM_MEMBERS를 실제 로그인 사용자 + API 데이터로 교체하고, 슈퍼어드민의 다중 조직 멤버 배정 기능을 구현한다.
+
+### 2️⃣ 수행된 작업 요약
+
+#### 채팅 시스템 — 하드코딩 → 실사용자 전환
+- **ChatHeader / ConversationItem / ConversationList / MessageBubble / NewChatModal**: `CURRENT_USER`, `CHAT_TEAM_MEMBERS` import 전부 제거. `localStorage.getItem('user')` 기반 `getCurrentUserId()` 헬퍼로 교체
+- **participants 데이터 구조 변경**: 단순 ID 배열 → `{user_id, name, initials}` 객체 배열로 변경 대응. DM 상대방 매칭 로직 수정
+- **findDMConversation 버그 수정**: `||` 조건 → `&&` 조건으로 수정 (두 사용자 **모두** 참여해야 매칭)
+- **ConversationItem 시간 포맷**: `Date.now() - ts` → `Date.now() - new Date(ts).getTime()` (ISO 문자열 대응)
+- **온라인 상태 키**: `otherMember.status` → `otherMember.online_status`로 변경
+
+#### 대화방 나가기 기능
+- **chatApi.js**: `leaveConversation(conversationId)` — `DELETE /api/v1/chat/conversations/{id}/leave` 추가
+- **chatStore.js**: `leaveConversation` 액션 추가 (API 호출 → 대화 목록 새로고침 → activeConversation 초기화)
+- **ParticipantPanel.jsx**: 하단에 "대화 나가기" 버튼 + `window.confirm` 확인 다이얼로그
+
+#### 슈퍼어드민 다중 조직 멤버 배정
+- **AdminMembers.jsx**: 슈퍼어드민일 때 전체 조직 목록(`/admin/all-orgs`) 로드
+- 배정 모달에 **조직 선택 드롭다운** 추가 → 선택 시 해당 조직의 부서 목록(`/admin/orgs/{id}/departments`) 동적 로드
+- 조직 미선택 시 역할/부서/직위 필드 비활성화 (`opacity-40 + pointer-events-none`)
+- 일반 어드민은 기존 동작 유지 (자기 조직 고정 표시)
+
+#### 글로벌 CSS 수정
+- **index.css**: `body`의 `text-white` 상속으로 `<input>/<textarea>/<select>` 텍스트가 보이지 않던 문제 해결. `color: #111827`, `placeholder: #9ca3af` 명시
+
+### 🔗 변경 파일 목록 (10개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `api/chatApi.js` | `leaveConversation` 추가 + `findDMConversation` 매칭 로직 버그 수정 |
+| `components/chat/ChatHeader.jsx` | CURRENT_USER → localStorage, participants 객체 배열 대응 |
+| `components/chat/ConversationItem.jsx` | 동일 + 시간 포맷 수정 |
+| `components/chat/ConversationList.jsx` | 동일 + 검색 로직 수정 |
+| `components/chat/MessageBubble.jsx` | CURRENT_USER → localStorage |
+| `components/chat/NewChatModal.jsx` | CURRENT_USER → localStorage, 조직 멤버 API 연동 유지 |
+| `components/chat/ParticipantPanel.jsx` | participants 객체 배열 대응 + 대화 나가기 버튼 |
+| `store/chatStore.js` | `leaveConversation` 액션 추가 |
+| `pages/employee/AdminMembers.jsx` | 슈퍼어드민 다중 조직 배정 (조직 선택 → 부서 동적 로드) |
+| `index.css` | 폼 요소 텍스트 가시성 수정 |
+
+### 📐 설계 결정 사항
+- **getCurrentUserId 헬퍼 패턴**: 각 컴포넌트에 인라인 정의 (store 순환 import 방지). authStore를 직접 import하지 않고 localStorage에서 직접 읽음
+- **participants 구조 변경 대응**: 백엔드가 `{user_id, name, initials}` 객체 배열을 반환하도록 변경됨에 따라, 프론트 전체 채팅 컴포넌트를 일괄 수정
+- **조직 배정 UX**: 슈퍼어드민은 조직 선택이 첫 단계이며, 선택 전에는 하위 필드를 시각적으로 비활성화하여 순서를 유도

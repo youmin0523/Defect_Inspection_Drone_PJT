@@ -131,6 +131,27 @@ async def create_conversation(
         if not exists:
             raise HTTPException(status_code=400, detail=f"참여자 {pid}는 같은 조직에 소속되어 있지 않습니다.")
 
+    # DM 중복 방지: 같은 두 사용자 간 기존 DM이 있으면 그것을 반환
+    all_ids = set(payload.participant_ids) | {user.id}
+    if payload.type == "dm" and len(all_ids) == 2:
+        from sqlalchemy.orm import aliased
+        CM1 = aliased(ConversationMember)
+        CM2 = aliased(ConversationMember)
+        id_list = list(all_ids)
+        existing_q = await db.execute(
+            select(Conversation)
+            .join(CM1, CM1.conversation_id == Conversation.id)
+            .join(CM2, CM2.conversation_id == Conversation.id)
+            .where(Conversation.type == "dm")
+            .where(Conversation.organization_id == org.id)
+            .where(CM1.user_id == id_list[0])
+            .where(CM2.user_id == id_list[1])
+            .limit(1)
+        )
+        existing_dm = existing_q.scalar_one_or_none()
+        if existing_dm:
+            return await _build_conv_response(db, existing_dm)
+
     conv = Conversation(
         type=payload.type,
         name=payload.name,
@@ -141,7 +162,6 @@ async def create_conversation(
     await db.flush()
 
     # 참여자 추가 (생성자 포함)
-    all_ids = set(payload.participant_ids) | {user.id}
     for uid in all_ids:
         db.add(ConversationMember(conversation_id=conv.id, user_id=uid))
     await db.flush()
@@ -267,6 +287,37 @@ async def mark_read(
     member.last_read_at = func.now()
     await db.flush()
     return {"ok": True}
+
+
+@router.delete("/conversations/{conversation_id}/leave", status_code=204)
+async def leave_conversation(
+    conversation_id: UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """대화방 나가기 (참여자 레코드 삭제)"""
+    result = await db.execute(
+        select(ConversationMember)
+        .where(ConversationMember.conversation_id == conversation_id)
+        .where(ConversationMember.user_id == current_user.id)
+    )
+    member = result.scalar_one_or_none()
+    if member is None:
+        raise HTTPException(status_code=404, detail="이 대화방에 참여하고 있지 않습니다.")
+
+    await db.delete(member)
+    await db.flush()
+
+    # 남은 참여자가 없으면 대화방 자체도 삭제
+    remaining = await db.scalar(
+        select(func.count(ConversationMember.id))
+        .where(ConversationMember.conversation_id == conversation_id)
+    )
+    if remaining == 0:
+        conv = await db.get(Conversation, conversation_id)
+        if conv:
+            await db.delete(conv)
+            await db.flush()
 
 
 @router.get("/unread-counts", response_model=UnreadCountResponse)

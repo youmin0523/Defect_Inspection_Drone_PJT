@@ -1224,3 +1224,202 @@ API 시그니처 변경에 따른 Store 수정:
 - **프레임 저장 전략**: raw JPEG + 메타데이터 저장, 조회 시 mode별 시각화 적용
 - **라이브 오버레이**: numpy 프레임에 직접 그려서 JPEG 인코딩 1회만 수행
 - **추론/브로드캐스트 분리**: `_detect()` → `_apply_live_overlay()` → `yield` → `_broadcast_detection()` 4단계 분리
+
+---
+
+## 📅 2026-04-24 (목) — 입력 필드 UX 수정 + 멤버 배정 조직 선택 + 채팅 시스템 전면 리팩토링
+
+> **작업자**: @youminsu0523 (Claude Opus 4.6 바이브코딩)
+> **브랜치**: `MS`
+
+### ⏱ 세션 시작 14:00 | 이슈 파악
+
+사용자가 조직명 입력 필드에서 텍스트가 보이지 않는 문제를 발견. 드래그해야만 보임.
+추가로 관리자 멤버 배정 모달에 조직 선택 기능이 없어 슈퍼어드민이 다른 조직에 멤버를 배정할 수 없는 문제도 확인.
+채팅 시스템에서 아이콘이 "??", 이름이 "알 수 없음"으로 표시되고 메시지 좌우 정렬이 안 되는 문제, DM 중복 생성 문제도 발견.
+
+### ⏱ R1 | 전역 입력 필드 텍스트 색상 수정
+
+- **문제**: `body`에 `text-white`가 전역 적용 → 라이트 배경 위 `input/textarea/select`가 흰 배경에 흰 글씨
+- **영향 범위**: Login, Signup, FindAccount, Onboarding, AdminMembers, SessionSetup, PreWork, EmployeeLanding, SiteFormModal, ContactModal, AddDefectDialog 등 전체 폼 요소
+- **해결**: `index.css`에 전역 룰 추가
+  ```css
+  input, textarea, select { color: #111827; }
+  input::placeholder, textarea::placeholder { color: #9ca3af; }
+  ```
+
+### ⏱ R2 | 멤버 배정 모달 — 소속 조직 선택 기능 (슈퍼어드민)
+
+- **프로세스 변경**: 역할→부서→직위(기존) → **소속 조직→역할→부서→직위**(개선)
+- **Backend 추가**:
+  - `GET /admin/all-orgs` — 전체 조직 목록 + 멤버 수 (슈퍼어드민 전용)
+  - `GET /admin/orgs/{org_id}/departments` — 특정 조직의 부서 목록 (슈퍼어드민 전용)
+  - `AssignMemberRequest`에 `organization_id: Optional[UUID]` 추가
+  - `assign_member` — 슈퍼어드민이 `organization_id` 지정 시 해당 조직에 배정, 일반 admin은 자기 조직에만
+- **Frontend**: 배정 모달에서 조직 선택 시 해당 조직의 부서 목록을 동적 로드. 조직 미선택 시 역할/부서/직위 비활성화(opacity-40)
+
+### ⏱ R3 | 채팅 시스템 Mock 제거 — 실제 사용자 데이터 연동
+
+- **근본 원인**: `CURRENT_USER = { id: 't1', ... }` Mock ID를 모든 채팅 컴포넌트가 참조 → 실제 UUID와 불일치
+  - `isMine` 항상 `false` → 모든 메시지가 왼쪽(상대방) 배치
+  - `CHAT_TEAM_MEMBERS` Mock 배열에서 상대방 검색 → 매칭 실패 → "??" 아이콘, "알 수 없음" 이름
+  - `conv.participants`가 `{user_id, name, initials}` 객체 배열인데 ID 문자열처럼 취급
+- **수정 파일 5개**:
+  - `ChatHeader.jsx` — `CHAT_TEAM_MEMBERS` 제거, `conv.participants`에서 직접 상대방 조회
+  - `ConversationItem.jsx` — 동일 Mock 제거, participants 객체에서 이름/이니셜 표시
+  - `MessageBubble.jsx` — `CURRENT_USER.id` → `localStorage.user.id`로 교체. 내 메시지 오른쪽(노란색), 상대 왼쪽(흰색)
+  - `ConversationList.jsx` — 검색 필터도 participants 객체 사용
+  - `NewChatModal.jsx` — `CURRENT_USER` 참조 3곳 모두 `getCurrentUser()` 함수로 교체
+
+### ⏱ R4 14:20 | DM 중복 생성 방지
+
+- **문제**: `findDMConversation`이 `participants.some(p => p.user_id === userId1 || userId2)` — 아무 한 명만 매칭되면 "기존 DM 있음"으로 판단 → 잘못된 DM 반환 or 미매칭 시 중복 생성
+- **Frontend 수정**: `&&` 연산으로 **두 사용자 모두** 참여하는 DM만 매칭
+  ```javascript
+  c.participants.some(p => p.user_id === userId1) &&
+  c.participants.some(p => p.user_id === userId2)
+  ```
+- **Backend 수정**: `create_conversation`에서 DM 생성 시 기존 DM 존재 여부를 서버에서도 검증 (aliased join으로 두 사용자 모두 참여하는 DM 검색)
+
+### ⏱ R5 14:30 | 채팅 나가기 기능 추가
+
+- **Backend**: `DELETE /conversations/{id}/leave` — ConversationMember 삭제, 남은 참여자 없으면 대화방 자체 삭제
+- **Frontend**: `chatApi.js`에 `leaveConversation()` 추가, `chatStore.js`에 `leaveConversation` 액션 추가
+- **UI**: `ParticipantPanel.jsx` 하단에 빨간색 "대화 나가기" 버튼 + `window.confirm` 확인 다이얼로그
+
+### 🔗 변경 파일 목록
+
+**Backend (3개)**:
+- `app/schemas/organization.py` — `AssignMemberRequest`에 `organization_id` 추가
+- `app/api/organization.py` — assign API 수정 + `GET /admin/all-orgs`, `GET /admin/orgs/{id}/departments` 추가
+- `app/api/chat.py` — `DELETE /conversations/{id}/leave` 추가 + DM 중복 방지 로직
+
+**Frontend (8개)**:
+- `src/index.css` — 전역 input/textarea/select 텍스트 색상
+- `src/pages/employee/AdminMembers.jsx` — 배정 모달 조직 선택 UI
+- `src/components/chat/ChatHeader.jsx` — Mock 제거, 실제 participants 사용
+- `src/components/chat/ConversationItem.jsx` — Mock 제거, 실제 participants 사용
+- `src/components/chat/MessageBubble.jsx` — 실제 사용자 ID로 좌우 정렬
+- `src/components/chat/ConversationList.jsx` — 검색 필터 Mock 제거
+- `src/components/chat/NewChatModal.jsx` — Mock 제거
+- `src/components/chat/ParticipantPanel.jsx` — participants 객체 처리 + 채팅 나가기 버튼
+
+**API 파일**:
+- `src/api/chatApi.js` — `leaveConversation()` 추가 + `findDMConversation` 로직 수정
+- `src/store/chatStore.js` — `leaveConversation` 액션 추가
+
+### 🔗 신규 API 엔드포인트
+| 메서드 | 경로 | 역할 |
+|--------|------|------|
+| GET | `/api/v1/organizations/admin/all-orgs` | 전체 조직 목록 (슈퍼어드민) |
+| GET | `/api/v1/organizations/admin/orgs/{org_id}/departments` | 특정 조직 부서 목록 (슈퍼어드민) |
+| DELETE | `/api/v1/chat/conversations/{id}/leave` | 대화방 나가기 |
+
+### 📐 설계 결정 사항
+- **전역 CSS vs 개별 클래스**: `body { text-white }` 상속 문제를 개별 input마다 `text-gray-900` 추가 대신 전역 CSS 규칙으로 일괄 해결 — 유지보수 부담 최소화
+- **Mock 데이터 전면 제거**: `CURRENT_USER`(id: 't1') / `CHAT_TEAM_MEMBERS` 참조를 모든 채팅 컴포넌트에서 제거하고 `localStorage.user` 기반으로 교체 — Phase 1 → Phase 2 전환 완료
+- **DM 중복 방지 이중 잠금**: 프론트엔드 `findDMConversation` + 백엔드 `create_conversation` 양쪽에서 기존 DM 존재 여부 검증
+- **대화 나가기 정리**: 마지막 참여자가 나가면 대화방 자체 자동 삭제 (DB 정리)
+
+## 📅 2026-04-24 (목) — 멤버 관리 초대 코드 표시 버그 수정
+
+> **작업자**: @youminsu0523 (Claude Opus 4.6 바이브코딩)
+> **브랜치**: `MS`
+> **시각**: 14:41
+
+### ⏱ R10 | 멤버 관리 페이지 초대 코드 미표시 버그 수정
+
+- **문제**: AdminMembers 페이지 상단에 조직 초대 코드가 표시되지 않음
+- **원인 분석**:
+  - 프론트엔드(`AdminMembers.jsx`)는 `orgInfo?.invite_code`로 표시 로직이 정상 구현되어 있었음
+  - 그러나 백엔드 `GET /api/v1/organizations/members` 응답에서 `OrganizationResponse` 구성 시 `invite_code` 필드를 누락
+  - 같은 파일의 `GET /api/v1/organizations/my` 엔드포인트에는 `invite_code=org.invite_code`가 포함되어 있었으나, `/members` 엔드포인트에서는 빠져 있었음
+  - 스키마 기본값이 `invite_code: Optional[str] = None`이므로 누락 시 항상 `None` → 프론트엔드 조건부 렌더링 통과 못함
+- **해결**: `app/api/organization.py` line 122에 `invite_code=org.invite_code` 추가
+
+### 🔗 변경 파일 목록
+
+**Backend (1개)**:
+- `app/api/organization.py` — `/members` 응답에 `invite_code` 필드 추가
+
+### 📐 설계 결정 사항
+- **초대 코드 흐름**: 조직 생성 시 8자리 코드 자동 발급 → 관리자가 멤버 관리 페이지에서 확인 → 오프라인/메신저로 신규 직원에게 전달 → 온보딩 페이지에서 입력하여 가입
+- **코드 알파벳**: 혼동 문자(0/O, 1/I/L) 제외한 32종 문자, 약 1조 조합
+
+---
+
+## 🔄 2026-04-24 — 노션 동기화 스크립트 세션별 상세 캡쳐 개선
+
+> **착수 시각**: 2026-04-24 11:10
+> **작업자**: @youminsu0523
+> **목표**: `sync_notion_logs.py`가 새 로그 콘텐츠를 세션별로 분리하여, 각 세션의 작업 내용과 관련된 앱 페이지를 Playwright로 상세 캡쳐 후 노션에 업로드하도록 개선.
+> **배경**: 기존 동기화는 새 콘텐츠 전체를 하나의 세션으로 묶어 스크린샷 1장만 촬영. 여러 기능(테스트 모드, 멤버관리, 로그인 등)이 섞여 있어도 대시보드 1장만 첨부되어 팀원이 어떤 화면이 변경됐는지 알 수 없었음.
+
+### ⏱ 11:10 | 노션 동기화 실행 → 문제 확인
+
+- 기존 스크립트 실행 결과: Backend/Frontend 각 1장씩만 캡쳐 (전체 내용을 하나로 뭉침)
+- 사용자 피드백: "어느 부분인지 상세하게 캡쳐하기로 했었는데"
+
+### ⏱ 11:15 | SESSION_ROUTE_MAP 신규 추가
+
+세션 키워드 → 앱 라우트/페이지 매핑 테이블 추가. 우선순위 기반 매칭:
+
+| 우선순위 | 키워드 예시 | 라우트 | 라벨 |
+|---------|-----------|--------|------|
+| 높음 | `AdminMembers`, `멤버 관리` | `/employee/admin/members` | 멤버 관리 페이지 |
+| 높음 | `Signup`, `회원가입` | `/signup` | 회원가입 페이지 |
+| 높음 | `ReportDetail`, `보고서 다운로드` | `/employee/reports` | 보고서 목록 |
+| 높음 | `floorplan`, `도면` | `/employee` | 직원 랜딩 (도면) |
+| 중간 | `test_stream`, `TestModeBar` | `/dashboard` | 대시보드 테스트 모드 |
+| 중간 | `EmployeeLanding`, `슈퍼어드민` | `/employee` | 직원 전용 랜딩 |
+| 중간 | `Login.jsx`, `Refresh Token` | `/login` | 로그인 페이지 |
+| 낮음 | `Dashboard`, `bbox` | `/dashboard` | 대시보드 |
+
+### ⏱ 11:20 | split_into_sessions() 함수 추가
+
+- 새 콘텐츠를 `\r?\n---\r?\n` (Windows CRLF 대응) 정규식으로 세션별 분리
+- 각 세션에서 `##` 또는 `###` 첫 헤딩을 제목으로 추출
+- 50자 미만 짧은 섹션(메타 블록 등)은 자동 스킵
+
+### ⏱ 11:25 | infer_session_route() 2단계 매칭
+
+기존 `infer_component_hint()` 대체:
+1. **1단계**: 세션 제목(`session_title`)으로 `SESSION_ROUTE_MAP` 매칭 (가장 정확)
+2. **2단계**: 본문 전체 텍스트로 매칭
+3. **3단계**: 기존 `COMPONENT_HINT_MAP` 폴백
+
+### ⏱ 11:30 | capture_app_screenshot() 라우트 기반 캡쳐로 전면 교체
+
+- **UI 로그인 방식 채택**: `update_screenshots.py` 패턴 참고 — `_login_via_ui()`로 실제 로그인 폼 입력 (`input#userId` + `input#password` → submit → `/employee` 대기)
+- 기존 `_inject_auth_token()` (localStorage 직접 주입 + API 로그인 시도) 제거
+- 인증 후 `route_info["route"]`로 직접 이동 → 2.5초 대기 → 캡쳐
+
+### ⏱ 11:35 | main() 세션별 개별 처리 루프
+
+```
+기존 흐름:
+  파일 → [전체 콘텐츠] → 캡쳐 1장 → Notion 1회
+
+변경 흐름:
+  파일 → split_into_sessions() → [세션1] → 라우트 추론 → 캡쳐 → Notion
+                                 → [세션2] → 라우트 추론 → 캡쳐 → Notion
+                                 → [세션3] → 라우트 추론 → 캡쳐 → Notion
+```
+
+### ⏱ 11:40 | CRLF 버그 수정 + 재동기화 검증
+
+- 첫 실행에서 세션이 1개로만 감지됨 → 원인: Windows `\r\n` 때문에 `\n---\n` 패턴 미매칭
+- 정규식을 `\r?\n---\r?\n`으로 수정 → 4개 세션 정상 분리 확인
+- 기존 페이지 아카이브 → 커서 롤백 → 재실행:
+  - Backend 4세션 + Frontend 2세션 = **총 6장 상세 캡쳐** 노션 업로드 완료
+
+### 🛠 변경 파일 목록
+
+**수정 (1개)**:
+- `sync_notion_logs.py` — 세션별 분리 + 라우트 매핑 + UI 로그인 캡쳐 + 개별 Notion append
+
+### 📐 설계 결정 사항
+- **세션 분리 기준**: `---` (마크다운 수평선). Vibe_Coding_Log.md가 이미 이 구분자를 세션 경계로 사용 중
+- **라우트 매핑 우선순위**: 구체적 키워드(멤버관리, 회원가입) > 중간(테스트모드, 슈퍼어드민) > 넓은(대시보드). 제목 매칭이 본문 매칭보다 우선
+- **UI 로그인 채택 이유**: localStorage 직접 주입은 React 상태와 불일치 → 빈 화면. 실제 폼 로그인이 안정적 (`update_screenshots.py` 검증 완료)
+- **커서 갱신 시점**: 모든 세션 처리 완료 후 한 번에 갱신 (중간 실패 시 전체 재시도)

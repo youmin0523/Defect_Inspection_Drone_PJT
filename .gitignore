@@ -27,6 +27,10 @@ screenshots/
 .vibe_sync_cursor.json
 sync_notion_logs.py
 capture_result.py
+update_screenshots.py
+new_urls.json
+output.txt
+run.bat
 
 tasks/
 

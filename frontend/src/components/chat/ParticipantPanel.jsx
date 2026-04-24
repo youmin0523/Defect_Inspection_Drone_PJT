@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { X } from 'lucide-react'
+import { X, LogOut } from 'lucide-react'
 import useChatStore from '../../store/chatStore.js'
 import { USER_STATUS_CONFIG } from '../../constants/chatConstants.js'
 import { listOrganizationMembers } from '../../api/organizationApi.js'
@@ -13,6 +13,7 @@ export default function ParticipantPanel() {
   const conversations = useChatStore((s) => s.conversations)
   const activeConversationId = useChatStore((s) => s.activeConversationId)
   const toggleParticipantPanel = useChatStore((s) => s.toggleParticipantPanel)
+  const leaveConversation = useChatStore((s) => s.leaveConversation)
 
   const [orgMembers, setOrgMembers] = useState([])
 
@@ -24,9 +25,12 @@ export default function ParticipantPanel() {
   const conv = conversations.find((c) => c.id === activeConversationId)
   if (!conv) return null
 
-  // 대화 참여자를 조직 멤버 정보와 매칭
-  const members = conv.participants
-    .map((id) => orgMembers.find((m) => m.user_id === id))
+  // participants 는 {user_id, name, initials} 객체 배열 — 조직 멤버와 매칭하여 부서/직위 보강
+  const members = (conv.participants || [])
+    .map((p) => {
+      const orgMatch = orgMembers.find((m) => m.user_id === p.user_id)
+      return orgMatch || { user_id: p.user_id, name: p.name, initials: p.initials }
+    })
     .filter(Boolean)
 
   const typeLabel = conv.type === 'channel' ? '채널' : conv.type === 'group' ? '그룹' : '1:1 대화'
@@ -88,12 +92,30 @@ export default function ParticipantPanel() {
                       <span className="text-[8px] font-bold bg-blue-100 text-blue-700 px-1 py-0.5 rounded shrink-0">관리자</span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-500">{m.position} · {m.department}</p>
+                  {(m.position || m.department) && (
+                    <p className="text-xs text-gray-500">{[m.position, m.department].filter(Boolean).join(' · ')}</p>
+                  )}
                 </div>
               </div>
             )
           })}
         </div>
+      </div>
+
+      {/* 대화 나가기 */}
+      <div className="px-4 py-3 border-t border-gray-100">
+        <button
+          type="button"
+          onClick={() => {
+            if (window.confirm('이 대화방을 나가시겠습니까?')) {
+              leaveConversation(activeConversationId)
+            }
+          }}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition"
+        >
+          <LogOut size={14} />
+          대화 나가기
+        </button>
       </div>
     </aside>
   )

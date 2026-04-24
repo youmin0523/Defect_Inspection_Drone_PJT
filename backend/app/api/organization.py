@@ -119,6 +119,7 @@ async def list_organization_members(
     return OrgMemberListResponse(
         organization=OrganizationResponse(
             id=org.id, name=org.name, biz_number=org.biz_number,
+            invite_code=org.invite_code,
             member_count=active_count, created_at=org.created_at,
         ),
         members=members,
@@ -331,15 +332,32 @@ async def list_unaffiliated_users(
     return [UnaffiliatedUserResponse.model_validate(u) for u in users]
 
 
-# ── 미소속 사용자 조직 배정 (admin/owner 전용) ─
+# ── 미소속 사용자 조직 배정 (admin/owner 또는 superadmin) ─
 @router.post("/members/assign", response_model=OrgMemberResponse, status_code=201)
 async def assign_member(
     payload: AssignMemberRequest,
-    org_tuple=Depends(require_role("owner", "admin")),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """미소속 사용자를 현재 조직에 배정 (admin/owner 전용)"""
-    user, member, org = org_tuple
+    """
+    미소속 사용자를 조직에 배정.
+    - 슈퍼어드민: organization_id 를 지정하여 아무 조직에 배정 가능
+    - 일반 admin/owner: 자신의 조직에만 배정 (organization_id 무시)
+    """
+    # 배정 대상 조직 결정
+    if current_user.is_superadmin and payload.organization_id:
+        # 슈퍼어드민이 특정 조직을 지정
+        target_org = await db.scalar(select(Organization).where(Organization.id == payload.organization_id))
+        if not target_org:
+            raise HTTPException(status_code=404, detail="해당 조직을 찾을 수 없습니다.")
+        org = target_org
+    else:
+        # 일반 admin/owner → 자기 조직
+        member_row, org = await _get_user_org(db, current_user.id)
+        if not org:
+            raise HTTPException(status_code=403, detail="소속된 조직이 없습니다.")
+        if member_row.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="멤버 배정 권한이 없습니다. (admin 이상)")
 
     # 배정 대상 사용자 확인
     target_user = await db.scalar(select(User).where(User.id == payload.user_id))
@@ -564,3 +582,50 @@ async def delete_department(
         raise HTTPException(status_code=404, detail="부서를 찾을 수 없습니다.")
     await db.delete(dept)
     await db.flush()
+
+
+# ══════════════════════════════════════════════
+# 슈퍼어드민 전용: 전체 조직 목록 + 조직별 부서 조회
+# ══════════════════════════════════════════════
+
+class _OrgListItem(BaseModel):
+    id: UUID
+    name: str
+    biz_number: str | None = None
+    member_count: int = 0
+
+@router.get("/admin/all-orgs", response_model=list[_OrgListItem])
+async def list_all_organizations(
+    superadmin=Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """플랫폼 전체 조직 목록 (슈퍼어드민 전용). 멤버 수 포함."""
+    result = await db.execute(
+        select(
+            Organization,
+            func.count(OrganizationMember.id).label("cnt"),
+        )
+        .outerjoin(OrganizationMember, (OrganizationMember.organization_id == Organization.id) & (OrganizationMember.status == "active"))
+        .group_by(Organization.id)
+        .order_by(Organization.name)
+    )
+    return [
+        _OrgListItem(id=org.id, name=org.name, biz_number=org.biz_number, member_count=cnt)
+        for org, cnt in result.all()
+    ]
+
+
+@router.get("/admin/orgs/{org_id}/departments", response_model=list[_DeptResponse])
+async def list_org_departments(
+    org_id: UUID,
+    superadmin=Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """특정 조직의 부서 목록 (슈퍼어드민 전용)."""
+    result = await db.execute(
+        select(Department).where(Department.organization_id == org_id).order_by(Department.name)
+    )
+    return [
+        _DeptResponse(id=d.id, organization_id=d.organization_id, name=d.name, created_at=d.created_at)
+        for d in result.scalars()
+    ]

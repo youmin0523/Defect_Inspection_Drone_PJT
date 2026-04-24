@@ -3,7 +3,10 @@
  * 역할: 카카오톡 스타일 말풍선 — 노란 내 메시지, 흰 상대 메시지, 연속 메시지 아바타 생략
  */
 
-import { CURRENT_USER } from '../../constants/chatConstants.js'
+function getCurrentUserId() {
+  const stored = JSON.parse(localStorage.getItem('user') || 'null')
+  return stored?.id || null
+}
 
 function formatTime(ts) {
   const d = new Date(ts)
@@ -11,7 +14,7 @@ function formatTime(ts) {
 }
 
 export default function MessageBubble({ message, showAvatar }) {
-  const isMine = message.sender_id === CURRENT_USER.id
+  const isMine = message.sender_id === getCurrentUserId()
 
   if (isMine) {
     return (
