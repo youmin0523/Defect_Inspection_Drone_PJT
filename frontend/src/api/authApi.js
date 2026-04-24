@@ -4,6 +4,7 @@
  *       - 일반 로그인 (아이디+비밀번호)
  *       - OAuth 코드 교환 (Google / Kakao / Naver)
  *       - 현재 사용자 조회 (GET /auth/me)
+ *       - Refresh Token 자동 재발급 (401 인터셉터)
  */
 
 import axios from 'axios'
@@ -24,6 +25,77 @@ API.interceptors.request.use((config) => {
   }
   return config
 })
+
+// ── 401 응답 시 refresh_token 으로 자동 재발급 ──
+let isRefreshing = false
+let failedQueue = []
+
+function processQueue(error, token = null) {
+  failedQueue.forEach(({ resolve, reject }) => {
+    if (error) reject(error)
+    else resolve(token)
+  })
+  failedQueue = []
+}
+
+API.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config
+
+    // refresh 엔드포인트 자체가 401이면 로그아웃
+    if (originalRequest.url?.includes('/auth/refresh')) {
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      localStorage.removeItem('user')
+      localStorage.removeItem('current_org')
+      window.location.href = '/login'
+      return Promise.reject(error)
+    }
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      const refreshToken = localStorage.getItem('refresh_token')
+      if (!refreshToken) {
+        return Promise.reject(error)
+      }
+
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject })
+        }).then((token) => {
+          originalRequest.headers.Authorization = `Bearer ${token}`
+          return API(originalRequest)
+        })
+      }
+
+      originalRequest._retry = true
+      isRefreshing = true
+
+      try {
+        const { data } = await API.post('/api/v1/auth/refresh', {
+          refresh_token: refreshToken,
+        })
+        const newToken = data.access_token
+        localStorage.setItem('access_token', newToken)
+        originalRequest.headers.Authorization = `Bearer ${newToken}`
+        processQueue(null, newToken)
+        return API(originalRequest)
+      } catch (refreshError) {
+        processQueue(refreshError, null)
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        localStorage.removeItem('user')
+        localStorage.removeItem('current_org')
+        window.location.href = '/login'
+        return Promise.reject(refreshError)
+      } finally {
+        isRefreshing = false
+      }
+    }
+
+    return Promise.reject(error)
+  }
+)
 
 /** 일반 로그인 */
 export const login = (username, password) =>
@@ -55,6 +127,23 @@ export const findId = (payload) =>
 /** 비밀번호 찾기 (임시 비밀번호 이메일 발송) */
 export const findPassword = (payload) =>
   API.post('/api/v1/auth/find-pw', payload)
+
+/** 프로필 이미지 업로드 */
+export const uploadProfileImage = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return API.put('/api/v1/auth/me/profile-image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+/** 프로필 이미지 삭제 */
+export const deleteProfileImage = () =>
+  API.delete('/api/v1/auth/me/profile-image')
+
+/** 내 정보 수정 (이름/전화번호) */
+export const updateMe = (payload) =>
+  API.patch('/api/v1/auth/me', payload)
 
 
 // ── OAuth 인가 URL 빌더 ─────────────────────

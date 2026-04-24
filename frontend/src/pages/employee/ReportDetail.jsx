@@ -9,9 +9,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, Clock, Save, Building } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Clock, Download, Save, Building } from 'lucide-react'
 import ReportEditor from '../../components/report/ReportEditor.jsx'
 import useReportsStore from '../../store/reportsStore.js'
+import { downloadReport } from '../../api/reportsApi.js'
 
 export default function ReportDetail() {
   const { id } = useParams()
@@ -101,6 +102,15 @@ export default function ReportDetail() {
               <span className="text-[11px] text-gray-500 inline-flex items-center gap-1">
                 <Save size={11} /> 자동 저장
               </span>
+            )}
+            {report && (
+              <button
+                type="button"
+                onClick={() => downloadReport(id).catch(() => {})}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold border border-gray-300 text-gray-600 hover:bg-gray-100 transition"
+              >
+                <Download size={11} /> 다운로드
+              </button>
             )}
             {report && (
               <button

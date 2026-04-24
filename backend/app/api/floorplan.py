@@ -27,8 +27,9 @@ from app.schemas.floorplan import (
     FloorplanProcessResponse,
     FloorplanAnalyzeResponse,
     FloorplanListResponse,
+    FloorplanValidateResponse,
 )
-from app.services.floorplan_processor import extract_walls_from_bytes
+from app.services.floorplan_processor import extract_walls_from_bytes, validate_floorplan_quality
 
 router = APIRouter()
 
@@ -129,8 +130,11 @@ async def process_floorplan(
 ):
     """
     업로드된 평면도에서 벽체 라인 추출 트리거.
-    OpenCV로 처리 후 Gazebo .world 파일 좌표 데이터 반환.
-    TODO: 실제 OpenCV 파이프라인 연결 필요
+    OpenCV로 처리 후 벽체 좌표 데이터 반환.
+
+    지원 파일 형식:
+      - JPG/PNG/WEBP: OpenCV 벽체 추출 (extract_walls_from_bytes)
+      - PDF/DXF: 추후 지원 (pdf2image / ezdxf 의��성 추가 필요)
     """
     result = await db.execute(
         select(Floorplan).where(Floorplan.id == floorplan_id)
@@ -142,29 +146,123 @@ async def process_floorplan(
     if fp.status == "processing":
         raise HTTPException(status_code=409, detail="이미 처리 중입니다.")
 
+    # 파일 존재 확인
+    if not fp.file_path or not os.path.exists(fp.file_path):
+        raise HTTPException(status_code=404, detail="업로드된 파일을 찾을 수 없습니다.")
+
     # 상태 업데이트
     fp.status = "processing"
     await db.flush()
 
-    # TODO: 여기에 실제 OpenCV 벽체 추출 로직 연결
-    # - JPG/PNG: cv2.Canny → HoughLinesP → 벽체 좌표 추출
-    # - PDF: pdf2image → 이미지 변환 후 동일 파이프라인
-    # - DXF: ezdxf 파싱 → LINE 엔티티 좌표 추출
-    #
-    # 처리 완료 시:
-    #   fp.status = "completed"
-    #   fp.wall_count = len(walls)
-    #   fp.walls_data = walls
-    #   fp.gazebo_world_path = "/path/to/generated.world"
+    try:
+        # 파일 읽기
+        async with aiofiles.open(fp.file_path, "rb") as f:
+            file_bytes = await f.read()
 
-    return FloorplanProcessResponse(
-        id=fp.id,
-        filename=fp.filename,
-        status=fp.status,
-        wall_count=fp.wall_count,
-        walls=fp.walls_data,
-        gazebo_world=fp.gazebo_world_path,
-    )
+        # 파일 형식별 처리
+        content_type = (fp.content_type or "").lower()
+
+        if content_type in {"image/jpeg", "image/png", "image/webp", "application/octet-stream"}:
+            # JPG/PNG/WEBP ��� OpenCV 벽체 추출
+            extraction = extract_walls_from_bytes(file_bytes)
+        elif content_type == "application/pdf":
+            # PDF → 이미지 변환 후 처리 (pdf2image 필요)
+            try:
+                from pdf2image import convert_from_bytes
+                import cv2
+                import numpy as np
+
+                images = convert_from_bytes(file_bytes, dpi=200, first_page=1, last_page=1)
+                img_array = np.array(images[0])
+                img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+                _, img_bytes = cv2.imencode(".png", img_bgr)
+                extraction = extract_walls_from_bytes(img_bytes.tobytes())
+            except ImportError:
+                fp.status = "failed"
+                await db.flush()
+                raise HTTPException(
+                    status_code=422,
+                    detail="PDF 처리를 위한 pdf2image 패키지가 설치되어 있지 않습니다.",
+                )
+        elif content_type in {"application/dxf"}:
+            # DXF → LINE 엔티티 좌표 추출 (ezdxf 필요)
+            try:
+                import ezdxf
+
+                doc = ezdxf.read(fp.file_path)
+                msp = doc.modelspace()
+                lines = [e for e in msp if e.dxftype() == "LINE"]
+
+                if not lines:
+                    fp.status = "completed"
+                    fp.wall_count = 0
+                    fp.walls_data = []
+                    await db.flush()
+                    return FloorplanProcessResponse(
+                        id=fp.id, filename=fp.filename, status="completed",
+                        wall_count=0, walls=[], gazebo_world=None,
+                    )
+
+                # 좌표 범위 산출 (정규화용)
+                all_x = [l.dxf.start.x for l in lines] + [l.dxf.end.x for l in lines]
+                all_y = [l.dxf.start.y for l in lines] + [l.dxf.end.y for l in lines]
+                min_x, max_x = min(all_x), max(all_x)
+                min_y, max_y = min(all_y), max(all_y)
+                w = max_x - min_x if max_x - min_x > 0 else 1
+                h = max_y - min_y if max_y - min_y > 0 else 1
+
+                walls = []
+                for line in lines:
+                    walls.append({
+                        "x1": round((line.dxf.start.x - min_x) / w, 4),
+                        "y1": round((line.dxf.start.y - min_y) / h, 4),
+                        "x2": round((line.dxf.end.x - min_x) / w, 4),
+                        "y2": round((line.dxf.end.y - min_y) / h, 4),
+                    })
+
+                extraction = {
+                    "walls": walls[:50],
+                    "outline": [],
+                    "image_width": int(w),
+                    "image_height": int(h),
+                    "wall_count": min(len(walls), 50),
+                }
+            except ImportError:
+                fp.status = "failed"
+                await db.flush()
+                raise HTTPException(
+                    status_code=422,
+                    detail="DXF 처리를 위한 ezdxf 패키지가 설치되어 있지 않습니다.",
+                )
+        else:
+            fp.status = "failed"
+            await db.flush()
+            raise HTTPException(
+                status_code=422,
+                detail=f"지원하지 않는 파일 형식입니다: {fp.content_type}",
+            )
+
+        # DB 업데이트 — 처리 완료
+        fp.status = "completed"
+        fp.wall_count = extraction["wall_count"]
+        fp.walls_data = extraction["walls"]
+        await db.flush()
+
+        return FloorplanProcessResponse(
+            id=fp.id,
+            filename=fp.filename,
+            status=fp.status,
+            wall_count=fp.wall_count,
+            walls=fp.walls_data,
+            gazebo_world=fp.gazebo_world_path,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        fp.status = "failed"
+        await db.flush()
+        raise HTTPException(status_code=500, detail=f"벽체 추출 처리 중 오류: {str(e)}")
 
 
 @router.post("/analyze", response_model=FloorplanAnalyzeResponse)
@@ -191,6 +289,55 @@ async def analyze_floorplan(
         raise HTTPException(status_code=422, detail=f"이미지 처리 실패: {str(e)}")
 
     return FloorplanAnalyzeResponse(**result)
+
+
+@router.post("/validate", response_model=FloorplanValidateResponse)
+async def validate_floorplan(
+    file: UploadFile = File(...),
+    _user=Depends(get_current_user),
+):
+    """
+    평면도 이미지 품질 검증 (Stateless — DB 불필요).
+    업로드 전 이미지가 벽체 추출에 적합한지 사전 판별.
+
+    검증 항목:
+      - 해상도 (최소 1000×1000px 권장)
+      - 선명도 (Laplacian variance)
+      - 대비 (흑백 표준편차)
+      - 직선 비율 (평면도 특성 확인)
+      - 직각 교차점 수
+      - 기울기 (수평/수직 정렬)
+      - 벽체 감지 수
+
+    응답 status:
+      - "ok": 양호 — 진행 허용
+      - "warning": 주의사항 있으나 진행 가능
+      - "rejected": 품질 부족 — 재업로드 권장
+    """
+    if file.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"이미지 파일만 지원합니다 (JPG/PNG/WEBP): {file.content_type}",
+        )
+
+    content = await file.read()
+
+    # 파일 크기 체크 (50KB 미만 거부)
+    if len(content) < 50 * 1024:
+        return FloorplanValidateResponse(
+            status="rejected",
+            score=0,
+            checks={},
+            warnings=[],
+            errors=[f"파일 크기가 너무 작습니다 ({len(content) // 1024}KB). 최소 50KB 이상이 필요합니다."],
+        )
+
+    try:
+        result = validate_floorplan_quality(content)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"이미지 검증 실패: {str(e)}")
+
+    return FloorplanValidateResponse(**result)
 
 
 @router.post("/{floorplan_id}/calibrate", response_model=FloorplanCalibrateResponse)

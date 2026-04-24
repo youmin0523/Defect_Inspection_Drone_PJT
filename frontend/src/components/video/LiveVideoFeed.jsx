@@ -13,11 +13,21 @@
 
 import { useState } from 'react'
 import useDroneStore from '../../store/droneStore.js'
+import useSessionStore from '../../store/sessionStore.js'
+import useDefectStore from '../../store/defectStore.js'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
 const STREAM_URLS = {
   rgb:     import.meta.env.VITE_STREAM_RGB_URL     || '/api/v1/stream/rgb',
   thermal: import.meta.env.VITE_STREAM_THERMAL_URL || '/api/v1/stream/thermal',
   blend:   import.meta.env.VITE_STREAM_BLEND_URL   || '/api/v1/stream/blend',
+}
+
+const TEST_STREAM_URLS = {
+  rgb:     '/api/v1/stream/test/rgb',
+  thermal: '/api/v1/stream/test/thermal',
+  blend:   '/api/v1/stream/test/rgb',  // 테스트 모드에서 blend 미지원, RGB 폴백
 }
 
 const MODE_LABELS = {
@@ -28,12 +38,25 @@ const MODE_LABELS = {
 
 export default function LiveVideoFeed({ fill = false, mode }) {
   const storeCameraMode = useDroneStore((s) => s.cameraMode)
+  const isTestMode = useSessionStore((s) => s.isTestMode)
+  const selectedDefect = useDefectStore((s) => s.selectedDefect)
   // mode prop 이 주어지면 store 무시 — 멀티 피드(메인 + PIP 다른 드론) 렌더링 용도.
   const cameraMode = mode ?? storeCameraMode
   const [hasError, setHasError] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
 
-  const streamUrl = STREAM_URLS[cameraMode] || STREAM_URLS.rgb
+  const urls = isTestMode ? TEST_STREAM_URLS : STREAM_URLS
+  const streamUrl = urls[cameraMode] || STREAM_URLS.rgb
+
+  // 테스트 모드 + 하자 선택 시 → 해당 시점 프레임(bbox/detection 오버레이 포함) 표시
+  const testDetectionMode = useSessionStore((s) => s.testDetectionMode)
+  const channel = cameraMode === 'thermal' ? 'thermal' : 'rgb'
+  const defectFrameUrl =
+    isTestMode && selectedDefect?.id
+      ? `${API_BASE}/api/v1/stream/test/defect/${selectedDefect.id}/${channel}?mode=${testDetectionMode}`
+      : null
+  const displayUrl = defectFrameUrl || streamUrl
+  const isDefectView = !!defectFrameUrl
 
   // fill 모드: 부모(풀스크린 컨테이너) 를 꽉 채움. 일반 모드: 16/9 고정.
   const containerClass = fill
@@ -51,16 +74,29 @@ export default function LiveVideoFeed({ fill = false, mode }) {
 
   return (
     <div className={containerClass} style={containerStyle}>
-      {/* MJPEG 스트림 */}
+      {/* MJPEG 스트림 또는 하자 시점 정지 프레임 */}
       {!hasError ? (
-        <img
-          key={streamUrl}
-          src={streamUrl}
-          alt="드론 카메라 피드"
-          className={imgClass}
-          onLoad={() => setIsLoaded(true)}
-          onError={() => setHasError(true)}
-        />
+        <>
+          <img
+            key={displayUrl}
+            src={displayUrl}
+            alt="드론 카메라 피드"
+            className={imgClass}
+            onLoad={() => setIsLoaded(true)}
+            onError={() => { if (!isDefectView) setHasError(true) }}
+          />
+          {/* 하자 조회 모드 표시 배지 */}
+          {isDefectView && fill && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-600/80 border border-red-400/60 shadow-lg">
+                <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                <span className="text-[11px] font-mono font-bold text-white tracking-wider">
+                  DEFECT VIEW — {selectedDefect?.category_code} {selectedDefect?.defect_type}
+                </span>
+              </div>
+            </div>
+          )}
+        </>
       ) : fill ? (
         /* 풀스크린 No-Signal — 레이더 스캔/격자/타이포 */
         <div className={`relative flex flex-col items-center justify-center w-full h-full text-slate-500 ${noSignalBg}`}>
@@ -144,8 +180,17 @@ export default function LiveVideoFeed({ fill = false, mode }) {
             {MODE_LABELS[cameraMode]}
           </div>
           <div className="absolute top-2 right-2 flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            <span className="text-xs text-white/70">LIVE</span>
+            {isDefectView ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-red-500" />
+                <span className="text-xs text-red-400 font-mono">DEFECT</span>
+              </>
+            ) : (
+              <>
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-xs text-white/70">LIVE</span>
+              </>
+            )}
           </div>
         </>
       )}

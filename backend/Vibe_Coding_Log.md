@@ -812,3 +812,415 @@ TODO 주석: SLAM/Floorplan 은 site/org FK 추가 후 `get_current_org_member` 
   - `PUSH_PROVIDER=fcm` (firebase-admin 연결 후)
   - `WS_BACKEND=redis` + `REDIS_URL` (수평 확장 시)
 - Telemetry POST 오픈 상태 확인 — VPC/방화벽 레벨 접근 제어 전제
+
+---
+
+## 📝 기본 정보 (Meta)
+
+- 작성자 (Who): @youminsu0523
+- 작성 일자 (When): 2026-04-23 14:00
+- 목표 기능 (Objective): 학습 데이터셋 출처 관리 문서화 및 .gitignore 설정
+- 작업 브랜치/환경: `MS`
+
+---
+
+## 💬 바이브코딩 대화 흐름 (Vibe Coding Log)
+
+### 1️⃣ 학습 데이터셋 출처 문서 추가 (Training Datasets Source Management)
+
+> ⏱ 2026-04-23 14:00
+
+#### 배경
+- 20종 결함 분류 모델 학습에 사용한 데이터셋(63,285장)의 출처·라이선스를 체계적으로 정리할 필요
+- `backend/training/` 디렉토리의 대용량 데이터셋 파일이 Git 추적에서 제외되어야 함
+
+#### 작업 내용
+
+**① `backend/training/.gitignore` 신규 생성**
+- 학습용 대용량 데이터셋 디렉토리(`datasets/`, `gdrive_raw/`, `weights/` 등)를 Git 추적에서 제외
+- 모델 가중치(`.pt`, `.onnx` 등)도 추적 제외 대상
+
+**② `backend/training/datasets_sources.md` 신규 생성**
+- 데이터셋 총괄표: 9개 데이터셋, 총 63,285장 이미지
+- 하자코드(A-01~E-02) ↔ 데이터셋 ↔ 모델 클래스 매핑 테이블
+- 원본 데이터 출처 상세 (Roboflow, GitHub, AI Hub 등 28개 소스)
+  - 카테고리별 정리: A 구조·기하 / B 단열·방수 / C 마감·표면 / D 바닥·난방 / E 창호·유리
+- 라이선스 요약: CC BY 4.0(22개), CC BY-NC(2개), Public Domain(1개), MIT(1개), GPL-3.0(1개), Academic(2개), 내부(1개)
+
+#### 커밋
+- `8bf2ad7` — `feat: add .gitignore and documentation for training datasets source management`
+
+#### 비고
+- Hijin 브랜치 PR #27 머지 완료 (`f4a2068`) — 04-22 작업분(refresh token, auth guards, prometheus, push notifications, redis pub/sub)은 이전 세션에서 기록 완료
+
+---
+
+## 🎮 2026-04-23~24 — TEST MODE 스트리밍 서비스 + Dashboard bbox 객체탐지 시각화 (@youminsu0523)
+
+> **작업자**: @youminsu0523  
+> **작업 브랜치**: `MS`  
+> **목표**: 드론 없이 로컬 이미지/영상으로 AI 하자 검출을 시험할 수 있는 TEST MODE 구축. 대시보드에서 bbox 오버레이로 탐지 결과 실시간 시각화.
+
+### ⏱ TEST MODE 백엔드 — test_stream.py (신규 1053줄)
+
+`backend/app/services/test_stream.py` **신규**:
+- **카테고리별 균등 샘플링**: 각 하자 유형(Crack, Moisture, Delamination 등)이 골고루 노출되도록 라운드로빈
+- **RGB/Thermal 쌍 동기화**: 프레임 버전 카운터로 두 스트림 정합성 보장. 쌍이 없는 데이터는 Thermal에 "No Signal" 표시
+- **재생 제어**: 시작(start) / 일시중지(pause) / 재개(resume) / 정지(stop) 상태 관리
+- **image_crop 생성**: DefectCard 썸네일 표시용 base64 JPEG 생성
+- **20종 ONNX 추론 or 목업 폴백**: 모델 가중치가 있으면 실제 추론, 없으면 랜덤 하자 목업 생성
+- **소스 전환**: 프로젝트 내장 학습 데이터(`training/`) ↔ 사용자 직접 업로드 이미지/영상
+
+### ⏱ TEST MODE 백엔드 — stream.py API 엔드포인트 추가 (189줄+)
+
+`backend/app/api/stream.py` 수정:
+| 메서드 | 경로 | 역할 |
+|--------|------|------|
+| POST | `/stream/test/init` | 테스트 모드 초기화 (이미지 스캔 + 모델 로드) |
+| POST | `/stream/test/start` | 재생 시작 |
+| POST | `/stream/test/pause` | 일시중지 |
+| POST | `/stream/test/resume` | 재개 |
+| POST | `/stream/test/stop` | 정지 |
+| GET | `/stream/test/state` | 현재 재생 상태 조회 |
+| GET | `/stream/test/rgb` | 테스트 RGB MJPEG 스트림 |
+| GET | `/stream/test/thermal` | 테스트 Thermal MJPEG 스트림 |
+| POST | `/stream/test/detection-mode` | 시각화 모드 전환 (bbox/detection) |
+| POST | `/stream/test/source` | 소스 전환 (project/upload) |
+| POST | `/stream/test/upload` | 테스트 이미지/영상 업로드 |
+| DELETE | `/stream/test/upload` | 업로드 파일 삭제 |
+| GET | `/stream/test/upload/list` | 업로드 파일 목록 |
+| GET | `/stream/test/defect/{id}/{channel}` | 특정 하자 시점 프레임 스냅샷 |
+
+### ⏱ TEST MODE config 추가
+
+`backend/app/config.py`:
+- `DRONE_CONNECTED: bool = False` — 드론 미연결 시 테스트 모드 활성화
+- `TEST_MODE_ENABLED: bool = True`
+- `TEST_IMAGE_INTERVAL: float = 3.0` — 이미지 전환 주기(초)
+
+### ⏱ TEST MODE 프론트엔드 — TestModeBar.jsx (신규 319줄)
+
+`frontend/src/components/dashboard/TestModeBar.jsx` **신규**:
+- 시작/일시중지/정지 재생 제어 버튼
+- 프로젝트 데이터 ↔ 직접 업로드 소스 전환 토글
+- 직접 업로드 모드: 이미지/영상 대량 드래그&드롭 첨부 + 파일 목록 표시
+- bbox / detection 시각화 모드 전환
+
+### ⏱ Dashboard + LiveVideoFeed 연동
+
+- **`Dashboard.jsx`** — 테스트 모드일 때 `TestModeBar` 렌더링 + 테스트 스트림 URL(`/stream/test/rgb`, `/stream/test/thermal`)로 전환
+- **`LiveVideoFeed.jsx`** — 테스트 모드 스트림 URL 분기 처리. bbox 오버레이 표시를 위한 `<img>` src 동적 전환
+- **`App.jsx`** — `DashboardLayout`에서 테스트 모드 진입 시 `test/init` 자동 호출, 퇴장 시 `test/stop` cleanup
+- **`sessionStore.js`** — `enterTestMode()`, `testSource`, `testPlayState`, `testDetectionMode`, `setTestSource()`, `setTestPlayState()`, `setTestDetectionMode()` 상태 추가
+- **`camera.py`** — 테스트 모드용 프레임 생성 지원
+
+---
+
+## 🔗 2026-04-24 — Frontend↔Backend 미연결 모듈 일괄 연동 + 슈퍼어드민 + 도면 검증 (@youminsu0523)
+
+> **착수 시각**: 2026-04-24 09:30  
+> **작업자**: @youminsu0523  
+> **작업 브랜치**: `MS`  
+> **목표**: 프론트엔드에서 localStorage Mock으로만 동작하던 5개 모듈을 백엔드 실제 API로 전환. 백엔드에만 구현되어 있던 기능을 프론트에 연결. 기획만 완료된 도면 검증 파이프라인 구현. 슈퍼어드민 시드 계정 생성.
+
+### ⏱ 09:30 | Phase 1 — Frontend Mock → Real API 전환 (5개 파일)
+
+기존 localStorage 기반 Mock API를 axios + JWT 인증 백엔드 호출로 전면 교체. 각 API 파일의 함수 시그니처는 유지하되 body만 fetch로 교체하는 설계대로 진행.
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `frontend/src/api/chatApi.js` | localStorage 시드+CRUD → `axios.get/post/patch` + JWT 헤더. `listConversations(userId)` → `listConversations()` (서버가 JWT로 사용자 식별) |
+| `frontend/src/api/notificationApi.js` | 동일 패턴. `simulateLatency()` 제거, 실제 HTTP 호출로 교체 |
+| `frontend/src/api/sitesApi.js` | 동일 패턴. 필터 파라미터(`status`, `building_type`, `client_type`, `search`) 쿼리스트링 지원 추가 |
+| `frontend/src/api/reportsApi.js` | `POST /report/save` + `GET /report/{id}/download` 마크다운 다운로드 함수(`downloadReport`) 추가 |
+| `frontend/src/api/organizationApi.js` | Mock 시드 제거, `removeMember(userId)` 함수 추가 |
+
+### ⏱ 09:40 | Phase 1 후속 — Store 호출부 수정
+
+API 시그니처 변경에 따른 Store 수정:
+
+- **`chatStore.js`** — `CURRENT_USER` 하드코딩 제거. `getCurrentUser()`를 localStorage에서 읽도록 변경. `sendMessage`에서 sender 정보 제거 (백엔드 JWT에서 자동 식별). `createConversation`에서 `participants` → `participant_ids`로 키 변경. `getUnreadCounts` 응답의 `perConversation` → `per_conversation` 매핑
+- **`reportsStore.js`** — `updateReport` import 제거 (백엔드에 PATCH 없음). `update` 메서드를 로컬 캐시 전용으로 변경
+
+### ⏱ 09:45 | Phase 2 — Refresh Token 프론트 연동
+
+- **`authApi.js`** — 401 응답 인터셉터 추가. `isRefreshing` 플래그 + `failedQueue` 패턴으로 동시 요청 대응. Refresh 실패 시 localStorage 정리 + `/login` 리다이렉트. `uploadProfileImage()`, `deleteProfileImage()`, `updateMe()` 함수 추가
+- **`authStore.js`** — `setAuth(token, user, refreshToken)` 3번째 파라미터 추가. `logout()`에 `refresh_token` 삭제 추가
+- **`Login.jsx`** / **`OAuthCallback.jsx`** — 로그인 응답에서 `refresh_token` 추출하여 `setAuth`에 전달
+
+### ⏱ 09:50 | Phase 2 — 보고서 다운로드 버튼
+
+- **`ReportDetail.jsx`** — 헤더에 `Download` 아이콘 버튼 추가. `downloadReport(id)` 호출 → 마크다운 파일 브라우저 다운로드
+
+### ⏱ 09:52 | Phase 2 — 부서/미소속 사용자/프로필 이미지 확인
+
+- **`AdminMembers.jsx`** — 이미 백엔드 직접 axios 호출로 구현 완료 확인 (부서 CRUD + 미소속 배정 + 멤버 수정)
+- **`EmployeeLanding.jsx` EditProfileModal** — 이미 fetch로 `PUT /auth/me/profile-image` 직접 호출 구현 확인
+
+### ⏱ 09:55 | Phase 3 — Floorplan OpenCV 벽체 추출 (process 엔드포인트 구현)
+
+기존 `POST /floorplan/{id}/process`는 TODO 스텁이었음. 실제 처리 로직 연결:
+
+- **`floorplan.py`** — 파일 존재 확인 → `aiofiles`로 비동기 읽기 → content_type 분기:
+  - **JPG/PNG/WEBP**: `extract_walls_from_bytes()` 직접 호출
+  - **PDF**: `pdf2image.convert_from_bytes()` → OpenCV BGR 변환 → 동일 파이프라인 (pdf2image 미설치 시 422 반환)
+  - **DXF**: `ezdxf.read()` → LINE 엔티티 좌표 추출 → 정규화 (ezdxf 미설치 시 422 반환)
+  - 처리 성공 → `status="completed"`, `wall_count`, `walls_data` DB 갱신
+  - 처리 실패 → `status="failed"` + 500 에러
+
+### ⏱ 10:00 | Phase 3 — 도면 이미지 품질 검증 파이프라인
+
+`project_inspection_area_auto.md` 메모리에 정의된 2단계 검증 사양을 구현:
+
+- **`floorplan_processor.py`** — `validate_floorplan_quality()` 함수 추가. 7개 체크 항목:
+  1. **해상도**: 1000×1000px 이상 권장, 500px 미만 거부
+  2. **선명도**: Laplacian variance. 100+ 양호, 30 미만 거부
+  3. **대비**: 그레이스케일 표준편차. 50+ 양호, 25 미만 거부
+  4. **직선 비율**: HoughLinesP 기반. 에지 대비 직선 픽셀 비율 0.3+ 양호, 0.15 미만 거부
+  5. **직각 교차점**: 수평선×수직선 쌍 수. 4+ 양호, 2 미만 부족
+  6. **기울기**: 직선 각도 중앙값의 수평/수직 편차. 3° 이내 양호, 10°+ 경고
+  7. **벽체 감지 수**: `extract_walls_from_bytes` 호출. 5+ 양호, 3 미만 거부
+
+- **종합 판정**: `status` = `ok` (에러 없음) | `warning` (경고만) | `rejected` (에러 있음). 점수는 항목별 가중 평균.
+
+- **`floorplan.py`** — `POST /floorplan/validate` 엔드포인트 추가. 파일 크기 50KB 미만 즉시 거부. `FloorplanValidateResponse` 스키마로 응답
+- **`schemas/floorplan.py`** — `FloorplanValidateResponse` 스키마 추가
+
+### ⏱ 10:05 | 슈퍼어드민 시드 계정 생성
+
+- **`main.py`** — `_ensure_superadmin_seed()` 함수 추가. lifespan에서 DB 초기화 직후 호출. `admin` username 존재 여부 확인 → 없으면 자동 생성 (중복 방지)
+- **계정 정보**: ID `admin` / PW `admin` / email `admin@aeroinspect.io` / `is_superadmin=True`
+- **DB에 즉시 생성 완료** (스크립트 직접 실행)
+
+### ⏱ 10:10 | bcrypt + passlib 호환성 이슈 해결
+
+- **문제**: `bcrypt 5.0.0` + `passlib 1.7.4` 조합에서 `ValueError: password cannot be longer than 72 bytes` 에러. passlib 내부의 `detect_wrap_bug()` 함수가 72바이트 초과 비밀번호로 테스트하면서 새 bcrypt의 strict 검증에 걸림
+- **해결 1**: `security.py` — passlib `CryptContext` 제거, `bcrypt` 라이브러리 직접 사용으로 전환. `hash_password()` = `bcrypt.hashpw()`, `verify_password()` = `bcrypt.checkpw()`
+- **해결 2**: bcrypt 5.0.0 → 4.2.1 다운그레이드 (안정 버전)
+- **해결 3**: admin 계정 비밀번호 해시 재생성 (bcrypt 4.2.1 기준)
+
+### ⏱ 10:15 | 슈퍼어드민 Pydantic 이메일 검증 에러 해결
+
+- **문제**: `admin@aeroinspect.local` 이메일 → Pydantic `EmailStr`이 `.local` 도메인을 special-use name으로 거부 → 로그인 시 500 에러
+- **해결**: 이메일을 `admin@aeroinspect.io`로 변경 (DB + 시드 코드)
+
+### ⏱ 10:20 | 슈퍼어드민 라우팅 + 권한 가드 수정
+
+슈퍼어드민이 조직 미소속 상태에서도 모든 기능에 접근 가능하도록 수정:
+
+- **`Login.jsx`** / **`OAuthCallback.jsx`** — `is_superadmin`이면 조직 없어도 `/employee`로 직행
+- **`OrgRequired.jsx`** — 슈퍼어드민은 `currentOrg` 체크 건너뜀. `adminOnly` 페이지도 접근 허용
+- **`EmployeeLanding.jsx`** — `isAdmin` 판정에 `user?.is_superadmin` 조건 추가 (2곳: EmployeeHeader, QuickActionsSection). `QuickActionsSection`에서 `user` 미선언 버그 수정 (`useAuthStore` import 누락)
+- **`AdminMembers.jsx`** — `fetchData` 분기 처리: 슈퍼어드민은 `admin/all-users` 우선 호출, 조직 API는 try-catch로 감싸서 미소속 시 빈 배열로 fallback. 전체 사용자 행 클릭 시 편집/배정 모달 연결
+
+### ⏱ 10:30 | 랜딩 헤더 로그인 상태 반영
+
+- **`LandingHeader.jsx`** — `useAuthStore` 연동:
+  - **비로그인**: `로그인` + `도입 문의하기` 표시 (직원전용 숨김)
+  - **로그인 상태**: `직원 전용` + `로그아웃` + `도입 문의하기` 표시
+  - 데스크탑/모바일 메뉴 모두 동일 적용
+
+### ⏱ 10:35 | EmployeeLanding 환영 배너 개인화
+
+- **`WelcomeBanner`** — 하드코딩 `과장님` 제거. `authStore.user.name` + `currentOrg.position` 동적 표시. 직급 미설정 시 이름만 표시
+
+### ⏱ 10:40 | 멤버관리/TEST MODE 권한 분기
+
+- **`QuickActionsSection`** — `멤버 관리` + `TEST MODE` 카드를 `isAdmin` (admin 또는 superadmin) 조건으로 묶어 일반 멤버에게 비노출
+
+### 🔗 변경 파일 목록 (Frontend 17개 + Backend 5개)
+
+**Frontend 수정**:
+- `api/chatApi.js`, `api/notificationApi.js`, `api/sitesApi.js`, `api/reportsApi.js`, `api/organizationApi.js` — Mock → Real API
+- `api/authApi.js` — Refresh Token 인터셉터 + 프로필 이미지 API
+- `store/chatStore.js`, `store/reportsStore.js`, `store/authStore.js` — API 시그니처 변경 대응
+- `pages/Login.jsx`, `pages/OAuthCallback.jsx` — refresh_token 전달 + 슈퍼어드민 라우팅
+- `components/auth/OrgRequired.jsx` — 슈퍼어드민 가드 bypass
+- `pages/EmployeeLanding.jsx` — isAdmin 로직 + 배너 개인화 + TEST MODE 권한
+- `pages/employee/AdminMembers.jsx` — 슈퍼어드민 분기 + 행 클릭 편집
+- `pages/employee/ReportDetail.jsx` — 다운로드 버튼
+- `components/landing/LandingHeader.jsx` — 로그인/로그아웃 상태 분기
+
+**Backend 수정**:
+- `app/core/security.py` — passlib → bcrypt 직접 사용
+- `app/api/floorplan.py` — process 실제 구현 + validate 엔드포인트
+- `app/services/floorplan_processor.py` — `validate_floorplan_quality()` 추가
+- `app/schemas/floorplan.py` — `FloorplanValidateResponse` 추가
+- `app/main.py` — 슈퍼어드민 시드 + bcrypt 4.2.1 호환
+
+### 🔗 신규 API 엔드포인트
+| 메서드 | 경로 | 역할 |
+|--------|------|------|
+| POST | `/api/v1/floorplan/validate` | 도면 이미지 품질 검증 (7개 항목) |
+
+### 📐 설계 결정 사항
+- **Mock → Real 전환 전략**: API 파일의 함수 시그니처 유지 → Store/컴포넌트 호출부 최소 변경. 각 API 파일에 독립 axios 인스턴스 생성 (JWT + X-Organization-Id 헤더 자동 첨부)
+- **Refresh Token 큐잉**: 동시에 여러 요청이 401 받았을 때 refresh 1회만 실행, 나머지는 큐에 대기 후 새 토큰으로 재시도
+- **슈퍼어드민 권한 모델**: 조직 소속 없이도 모든 페이지/기능 접근 가능. `is_superadmin` 플래그가 `currentOrg` 체크보다 우선
+- **도면 검증 판정 기준**: `rejected` (에러 1개 이상) > `warning` (경고만) > `ok` (전부 통과). 점수는 참고용이며 판정은 에러/경고 유무로 결정
+
+---
+
+## ⏱ 2026-04-21 ~ 04-23 | ML 학습 파이프라인 전체 구축
+
+### 📋 작업 개요
+20종 건물 하자 검출 AI를 위한 전체 ML 파이프라인 구축: 데이터 수집 → 폴더링 → 라벨링 → 학습 → ONNX 변환
+
+### 📂 데이터 수집 (gdrive_raw/)
+- **총 63,285장**, 31개 원본 폴더, 하자코드(A-01~E-02) 기준 폴더명 통일
+- **출처**: Roboflow Universe (CC BY 4.0), AI Hub (CC BY-NC), GitHub 공개 데이터셋, 팀 자체 수집
+- **출처 문서**: `training/datasets_sources.md` 생성
+
+| 주요 데이터 | 이미지 수 | 출처 |
+|-----------|----------|------|
+| 균열 (Crack) | ~15,000장 | Roboflow, AI Hub |
+| 벽지/마감 (Wallpaper) | ~12,000장 | Roboflow |
+| 바닥/타일/유리 | ~8,600장 | Roboflow, GitHub |
+| 열화상 (Thermal) | ~4,400장 | Roboflow, Crack900 |
+| 실내 세그멘테이션 | ~7,400장 | Roboflow |
+| 코킹 하자 | ~6,700장 | 팀 자체 수집 |
+
+### 🔧 폴더링 / 라벨링
+1. 중복 제거 — MD5 해시 100% 검증 후 삭제 (1.7GB 회수)
+2. 라벨 포맷 통일 — COCO JSON → YOLO txt, polygon → bbox 변환
+3. 클래스 매핑 — 원본 클래스 → 프로젝트 20종 하자 코드
+4. full-image bbox 제거 — 부정확한 bbox 9,549장 제거, 정밀 bbox 데이터 보강
+
+### 🤖 모델 학습 결과 (v3~v4)
+
+| 모델 | 역할 | 데이터 | 성능 |
+|------|------|--------|------|
+| M1 YOLO | 구조·방수 검출 (A-02,A-03,B-03,B-04) | 20,393장 nc=3 | mAP@0.5=0.685 |
+| M1 ResNet | 균열 유형 분류 | 2,991장 4cls | ValAcc=0.999 |
+| M2 YOLO | 마감·표면 검출 (C-01~C-05) | 6,546장 nc=2 | mAP@0.5=0.939 |
+| M2 ResNet | 표면 유형 분류 | 3,404장 5cls | ValAcc=0.844 |
+| M3 YOLO | 바닥·창호 검출 (D-03,D-04,E-01,E-02) | 8,044장 nc=3 | mAP@0.5=0.762 |
+| 열화상 YOLO | 열화상 결함 (B-01,B-02,B-05) | 4,372장 nc=3 | mAP@0.5=0.536 |
+| M5 YOLO-seg | 기하학 세그 (A-01,A-04) | 7,418장 nc=5 | frames seg |
+| M6 PatchCore | 이상탐지 (비지도) | 5,361장 | coreset 77MB |
+
+### 🛠 신규/수정 파일
+
+**신규**:
+- `training/retrain_all_v3.py` — GPU 순차 학습 파이프라인
+- `training/integrate_new_data.py` — gdrive_raw → datasets 자동 매핑 통합
+- `training/datasets_sources.md` — 데이터셋 출처 문서
+- `training/auto_train_all.py` — 자동 학습 + 모니터링 파이프라인
+
+**수정**:
+- `app/services/alignment_detector.py` — M5+G1+LiDAR 정밀 기하학 검출기 완전 재작성
+  - RANSAC 200회 라인 피팅 + 서브픽셀 엣지 검출
+  - LiDAR 수직/수평 기준값 연동 (드론 roll/pitch 역보정)
+  - KCS 41 46 01 기준 불량 판정 (수직 ±3mm/m, 직각 ±2mm/m)
+
+### 📐 설계 결정 사항
+- **gdrive_raw vs datasets**: gdrive_raw = 원본(하자코드별), datasets = 학습용(모델별, YOLO txt 통일)
+- **bbox 정확도**: full-image bbox 제거 + 정밀 bbox 보강 + box loss 가중치 10.0
+- **GPU/CPU 병렬**: YOLO=GPU, ResNet/PatchCore=CPU 동시 진행
+- **열화상 보강**: 태양광 열화상(열점 유사) 추가 → 1,262→4,372장, mAP 14% 개선
+
+---
+
+## 📅 2026-04-24 (목) — 테스트 모드 고도화: 실시간 오버레이 + 카테고리 균등 샘플링
+
+> **작업자**: @youminsu0523 (Claude Opus 4.6 바이브코딩)
+> **브랜치**: `MS`
+
+### ⏱ 세션 시작 | 이전 대화 복구 + 이슈 파악
+
+이전 대화가 유실되어 git diff 기반으로 테스트 모드 구현 상태를 복구.
+사용자가 보고한 4가지 이슈 확인:
+1. DRONE1(RGB)과 DRONE2(Thermal)에 서로 다른 구간의 이미지가 표시됨
+2. 하자탐지목록에 균열만 나옴 (다른 하자 유형 확인 불가)
+3. DefectCard에 이미지가 "없음"으로 표시됨
+4. onnxruntime 미설치 에러
+
+### ⏱ R1 | 카테고리별 균등 샘플링 구현 (균열만 나오는 문제 해결)
+
+- **문제**: 28,914장을 한꺼번에 셔플 → ext_crack이 82.8%(23,372장) 차지 → 거의 균열만 노출
+- **데이터 분포**:
+  | 카테고리 | 이미지 수 | 비율 |
+  |---------|----------|------|
+  | ext_crack | 23,372 | 82.8% |
+  | ext_glass | 2,745 | 9.7% |
+  | ext_building_crack | 1,064 | 3.8% |
+  | ext_wall_crack | 678 | 2.4% |
+  | ext_floor_crack | 170 | 0.6% |
+  | ext_surface | 144 | 0.5% |
+  | ext_concrete | 10 | 0.04% |
+  | paired_crack (Crack900) | 731 | 2.6% |
+- **해결**: `_category_frames: Dict[str, List[TestFrame]]`로 카테고리별 그룹핑 후, `_advance_frame()`에서 카테고리를 균등 확률(12.5%)로 랜덤 선택
+- **추가 수정**: 디렉토리 구조가 `ext_crack/train/images/*.jpg` 3단계 깊이 → `os.path.relpath()` + `Path(rel_path).parts[0]`으로 1단계 디렉토리명 추출
+
+### ⏱ R2 | RGB-Thermal 쌍 동기화 (프레임 버전 카운터)
+
+- **문제**: 두 MJPEG 스트림이 독립적으로 `sleep(3초)` → 타이밍 어긋남
+- **해결**: `_frame_version: int` 카운터 도입. RGB 제너레이터가 양쪽 프레임 준비 완료 후 `++`, Thermal 제너레이터는 새 버전까지 대기
+
+### ⏱ R3 | DefectCard "없음" → 실제 이미지 표시 (image_crop)
+
+- **문제**: `image_crop` 필드 누락 → DefectCard가 "없음" 표시
+- **해결**: `_generate_random_crop()` — 프레임 랜덤 크롭 → 112x112 → base64 JPEG. 실제 추론에도 bbox 기반 `_crop_to_base64()` 적용
+
+### ⏱ R4 | onnxruntime 설치
+
+- `requirements.txt`에 `onnxruntime` 추가 + pip install 완료 (v1.25.0)
+
+### ⏱ R5 | 하자 클릭 시 DRONE1/DRONE2에 해당 시점 프레임 표시
+
+- **Backend**: `store_defect_frame()` — raw RGB/Thermal JPEG + bbox/label/severity 메타데이터를 `OrderedDict`에 저장 (최대 200건)
+- **Backend**: `GET /test/defect/{defect_id}/{channel}?mode=` — 저장된 프레임에 mode별 시각화 적용 후 JPEG 반환
+- **Frontend**: `LiveVideoFeed.jsx` — `isTestMode && selectedDefect` 조건에서 MJPEG 스트림 대신 defect frame endpoint URL로 전환. "DEFECT VIEW" 배지 표시
+
+### ⏱ R6 | bbox 오버레이에 한글 라벨 깨짐 해결
+
+- **문제**: `cv2.putText()`는 한글 미지원
+- **해결**: PIL + Windows `malgunbd.ttf`(맑은 고딕 Bold) 자동 탐색 + 폰트 캐싱. cv2로 네모박스, PIL로 한글 텍스트 렌더링
+
+### ⏱ R7 | 하자 탐지 타이밍 수정 (이미지보다 목록이 먼저 갱신)
+
+- **문제**: WS 전송 → yield 순서 → 하자가 이미지보다 먼저 목록에 표시
+- **해결**: yield 먼저 → 0.5초 대기 → 브로드캐스트 순서로 변경
+
+### ⏱ R8 | BBox / 객체감지(Detection) 2가지 시각화 모드
+
+- **BBox 모드**: 빨간 네모박스 + 한글 라벨
+- **Detection 모드**: 반투명 컬러 마스크(심각도별) + Canny 에지 윤곽 강조 + L자 코너 마커 + 심각도 뱃지
+- **심각도별 색상**: HIGH=빨강, MED=주황, LOW=노랑
+- `TestModeBar.jsx`에 BBOX/DETECT 토글 → `POST /test/detection-mode` API 호출
+
+### ⏱ R9 | 실시간 라이브 스트림 오버레이 (핵심 리팩토링)
+
+- **문제**: 오버레이가 하자 목록 클릭 시에만 보이고 라이브 스트림에는 미표시
+- **해결 — 제너레이터 흐름 전면 리팩토링**:
+  ```
+  기존: 프레임 → 인코딩 → yield(원본) → 추론 → WS 브로드캐스트
+  변경: 프레임 → _detect(결과만) → _apply_live_overlay → 인코딩 → yield(오버레이 포함) → _broadcast_detection
+  ```
+- **추론 분리**: `_detect()`(결과 반환) + `_broadcast_detection()`(WS 전송)
+- `_apply_live_overlay()`: numpy 프레임에 직접 오버레이 (JPEG 디코딩/재인코딩 없음). `_detection_mode`에 따라 bbox 또는 detection 스타일 적용
+- Thermal에도 동일한 오버레이 적용. 영상 프레임에도 동일 흐름
+
+### 🔗 변경 파일 목록
+
+**Backend (3개)**:
+- `app/services/test_stream.py` — 전면 리팩토링
+- `app/api/stream.py` — defect frame 조회 + detection-mode 엔드포인트
+- `requirements.txt` — onnxruntime 추가
+
+**Frontend (3개)**:
+- `src/components/video/LiveVideoFeed.jsx` — 하자 선택 시 defect frame 표시 + detection mode 쿼리
+- `src/components/dashboard/TestModeBar.jsx` — BBOX/DETECT 토글 + API 연동
+- `src/store/sessionStore.js` — `testDetectionMode` 상태 추가
+
+### 🔗 신규 API 엔드포인트
+| 메서드 | 경로 | 역할 |
+|--------|------|------|
+| POST | `/api/v1/stream/test/detection-mode` | 감지 시각화 모드 전환 (bbox ↔ detection) |
+| GET | `/api/v1/stream/test/defect/{id}/{channel}?mode=` | 하자 시점 프레임 조회 |
+
+### 📐 설계 결정 사항
+- **카테고리 균등 샘플링**: 카테고리 단위 랜덤 선택 → 데이터 불균형에도 전체 하자 유형 골고루 노출
+- **프레임 저장 전략**: raw JPEG + 메타데이터 저장, 조회 시 mode별 시각화 적용
+- **라이브 오버레이**: numpy 프레임에 직접 그려서 JPEG 인코딩 1회만 수행
+- **추론/브로드캐스트 분리**: `_detect()` → `_apply_live_overlay()` → `yield` → `_broadcast_detection()` 4단계 분리

@@ -37,6 +37,36 @@ configure_logging(
 logger = get_logger(__name__)
 
 
+async def _ensure_superadmin_seed():
+    """슈퍼어드민 시드 계정이 없으면 자동 생성 (admin / admin)."""
+    from sqlalchemy import select
+    from app.db.session import async_session_factory
+    from app.models.user import User
+    from app.core.security import hash_password
+
+    async with async_session_factory() as db:
+        existing = await db.scalar(
+            select(User.id).where(User.username == "admin")
+        )
+        if existing:
+            logger.info("superadmin_seed_exists", username="admin")
+            return
+
+        superadmin = User(
+            username="admin",
+            email="admin@aeroinspect.io",
+            password_hash=hash_password("admin"),
+            name="슈퍼관리자",
+            phone="000-0000-0000",
+            account_type="personal",
+            is_superadmin=True,
+        )
+        db.add(superadmin)
+        await db.commit()
+        logger.info("superadmin_seed_created", username="admin")
+        print("[AeroInspect] 슈퍼어드민 시드 계정 생성 완료 (admin / admin)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -50,33 +80,38 @@ async def lifespan(app: FastAPI):
     try:
         await init_db()
         print("[AeroInspect] DB 초기화 완료")
+
+        # 슈퍼어드민 시드 계정 생성 (���으면 자동 생성)
+        await _ensure_superadmin_seed()
     except Exception as e:
         print(f"[AeroInspect] DB 초기화 실패 (DB 연결 안 됨, 임시 무시): {e}")
 
-    # RGB 카메라 (USB Capture Card) 열기
-    await rgb_camera_service.open()
-    print(f"[AeroInspect] RGB 카메라 (index={settings.RGB_CAMERA_INDEX}) 열림")
+    if settings.DRONE_CONNECTED:
+        # RGB 카메라 (USB Capture Card) 열기
+        await rgb_camera_service.open()
+        print(f"[AeroInspect] RGB 카메라 (index={settings.RGB_CAMERA_INDEX}) 열림")
 
-    # 열화상 카메라 (IRC-256CA) 열기
-    await thermal_camera_service.open()
-    print(f"[AeroInspect] 열화상 카메라 (index={settings.THERMAL_CAMERA_INDEX}) 열림")
+        # 열화상 카메라 (IRC-256CA) 열기
+        await thermal_camera_service.open()
+        print(f"[AeroInspect] 열화상 카메라 (index={settings.THERMAL_CAMERA_INDEX}) 열림")
 
-    # 3-모델 추론 파이프라인 로드 (YOLO thermal + delam + ResNet 벽지)
-    # 가중치 파일 누락 시 FileNotFoundError가 나지만 서버 자체는 기동 유지 (503 반환)
-    try:
-        yolo_service.load_model()  # shim → inference_pipeline.load_models()
-        print("[AeroInspect] 3-모델 추론 파이프라인 로드 완료")
-    except FileNotFoundError as e:
-        print(f"[AeroInspect] AI 모델 로드 실패 (가중치 없음): {e}")
+        # 3-모델 추론 파이프라인 로드 (YOLO thermal + delam + ResNet 벽지)
+        try:
+            yolo_service.load_model()
+            print("[AeroInspect] 3-모델 추론 파이프라인 로드 완료")
+        except FileNotFoundError as e:
+            print(f"[AeroInspect] AI 모델 로드 실패 (가중치 없음): {e}")
 
-    # TF-Luna LiDAR 시리얼 연결 (실패해도 서버는 계속)
-    try:
-        await lidar_service.start()
-    except Exception as e:
-        print(f"[AeroInspect] LiDAR 시작 실패 (좌표 없이 계속): {e}")
+        # TF-Luna LiDAR 시리얼 연결
+        try:
+            await lidar_service.start()
+        except Exception as e:
+            print(f"[AeroInspect] LiDAR 시작 실패 (좌표 없이 계속): {e}")
 
-    # WebSocket 스트림 추론 워커 시작 (드롭 큐)
-    await stream_inference_worker.start()
+        # WebSocket 스트림 추론 워커 시작 (드롭 큐)
+        await stream_inference_worker.start()
+    else:
+        print("[AeroInspect] DRONE_CONNECTED=False → 카메라/LiDAR/추론 파이프라인 건너뜀 (API 전용 모드)")
 
     print("[AeroInspect] 서버 준비 완료")
 
@@ -85,26 +120,23 @@ async def lifespan(app: FastAPI):
     # ── 종료 ─────────────────────────────────
     print("[AeroInspect] 서버 종료 중...")
 
-    # LiDAR 시리얼 종료
-    try:
-        await lidar_service.stop()
-    except Exception as e:
-        print(f"[AeroInspect] LiDAR 종료 중 오류: {e}")
+    if settings.DRONE_CONNECTED:
+        try:
+            await lidar_service.stop()
+        except Exception as e:
+            print(f"[AeroInspect] LiDAR 종료 중 오류: {e}")
 
-    # 텔레메트리 캐시 초기화
+        await stream_inference_worker.stop()
+
+        if recording_service.is_recording:
+            await recording_service.stop()
+            print("[AeroInspect] 녹화 중지 완료")
+
+        await rgb_camera_service.release()
+        await thermal_camera_service.release()
+        print("[AeroInspect] 카메라 자원 해제 완료")
+
     telemetry_cache.clear()
-
-    # 스트림 추론 워커 종료
-    await stream_inference_worker.stop()
-
-    # 녹화 중이면 안전하게 중지
-    if recording_service.is_recording:
-        await recording_service.stop()
-        print("[AeroInspect] 녹화 중지 완료")
-
-    await rgb_camera_service.release()
-    await thermal_camera_service.release()
-    print("[AeroInspect] 카메라 자원 해제 완료")
 
 
 # FastAPI 앱 생성

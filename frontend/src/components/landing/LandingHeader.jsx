@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { handleAnchorClick, smoothScrollTo } from '../../utils/smoothScroll.js';
 import ContactModal from './ContactModal.jsx';
+import useAuthStore from '../../store/authStore.js';
 
 // 네이비 원본(스크롤 후 흰 헤더용) + 흰색(최상단 어두운 히어로용)
 import logoDark from '../../assets/logo/logo_transparent-removebg-preview.png';
@@ -33,6 +34,8 @@ export default function LandingHeader() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const mobileMenuRef = useRef(null);
   const location = useLocation();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const user = useAuthStore((s) => s.user);
 
   // 로고 클릭: 이미 "/" 경로면 Link가 리렌더를 발생시키지 않아 스크롤이 안 먹음.
   // 현재 경로가 "/"일 때만 기본 동작을 가로채 최상단까지 스무스 스크롤.
@@ -129,40 +132,46 @@ export default function LandingHeader() {
         {/* //* [Modified Code] 직원 전용 진입 랜딩(/employee)을 거치도록 변경
             - 기존 세션 셋업 플로우는 /employee 화면 내 "점검 세션 시작 →" 버튼에서 이어짐
             - NOTE: 로그인/권한 가드는 DB 연결 단계에서 추가 예정 (AWS 프리티어 제약) */}
-        {/* 직원 전용 (데스크탑) */}
-        <Link
-          to="/employee"
-          title="DB 미연결 단계 — 로그인 없이 임시 접근. 직원 랜딩 → 세션 셋업 → 모델링 → 대시보드 순으로 진입"
-          className={`group hidden md:inline-flex items-center gap-2 px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-yellow-400 ${
-            isAtTop
-              ? 'border border-yellow-300/60 bg-yellow-300/10 text-yellow-200 hover:bg-yellow-300 hover:text-slate-900'
-              : 'border border-yellow-500/70 bg-yellow-50 text-yellow-800 hover:bg-yellow-400 hover:text-slate-900'
-          }`}
-        >
-          <span className={`inline-block h-1.5 w-1.5 rounded-full ${isAtTop ? 'bg-yellow-300' : 'bg-yellow-500'}`} />
-          직원 전용
-          <span
-            className={`rounded-sm px-1.5 py-0.5 text-[10px] font-bold tracking-wider ${
+        {/* 직원 전용 — 로그인 상태에서만 표시 */}
+        {isAuthenticated && (
+          <Link
+            to="/employee"
+            className={`group hidden md:inline-flex items-center gap-2 px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-yellow-400 ${
               isAtTop
-                ? 'bg-yellow-300/30 text-yellow-100 group-hover:bg-slate-900/20 group-hover:text-slate-900'
-                : 'bg-yellow-200 text-yellow-800 group-hover:bg-slate-900/20 group-hover:text-slate-900'
+                ? 'border border-yellow-300/60 bg-yellow-300/10 text-yellow-200 hover:bg-yellow-300 hover:text-slate-900'
+                : 'border border-yellow-500/70 bg-yellow-50 text-yellow-800 hover:bg-yellow-400 hover:text-slate-900'
             }`}
           >
-            TEMP
-          </span>
-        </Link>
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${isAtTop ? 'bg-yellow-300' : 'bg-yellow-500'}`} />
+            직원 전용
+          </Link>
+        )}
 
-        {/* 로그인 버튼 (데스크탑) */}
-        <Link
-          to="/login"
-          className={`hidden md:inline-block px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-400 ${
-            isAtTop
-              ? 'text-white/90 hover:text-white hover:bg-white/10'
-              : 'text-gray-600 hover:text-blue-600 hover:bg-gray-100'
-          }`}
-        >
-          로그인
-        </Link>
+        {/* 로그인 / 로그아웃 (데스크탑) */}
+        {isAuthenticated ? (
+          <button
+            type="button"
+            onClick={() => useAuthStore.getState().logout()}
+            className={`hidden md:inline-block px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+              isAtTop
+                ? 'text-white/90 hover:text-white hover:bg-white/10'
+                : 'text-gray-600 hover:text-red-600 hover:bg-gray-100'
+            }`}
+          >
+            로그아웃
+          </button>
+        ) : (
+          <Link
+            to="/login"
+            className={`hidden md:inline-block px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+              isAtTop
+                ? 'text-white/90 hover:text-white hover:bg-white/10'
+                : 'text-gray-600 hover:text-blue-600 hover:bg-gray-100'
+            }`}
+          >
+            로그인
+          </Link>
+        )}
 
         {/* CTA: 최상단에서는 살짝 투명 처리, 스크롤 후엔 솔리드 */}
         {/* 도입 문의하기 CTA (데스크탑) */}
@@ -205,45 +214,56 @@ export default function LandingHeader() {
                   : 'bg-white border border-gray-100'
               }`}
             >
-              {/* 직원 전용 */}
-              <Link
-                to="/employee"
-                onClick={() => setIsMobileMenuOpen(false)}
-                className={`flex items-center gap-3 px-5 py-3.5 font-semibold text-sm transition ${
-                  isAtTop
-                    ? 'text-yellow-300 hover:bg-white/10'
-                    : 'text-yellow-700 hover:bg-yellow-50'
-                }`}
-              >
-                <i className="ri-shield-user-line text-lg" />
-                <span>직원 전용</span>
-                <span
-                  className={`ml-auto rounded-sm px-1.5 py-0.5 text-[10px] font-bold tracking-wider ${
+              {/* 직원 전용 — 로그인 상태에서만 */}
+              {isAuthenticated && (
+                <Link
+                  to="/employee"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className={`flex items-center gap-3 px-5 py-3.5 font-semibold text-sm transition ${
                     isAtTop
-                      ? 'bg-yellow-300/20 text-yellow-300'
-                      : 'bg-yellow-100 text-yellow-700'
+                      ? 'text-yellow-300 hover:bg-white/10'
+                      : 'text-yellow-700 hover:bg-yellow-50'
                   }`}
                 >
-                  TEMP
-                </span>
-              </Link>
+                  <i className="ri-shield-user-line text-lg" />
+                  <span>직원 전용</span>
+                </Link>
+              )}
 
               {/* 구분선 */}
               <div className={`mx-4 h-px ${isAtTop ? 'bg-white/10' : 'bg-gray-100'}`} />
 
-              {/* 로그인 */}
-              <Link
-                to="/login"
-                onClick={() => setIsMobileMenuOpen(false)}
-                className={`flex items-center gap-3 px-5 py-3.5 font-semibold text-sm transition ${
-                  isAtTop
-                    ? 'text-white/90 hover:bg-white/10'
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                <i className="ri-login-box-line text-lg" />
-                <span>로그인</span>
-              </Link>
+              {/* 로그인 / 로그아웃 */}
+              {isAuthenticated ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false)
+                    useAuthStore.getState().logout()
+                  }}
+                  className={`flex items-center gap-3 w-full px-5 py-3.5 font-semibold text-sm transition ${
+                    isAtTop
+                      ? 'text-red-300 hover:bg-white/10'
+                      : 'text-red-600 hover:bg-red-50'
+                  }`}
+                >
+                  <i className="ri-logout-box-line text-lg" />
+                  <span>로그아웃</span>
+                </button>
+              ) : (
+                <Link
+                  to="/login"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className={`flex items-center gap-3 px-5 py-3.5 font-semibold text-sm transition ${
+                    isAtTop
+                      ? 'text-white/90 hover:bg-white/10'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  <i className="ri-login-box-line text-lg" />
+                  <span>로그인</span>
+                </Link>
+              )}
 
               {/* 구분선 */}
               <div className={`mx-4 h-px ${isAtTop ? 'bg-white/10' : 'bg-gray-100'}`} />
