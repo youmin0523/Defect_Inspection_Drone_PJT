@@ -1086,3 +1086,144 @@ Dashboard (12-col grid)
 ### ⏱ 비고
 - 앞으로 `git pull` 후에는 `npm install` 한 번 돌려주는 흐름 유지 권장
 - 백엔드도 동일하게 `pip install -r requirements.txt` 확인
+
+---
+
+## 🎮 2026-04-23~24 | TEST MODE 대시보드 인프라 구축
+
+> **작업자**: @youminsu0523  
+> **작업 브랜치**: `MS`  
+> **목표**: 드론 없이 로컬 이미지/영상으로 AI 하자 검출을 시험할 수 있는 TEST MODE 프론트엔드 구축
+
+### ⏱ 신규 컴포넌트
+
+- **`components/dashboard/TestModeBar.jsx`** (319줄 신규)
+  - 시작(Play) / 일시중지(Pause) / 정지(Stop) 재생 제어 버튼
+  - 프로젝트 내장 데이터 ↔ 직접 업로드 소스 전환 토글
+  - 직접 업로드: 이미지/영상 드래그&드롭 대량 첨부 + 파일 목록 관리
+  - bbox / detection 시각화 모드 전환
+  - 백엔드 `/api/v1/stream/test/*` 엔드포인트와 연동
+
+### ⏱ 기존 파일 수정
+
+- **`store/sessionStore.js`** (59줄+)
+  - `enterTestMode()` — 테스트 모드 진입 액션. `modelSource='test'`, `isTestMode=true` 설정
+  - `testSource` — `'project'` | `'upload'` 소스 선택 상태
+  - `testPlayState` — `'idle'` | `'playing'` | `'paused'` 재생 상태
+  - `testDetectionMode` — `'bbox'` | `'detection'` 시각화 모드
+  - `setTestSource()`, `setTestPlayState()`, `setTestDetectionMode()` 액션
+
+- **`pages/Dashboard.jsx`** (8줄+)
+  - 테스트 모드 감지 시 `TestModeBar` 렌더링
+  - 스트림 URL을 `/stream/test/rgb`, `/stream/test/thermal`로 분기
+
+- **`components/video/LiveVideoFeed.jsx`** (69줄+)
+  - 테스트 모드 스트림 URL 분기 처리
+  - bbox 오버레이 표시를 위한 `<img>` src 동적 전환
+
+- **`App.jsx`** (18줄+)
+  - `DashboardLayout`에서 테스트 모드 진입 시 `POST /stream/test/init` 자동 호출 (이미지 스캔 + 모델 로드)
+  - 컴포넌트 퇴장(unmount) 시 `POST /stream/test/stop` cleanup
+
+- **`pages/EmployeeLanding.jsx`** — QuickActions에 TEST MODE 카드 추가 (FlaskConical 아이콘, 빨간 accent). 클릭 시 `enterTestMode()` → `/dashboard` 이동
+
+### ⏱ 동작 흐름
+1. `/employee` 에서 "TEST MODE" 카드 클릭
+2. `sessionStore.enterTestMode()` → `modelSource='test'`, `isTestMode=true`
+3. `/dashboard` 이동 → `DashboardLayout` 마운트 → `POST /test/init` 호출 (이미지 스캔)
+4. `TestModeBar` 에서 ▶ 시작 → `POST /test/start` → MJPEG 스트림 시작
+5. `LiveVideoFeed` 가 `/stream/test/rgb`, `/stream/test/thermal` 구독하여 실시간 표시
+6. AI 추론 결과 → WebSocket `defect.new` → DefectPanel에 실시간 카드 생성
+7. ■ 정지 → `POST /test/stop` → 스트림 중단
+
+---
+
+## 🔗 2026-04-24 | Frontend↔Backend 미연결 모듈 일괄 연동 + 슈퍼어드민 UX
+
+> **작업자**: @youminsu0523  
+> **작업 브랜치**: `MS`  
+> **목표**: localStorage Mock으로만 동작하던 5개 API 모듈을 백엔드 실제 REST API로 전환. Refresh Token 자동 재발급. 슈퍼어드민 라우팅/권한 가드. 랜딩 헤더 로그인 상태 반영.
+
+### ⏱ 09:30 | Mock → Real API 전환 (5개 파일)
+
+localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT 인증 백엔드 호출로 전면 교체:
+
+| 파일 | 변경 전 | 변경 후 |
+|------|--------|--------|
+| `api/chatApi.js` | localStorage CRUD + 시드 15개 메시지 | `axios.get/post/patch` + JWT. `listConversations(userId)` → `listConversations()` (서버가 JWT로 사용자 식별) |
+| `api/notificationApi.js` | localStorage + 14개 시드 알림 | 동일 패턴. `simulateLatency()` 제거 |
+| `api/sitesApi.js` | localStorage + 5개 시드 현장 | 필터 쿼리스트링(`status`, `building_type`, `client_type`, `search`) 지원 추가 |
+| `api/reportsApi.js` | localStorage + updateReport | `POST /report/save` + `downloadReport()` 마크다운 다운로드 추가. updateReport 제거 (백엔드에 PATCH 없음) |
+| `api/organizationApi.js` | localStorage + 7명 시드 멤버 | `removeMember(userId)` 함수 추가 |
+
+### ⏱ 09:40 | Store 호출부 수정
+
+- **`chatStore.js`** — `CURRENT_USER` 하드코딩 제거 → `localStorage.user`에서 읽도록 변경. `sendMessage`에서 sender 정보 불필요 (백엔드 JWT 자동 식별). `createConversation` 키: `participants` → `participant_ids`. 응답 키: `perConversation` → `per_conversation`
+- **`reportsStore.js`** — `updateReport` import 제거. `update` 메서드를 로컬 캐시 전용으로 변경 (async → sync)
+
+### ⏱ 09:45 | Refresh Token 프론트 연동
+
+- **`authApi.js`** — 401 응답 인터셉터 추가:
+  - `isRefreshing` 플래그 + `failedQueue` 큐잉 패턴 → 동시 요청 401 시 refresh 1회만 실행
+  - Refresh 실패 → localStorage 정리 + `/login` 리다이렉트
+  - `uploadProfileImage()`, `deleteProfileImage()`, `updateMe()` 함수 추가
+- **`authStore.js`** — `setAuth(token, user, refreshToken)` 3번째 파라미터 추가. `logout()`에 `refresh_token` localStorage 삭제 추가
+- **`Login.jsx`** / **`OAuthCallback.jsx`** — 로그인 응답에서 `refresh_token` 추출하여 `setAuth`에 전달
+
+### ⏱ 09:50 | 보고서 다운로드 버튼
+
+- **`pages/employee/ReportDetail.jsx`** — 헤더에 `Download` 아이콘 버튼 추가. `reportsApi.downloadReport(id)` 호출 → 브라우저 마크다운 파일 다운로드 (Content-Disposition 파싱)
+
+### ⏱ 10:20 | 슈퍼어드민 라우팅 + 권한 가드 수정
+
+조직 미소속 슈퍼어드민이 모든 기능에 접근 가능하도록 전면 수정:
+
+- **`Login.jsx`** / **`OAuthCallback.jsx`** — `is_superadmin`이면 조직 없어도 `/employee`로 직행 (온보딩 건너뜀)
+- **`components/auth/OrgRequired.jsx`** — `user.is_superadmin === true` 시 `currentOrg` 체크 건너뜀. `adminOnly` 페이지도 접근 허용
+- **`pages/EmployeeLanding.jsx`**:
+  - `isAdmin` 판정에 `user?.is_superadmin` 조건 추가 (EmployeeHeader + QuickActionsSection 2곳)
+  - `QuickActionsSection`에서 `user` 미선언 크래시 수정 (`useAuthStore` import 누락)
+  - 프로필 드롭다운에 슈퍼어드민 뱃지 표시
+- **`pages/employee/AdminMembers.jsx`**:
+  - `fetchData` 분기: 슈퍼어드민은 `admin/all-users` 우선 호출, 조직 API는 try-catch 감싸서 미소속 시 빈 배열 fallback
+  - 전체 사용자 행 클릭 → 소속 있으면 편집 모달, 미소속이면 배정 모달 연결
+
+### ⏱ 10:30 | 랜딩 헤더 로그인 상태 반영
+
+- **`components/landing/LandingHeader.jsx`** — `useAuthStore` 연동:
+  - **비로그인**: `로그인` + `도입 문의하기` 표시 (직원전용 숨김)
+  - **로그인 상태**: `직원 전용` + `로그아웃` + `도입 문의하기` 표시
+  - 데스크탑/모바일 메뉴 모두 동일 적용
+
+### ⏱ 10:35 | EmployeeLanding 개인화 + 권한 분기
+
+- **WelcomeBanner** — 하드코딩 `과장님` 제거. `authStore.user.name` + `currentOrg.position` 동적 표시. 직급 미설정 시 이름만
+- **QuickActionsSection** — `멤버 관리` + `TEST MODE` 카드를 `isAdmin` (admin/owner/superadmin) 조건으로 묶어 일반 멤버에게 비노출
+
+### 🔗 변경 파일 목록 (17개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `api/chatApi.js` | Mock → Real API 전면 교체 |
+| `api/notificationApi.js` | 동일 |
+| `api/sitesApi.js` | 동일 |
+| `api/reportsApi.js` | 동일 + downloadReport 추가 |
+| `api/organizationApi.js` | 동일 + removeMember 추가 |
+| `api/authApi.js` | 401 인터셉터 + 프로필 이미지 API |
+| `store/chatStore.js` | API 시그니처 변경 대응 |
+| `store/reportsStore.js` | updateReport 제거 |
+| `store/authStore.js` | refresh_token 지원 |
+| `pages/Login.jsx` | refresh_token + 슈퍼어드민 라우팅 |
+| `pages/OAuthCallback.jsx` | 동일 |
+| `components/auth/OrgRequired.jsx` | 슈퍼어드민 bypass |
+| `pages/EmployeeLanding.jsx` | isAdmin + 배너 개인화 + 권한 분기 |
+| `pages/employee/AdminMembers.jsx` | 슈퍼어드민 분기 + 행 클릭 편집 |
+| `pages/employee/ReportDetail.jsx` | 다운로드 버튼 |
+| `components/landing/LandingHeader.jsx` | 로그인/로그아웃 상태 분기 |
+| `components/dashboard/TestModeBar.jsx` | 신규 (TEST MODE 제어바) |
+
+### 📐 설계 결정 사항
+- **Mock → Real 전환 전략**: API 파일의 함수 시그니처 유지 → Store/컴포넌트 호출부 최소 변경. 각 API 파일에 독립 axios 인스턴스 (JWT + X-Organization-Id 헤더 자동 첨부)
+- **Refresh Token 큐잉**: 동시 다발 401 시 refresh 1회만 실행, 나머지 큐 대기 후 새 토큰으로 재시도
+- **슈퍼어드민 권한 모델**: 조직 소속 없이도 모든 페이지/기능 접근 가능. `is_superadmin`이 `currentOrg` 체크보다 우선
+- **TEST MODE 접근 제한**: admin/owner/superadmin만 카드 노출 (일반 멤버 비노출)
