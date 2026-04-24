@@ -5,8 +5,13 @@
 
 import { Search } from 'lucide-react'
 import useChatStore from '../../store/chatStore.js'
-import { CHAT_FILTER_TABS, CHAT_TEAM_MEMBERS, CURRENT_USER } from '../../constants/chatConstants.js'
+import { CHAT_FILTER_TABS } from '../../constants/chatConstants.js'
 import ConversationItem from './ConversationItem.jsx'
+
+function getCurrentUserId() {
+  const stored = JSON.parse(localStorage.getItem('user') || 'null')
+  return stored?.id || null
+}
 
 export default function ConversationList() {
   const conversations = useChatStore((s) => s.conversations)
@@ -22,14 +27,13 @@ export default function ConversationList() {
   }
   if (searchQuery.trim()) {
     const q = searchQuery.toLowerCase()
+    const currentUserId = getCurrentUserId()
     filtered = filtered.filter((c) => {
       if (c.name?.toLowerCase().includes(q)) return true
-      // DM: 상대방 이름으로 검색
+      // DM: 상대방 이름으로 검색 (participants 는 {user_id, name, initials} 객체 배열)
       if (c.type === 'dm') {
-        const other = CHAT_TEAM_MEMBERS.find(
-          (m) => c.participants.includes(m.id) && m.id !== CURRENT_USER.id
-        )
-        return other?.name.toLowerCase().includes(q)
+        const other = c.participants?.find((p) => p.user_id !== currentUserId)
+        return other?.name?.toLowerCase().includes(q)
       }
       return false
     })

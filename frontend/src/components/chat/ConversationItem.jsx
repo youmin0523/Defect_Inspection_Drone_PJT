@@ -5,10 +5,15 @@
 
 import { Hash, Users } from 'lucide-react'
 import useChatStore from '../../store/chatStore.js'
-import { CHAT_TEAM_MEMBERS, CURRENT_USER, USER_STATUS_CONFIG } from '../../constants/chatConstants.js'
+import { USER_STATUS_CONFIG } from '../../constants/chatConstants.js'
+
+function getCurrentUserId() {
+  const stored = JSON.parse(localStorage.getItem('user') || 'null')
+  return stored?.id || null
+}
 
 function formatRelativeTime(ts) {
-  const diff = Date.now() - ts
+  const diff = Date.now() - new Date(ts).getTime()
   const min = Math.floor(diff / 60000)
   if (min < 1) return '방금'
   if (min < 60) return `${min}분`
@@ -25,16 +30,17 @@ export default function ConversationItem({ conv }) {
   const isActive = activeConversationId === conv.id
   const unread = unreadPerConv[conv.id] || 0
 
-  // DM 상대방 정보
+  const currentUserId = getCurrentUserId()
+  // participants 는 {user_id, name, initials} 객체 배열
   const otherMember = conv.type === 'dm'
-    ? CHAT_TEAM_MEMBERS.find((m) => conv.participants.includes(m.id) && m.id !== CURRENT_USER.id)
+    ? conv.participants?.find((p) => p.user_id !== currentUserId)
     : null
 
   const displayName = conv.type === 'dm'
     ? (otherMember?.name || '알 수 없음')
     : conv.name
 
-  const statusConfig = otherMember ? USER_STATUS_CONFIG[otherMember.status] : null
+  const statusConfig = otherMember ? USER_STATUS_CONFIG[otherMember.online_status] : null
 
   return (
     <button

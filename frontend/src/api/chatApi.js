@@ -63,19 +63,25 @@ export async function markConversationRead(conversationId) {
   return data
 }
 
+/** DELETE /api/v1/chat/conversations/{id}/leave */
+export async function leaveConversation(conversationId) {
+  await API.delete(`/api/v1/chat/conversations/${conversationId}/leave`)
+}
+
 /** GET /api/v1/chat/unread-counts */
 export async function getUnreadCounts() {
   const { data } = await API.get('/api/v1/chat/unread-counts')
   return data
 }
 
-/** 기존 DM 대화방 검색 (대화방 목록에서 필터링) */
+/** 기존 DM 대화방 검색 (대화방 목록에서 필터링) — 두 사용자 모두 참여해야 매칭 */
 export async function findDMConversation(userId1, userId2) {
   const convs = await listConversations()
   return convs.find(
     (c) =>
       c.type === 'dm' &&
       c.participants?.length === 2 &&
-      c.participants.some((p) => p.user_id === userId1 || p.user_id === userId2)
+      c.participants.some((p) => p.user_id === userId1) &&
+      c.participants.some((p) => p.user_id === userId2)
   ) || null
 }

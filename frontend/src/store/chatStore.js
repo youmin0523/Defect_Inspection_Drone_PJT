@@ -15,6 +15,7 @@ import {
   markConversationRead,
   getUnreadCounts,
   findDMConversation,
+  leaveConversation as leaveConvApi,
 } from '../api/chatApi.js'
 
 /** authStore에서 현재 사용자 가져오기 (store 순환 import 방지) */
@@ -116,6 +117,17 @@ const useChatStore = create((set, get) => ({
     await markConversationRead(convId)
     const { total, per_conversation } = await getUnreadCounts()
     set({ unreadTotal: total, unreadPerConv: per_conversation || {} })
+  },
+
+  /** 대화방 나가기 */
+  leaveConversation: async (convId) => {
+    try {
+      await leaveConvApi(convId)
+      const convs = await listConversations()
+      set({ conversations: convs, activeConversationId: null, messages: [] })
+    } catch (err) {
+      set({ error: err.message })
+    }
   },
 
   // 필터 / 검색

@@ -5,7 +5,12 @@
 
 import { Hash, Users, PanelRightOpen } from 'lucide-react'
 import useChatStore from '../../store/chatStore.js'
-import { CHAT_TEAM_MEMBERS, CURRENT_USER, USER_STATUS_CONFIG } from '../../constants/chatConstants.js'
+import { USER_STATUS_CONFIG } from '../../constants/chatConstants.js'
+
+function getCurrentUserId() {
+  const stored = JSON.parse(localStorage.getItem('user') || 'null')
+  return stored?.id || null
+}
 
 export default function ChatHeader() {
   const conversations = useChatStore((s) => s.conversations)
@@ -16,15 +21,17 @@ export default function ChatHeader() {
   const conv = conversations.find((c) => c.id === activeConversationId)
   if (!conv) return null
 
+  const currentUserId = getCurrentUserId()
+  // participants 는 {user_id, name, initials} 객체 배열
   const otherMember = conv.type === 'dm'
-    ? CHAT_TEAM_MEMBERS.find((m) => conv.participants.includes(m.id) && m.id !== CURRENT_USER.id)
+    ? conv.participants?.find((p) => p.user_id !== currentUserId)
     : null
 
   const displayName = conv.type === 'dm'
     ? (otherMember?.name || '알 수 없음')
     : conv.name
 
-  const statusConfig = otherMember ? USER_STATUS_CONFIG[otherMember.status] : null
+  const statusConfig = otherMember ? USER_STATUS_CONFIG[otherMember.online_status] : null
 
   return (
     <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-gray-200">
@@ -64,8 +71,8 @@ export default function ChatHeader() {
           </h2>
           <p className="text-xs text-gray-500">
             {conv.type === 'dm'
-              ? (statusConfig ? `${otherMember.role} · ${statusConfig.label}` : '')
-              : `${conv.participants.length}명 참여 중`
+              ? (statusConfig ? statusConfig.label : '')
+              : `${conv.participants?.length || 0}명 참여 중`
             }
           </p>
         </div>
