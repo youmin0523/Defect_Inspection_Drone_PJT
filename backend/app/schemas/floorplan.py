@@ -48,6 +48,25 @@ class FloorplanListResponse(BaseModel):
 
 
 # ── FR-015 스케일 보정 ──────────────────────────
+class FloorplanQualityCheckDetail(BaseModel):
+    """개별 품질 체크 결과"""
+    pass_check: bool = Field(..., alias="pass")
+    value: Optional[object] = None
+    message: str
+
+    class Config:
+        populate_by_name = True
+
+
+class FloorplanValidateResponse(BaseModel):
+    """도면 이미지 품질 검증 응답"""
+    status: str = Field(..., description="ok | warning | rejected")
+    score: float = Field(..., description="종합 점수 (0-100)")
+    checks: dict = Field(default_factory=dict, description="항목별 검증 결과")
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
 class FloorplanCalibrateRequest(BaseModel):
     """
     평면도 위 두 점 + 실측 거리 → px/m 환산.

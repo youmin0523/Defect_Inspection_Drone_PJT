@@ -249,3 +249,209 @@ def _merge_overlapping_segments(segments: list[tuple], gap: float = 0.03) -> lis
         else:
             merged.append((s_min, s_max))
     return merged
+
+
+# ══════════════════════════════════════════════════
+# 도면 이미지 품질 검증 파이프라인
+# ══════════════════════════════════════════════════
+
+def validate_floorplan_quality(image_bytes: bytes) -> dict:
+    """
+    평면도 이미지 품질 검증.
+    직선 비율, 직각 교차점, 선명도, 대비, 기울기, 벽체 수 등을 종합 분석.
+
+    Returns:
+        {
+            "status": "ok" | "warning" | "rejected",
+            "score": float (0-100),
+            "checks": {
+                "resolution": {...},
+                "sharpness": {...},
+                "contrast": {...},
+                "straightness": {...},
+                "right_angles": {...},
+                "rotation": {...},
+                "wall_count": {...},
+            },
+            "warnings": [str, ...],
+            "errors": [str, ...],
+        }
+    """
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        return {
+            "status": "rejected",
+            "score": 0,
+            "checks": {},
+            "warnings": [],
+            "errors": ["이미지를 디코딩할 수 없습니다."],
+        }
+
+    h, w = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    checks = {}
+    warnings = []
+    errors = []
+    scores = []
+
+    # ── 1. 해상도 체크 ──
+    min_dim = min(w, h)
+    if min_dim >= 1000:
+        checks["resolution"] = {"pass": True, "value": f"{w}×{h}", "message": "해상도 양호"}
+        scores.append(100)
+    elif min_dim >= 500:
+        checks["resolution"] = {"pass": True, "value": f"{w}×{h}", "message": "해상도 허용 범위 (권장: 1000px 이상)"}
+        warnings.append(f"이미지 해상도가 낮습니다 ({w}×{h}). 1000×1000px 이상을 권장합니다.")
+        scores.append(60)
+    else:
+        checks["resolution"] = {"pass": False, "value": f"{w}×{h}", "message": "해상도 부족"}
+        errors.append(f"이미지 해상도가 너무 낮습니다 ({w}×{h}). 최소 1000×1000px 이상이 필요합니다.")
+        scores.append(20)
+
+    # ── 2. 선명도 (Laplacian variance) ──
+    laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    if laplacian_var >= 100:
+        checks["sharpness"] = {"pass": True, "value": round(laplacian_var, 1), "message": "선명도 양호"}
+        scores.append(100)
+    elif laplacian_var >= 30:
+        checks["sharpness"] = {"pass": True, "value": round(laplacian_var, 1), "message": "선명도 보통"}
+        warnings.append("이미지가 다소 흐립니다. 더 선명한 이미지를 권장합니다.")
+        scores.append(60)
+    else:
+        checks["sharpness"] = {"pass": False, "value": round(laplacian_var, 1), "message": "이미지가 너무 흐립니다"}
+        errors.append("이미지가 너무 흐려서 벽체 추출이 어렵습니다. 선명한 이미지를 업로드해주세요.")
+        scores.append(20)
+
+    # ── 3. 대비 (흑백 표준편차) ──
+    std_dev = float(gray.std())
+    if std_dev >= 50:
+        checks["contrast"] = {"pass": True, "value": round(std_dev, 1), "message": "대비 양호"}
+        scores.append(100)
+    elif std_dev >= 25:
+        checks["contrast"] = {"pass": True, "value": round(std_dev, 1), "message": "대비 보통"}
+        warnings.append("이미지 대비가 낮습니다. 벽체와 배경 구분이 명확한 이미지를 권장합니다.")
+        scores.append(60)
+    else:
+        checks["contrast"] = {"pass": False, "value": round(std_dev, 1), "message": "대비가 너무 낮습니다"}
+        errors.append("대비가 너무 낮아 벽체를 구분할 수 없습니다.")
+        scores.append(20)
+
+    # ── 4. 직선 비율 (Hough Lines 기반) ──
+    blurred = cv2.GaussianBlur(gray, (5, 5), 1)
+    edges = cv2.Canny(blurred, 50, 150, apertureSize=3)
+    total_edge_pixels = np.count_nonzero(edges)
+
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=50,
+                             minLineLength=int(max(w, h) * 0.03),
+                             maxLineGap=int(max(w, h) * 0.02))
+
+    line_pixel_count = 0
+    h_lines = 0
+    v_lines = 0
+    line_angles = []
+
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            length = math.hypot(x2 - x1, y2 - y1)
+            line_pixel_count += length
+            angle = math.degrees(math.atan2(y2 - y1, x2 - x1)) % 180
+            line_angles.append(angle)
+            if angle < 10 or angle > 170:
+                h_lines += 1
+            elif 80 < angle < 100:
+                v_lines += 1
+
+    straightness_ratio = line_pixel_count / max(total_edge_pixels, 1)
+    if straightness_ratio >= 0.3:
+        checks["straightness"] = {"pass": True, "value": round(straightness_ratio, 3), "message": "직선 비율 양호 — 평면도 특성 ��인"}
+        scores.append(100)
+    elif straightness_ratio >= 0.15:
+        checks["straightness"] = {"pass": True, "value": round(straightness_ratio, 3), "message": "직선 비율 보통"}
+        warnings.append("직선 비율이 낮습니다. 평면도가 아닌 이미지일 수 있습니다.")
+        scores.append(55)
+    else:
+        checks["straightness"] = {"pass": False, "value": round(straightness_ratio, 3), "message": "직선이 거의 없습니다 — 평면도가 아닌 것 같습니다"}
+        errors.append("이 이미지는 평면도가 아닌 것 같습니다 (직선 비율이 매우 낮음).")
+        scores.append(10)
+
+    # ── 5. 직각 교차점 수 ──
+    right_angle_count = 0
+    if lines is not None and len(lines) >= 2:
+        # 수평선과 수직선의 쌍 수 ≈ 직각 교차점 추정
+        right_angle_count = min(h_lines, v_lines)
+
+    if right_angle_count >= 4:
+        checks["right_angles"] = {"pass": True, "value": right_angle_count, "message": "직각 교차점 충분"}
+        scores.append(100)
+    elif right_angle_count >= 2:
+        checks["right_angles"] = {"pass": True, "value": right_angle_count, "message": "직각 교차점 부족"}
+        warnings.append("직각 교차점이 적습니다. 단순한 평면도이거나 품질이 낮을 수 있습니다.")
+        scores.append(60)
+    else:
+        checks["right_angles"] = {"pass": False, "value": right_angle_count, "message": "직각 구조 미감지"}
+        scores.append(30)
+
+    # ── 6. ���울기 감지 ──
+    if line_angles:
+        # 수평/수직에서 벗어난 중앙 각도
+        deviations = []
+        for a in line_angles:
+            dev_h = min(a, 180 - a)  # 수평으로부터 편차
+            dev_v = abs(a - 90)       # 수직으로부터 편차
+            deviations.append(min(dev_h, dev_v))
+        median_dev = sorted(deviations)[len(deviations) // 2]
+
+        if median_dev <= 3:
+            checks["rotation"] = {"pass": True, "value": round(median_dev, 1), "message": "수평/수직 정렬 양호"}
+            scores.append(100)
+        elif median_dev <= 10:
+            checks["rotation"] = {"pass": True, "value": round(median_dev, 1), "message": "약간 기울어짐"}
+            warnings.append(f"이미지가 약 {median_dev:.1f}° 기울어져 있습니다. 정���된 이미지를 권장합니다.")
+            scores.append(70)
+        else:
+            checks["rotation"] = {"pass": False, "value": round(median_dev, 1), "message": "심하게 기울어져 있습니다"}
+            warnings.append(f"이미지가 {median_dev:.1f}° 기울어져 있습니다. 보정 후 업로드��� 권장합니다.")
+            scores.append(40)
+    else:
+        checks["rotation"] = {"pass": False, "value": None, "message": "기울기 판단 불가 (직선 미감지)"}
+        scores.append(50)
+
+    # ── 7. 벽체 감지 수 (간이 추출) ──
+    try:
+        extraction = extract_walls_from_bytes(image_bytes)
+        wall_count = extraction["wall_count"]
+    except Exception:
+        wall_count = 0
+
+    if wall_count >= 5:
+        checks["wall_count"] = {"pass": True, "value": wall_count, "message": f"벽체 {wall_count}개 감지"}
+        scores.append(100)
+    elif wall_count >= 3:
+        checks["wall_count"] = {"pass": True, "value": wall_count, "message": f"벽체 {wall_count}개 감지 (적음)"}
+        warnings.append("감지된 벽체가 적습니다. 평면도 품질을 확인해주세요.")
+        scores.append(60)
+    else:
+        checks["wall_count"] = {"pass": False, "value": wall_count, "message": "벽체를 거의 감지할 수 없습니다"}
+        errors.append("벽체를 충분히 감지할 수 없습니다. 더 선명하고 대비가 높은 평면도를 업로드해주세요.")
+        scores.append(15)
+
+    # ── 종합 점수 + 판정 ──
+    avg_score = sum(scores) / len(scores) if scores else 0
+
+    if errors:
+        status = "rejected"
+    elif warnings:
+        status = "warning"
+    else:
+        status = "ok"
+
+    return {
+        "status": status,
+        "score": round(avg_score, 1),
+        "checks": checks,
+        "warnings": warnings,
+        "errors": errors,
+    }

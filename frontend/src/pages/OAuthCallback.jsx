@@ -36,10 +36,10 @@ export default function OAuthCallback() {
 
     oauthLogin(provider, code, redirectUri)
       .then((res) => {
-        const { access_token, user } = res.data
-        setAuth(access_token, user)
+        const { access_token, refresh_token, user } = res.data
+        setAuth(access_token, user, refresh_token)
         const hasOrg = user.organizations && user.organizations.length > 0
-        navigate(hasOrg ? '/employee' : '/employee/onboarding', { replace: true })
+        navigate((hasOrg || user.is_superadmin) ? '/employee' : '/employee/onboarding', { replace: true })
       })
       .catch((err) => {
         console.error('OAuth 로그인 실패:', err)

@@ -16,7 +16,6 @@ import {
   listReports,
   getReport,
   createReport,
-  updateReport,
   deleteReport,
 } from '../api/reportsApi.js'
 
@@ -65,13 +64,13 @@ const useReportsStore = create((set, get) => ({
     return created
   },
 
-  /** 부분 업데이트 */
-  update: async (id, patch) => {
-    const updated = await updateReport(id, patch)
+  /** 로컬 캐시 업데이트 (백엔드 report 엔드포인트에는 PATCH 없음) */
+  update: (id, patch) => {
     set((state) => ({
-      reports: state.reports.map((r) => (r.id === id ? updated : r)),
+      reports: state.reports.map((r) =>
+        r.id === id ? { ...r, ...patch } : r
+      ),
     }))
-    return updated
   },
 
   /** 삭제 */

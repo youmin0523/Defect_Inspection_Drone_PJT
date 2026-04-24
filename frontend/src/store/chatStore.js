@@ -2,8 +2,8 @@
  * store/chatStore.js
  * 역할: 사내 메신저 상태 관리 — chatApi 래퍼 (Zustand, persist 없음)
  *
- *   persist 를 쓰지 않는 이유: 저장소 SoT 는 api/chatApi.js 의 localStorage 키
- *   (그리고 향후 백엔드 DB). 이 store 는 그 데이터의 "메모리 캐시" 일 뿐.
+ *   백엔드 REST API 연동 — JWT 토큰으로 현재 사용자 자동 식별.
+ *   CURRENT_USER 는 fallback 용도로만 유지 (authStore.user 우선).
  */
 
 import { create } from 'zustand'
@@ -16,7 +16,12 @@ import {
   getUnreadCounts,
   findDMConversation,
 } from '../api/chatApi.js'
-import { CURRENT_USER } from '../constants/chatConstants.js'
+
+/** authStore에서 현재 사용자 가져오기 (store 순환 import 방지) */
+function getCurrentUser() {
+  const stored = JSON.parse(localStorage.getItem('user') || 'null')
+  return stored || { id: null, name: '사용자', initials: '??' }
+}
 
 const useChatStore = create((set, get) => ({
   // State
@@ -37,9 +42,9 @@ const useChatStore = create((set, get) => ({
   fetchConversations: async () => {
     set({ loading: true, error: null })
     try {
-      const convs = await listConversations(CURRENT_USER.id)
-      const { total, perConversation } = await getUnreadCounts(CURRENT_USER.id)
-      set({ conversations: convs, unreadTotal: total, unreadPerConv: perConversation, loading: false })
+      const convs = await listConversations()
+      const { total, per_conversation } = await getUnreadCounts()
+      set({ conversations: convs, unreadTotal: total, unreadPerConv: per_conversation || {}, loading: false })
     } catch (err) {
       set({ error: err.message, loading: false })
     }
@@ -50,9 +55,9 @@ const useChatStore = create((set, get) => ({
     set({ activeConversationId: convId, messagesLoading: true })
     try {
       const msgs = await getMessages(convId)
-      await markConversationRead(convId, CURRENT_USER.id)
-      const { total, perConversation } = await getUnreadCounts(CURRENT_USER.id)
-      set({ messages: msgs, messagesLoading: false, unreadTotal: total, unreadPerConv: perConversation })
+      await markConversationRead(convId)
+      const { total, per_conversation } = await getUnreadCounts()
+      set({ messages: msgs, messagesLoading: false, unreadTotal: total, unreadPerConv: per_conversation || {} })
     } catch (err) {
       set({ error: err.message, messagesLoading: false })
     }
@@ -63,15 +68,8 @@ const useChatStore = create((set, get) => ({
     const { activeConversationId } = get()
     if (!activeConversationId || !text.trim()) return
 
-    // authStore에서 프로필 이미지 URL 가져오기
-    const authUser = JSON.parse(localStorage.getItem('user') || '{}')
-
     const msg = await sendMessage({
       conversation_id: activeConversationId,
-      sender_id: CURRENT_USER.id,
-      sender_name: CURRENT_USER.name,
-      sender_initials: CURRENT_USER.initials,
-      sender_profile_image_url: authUser.profile_image_url || null,
       text: text.trim(),
     })
 
@@ -79,19 +77,19 @@ const useChatStore = create((set, get) => ({
     set((s) => ({ messages: [...s.messages, msg] }))
 
     // 대화방 목록 갱신 (순서 변경 + last_message)
-    const convs = await listConversations(CURRENT_USER.id)
+    const convs = await listConversations()
     set({ conversations: convs })
   },
 
   /** 새 대화방 생성 */
   createConversation: async ({ type, name, participants }) => {
+    const user = getCurrentUser()
     const conv = await createConversation({
       type,
       name,
-      participants: [...participants, CURRENT_USER.id],
-      created_by: CURRENT_USER.id,
+      participant_ids: [...participants, user.id].filter(Boolean),
     })
-    const convs = await listConversations(CURRENT_USER.id)
+    const convs = await listConversations()
     set({ conversations: convs, isNewChatModalOpen: false })
     // 생성 후 바로 선택
     get().selectConversation(conv.id)
@@ -100,7 +98,8 @@ const useChatStore = create((set, get) => ({
 
   /** DM 시작 (기존 DM 있으면 선택, 없으면 생성) */
   startDM: async (targetUserId) => {
-    const existing = await findDMConversation(CURRENT_USER.id, targetUserId)
+    const user = getCurrentUser()
+    const existing = await findDMConversation(user.id, targetUserId)
     if (existing) {
       get().selectConversation(existing.id)
       return existing
@@ -114,9 +113,9 @@ const useChatStore = create((set, get) => ({
 
   /** 읽음 처리 */
   markRead: async (convId) => {
-    await markConversationRead(convId, CURRENT_USER.id)
-    const { total, perConversation } = await getUnreadCounts(CURRENT_USER.id)
-    set({ unreadTotal: total, unreadPerConv: perConversation })
+    await markConversationRead(convId)
+    const { total, per_conversation } = await getUnreadCounts()
+    set({ unreadTotal: total, unreadPerConv: per_conversation || {} })
   },
 
   // 필터 / 검색
@@ -131,8 +130,8 @@ const useChatStore = create((set, get) => ({
   /** 미읽음 카운트 갱신 (사이드바 뱃지용) */
   refreshUnreadCounts: async () => {
     try {
-      const { total, perConversation } = await getUnreadCounts(CURRENT_USER.id)
-      set({ unreadTotal: total, unreadPerConv: perConversation })
+      const { total, per_conversation } = await getUnreadCounts()
+      set({ unreadTotal: total, unreadPerConv: per_conversation || {} })
     } catch {}
   },
 }))

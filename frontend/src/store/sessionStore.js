@@ -50,8 +50,15 @@ const useSessionStore = create(
       // //* [Modified Code] 흐름 재설계 (2026-04-16): 모델 소스 구분
       //   'premodel'  = /employee/pre-work 에서 미리 만들어둔 모델을 로드
       //   'drone'     = L3 자율비행 실시간 스캔
-      modelSource: null, // 'premodel' | 'drone' | null
+      //   'test'      = 테스트 모드 (로컬 이미지/영상으로 프로토타입 테스트)
+      modelSource: null, // 'premodel' | 'drone' | 'test' | null
       loadedPreModelId: null, // preModelStore.preModels 의 id 참조
+
+      // ── 테스트 모드 ───────────────────────────
+      isTestMode: false,
+      testSource: 'project', // 'project' (프로젝트 로컬) | 'upload' (직접 업로드)
+      testPlayState: 'stopped', // 'stopped' | 'playing' | 'paused'
+      testDetectionMode: 'bbox', // 'bbox' (네모박스) | 'detection' (객체감지)
 
       // ── 세션 메타 ──────────────────────────
       sessionId: null,
@@ -183,6 +190,49 @@ const useSessionStore = create(
         set({ modelStatus: 'pending', modelProgress: 0, modelStage: '' })
       },
 
+      /** 테스트 모드 진입 — 세션 가드 통과를 위해 목업 데이터 채우고 modelStatus='ready' 설정 */
+      enterTestMode: () => {
+        cancelRunner?.()
+        cancelRunner = null
+        set({
+          isTestMode: true,
+          testSource: 'project',
+          siteName: '[TEST] 하자 검출 테스트',
+          siteUnit: 'TEST-001',
+          operatorName: '테스트 운용자',
+          inspectionDate: todayISO(),
+          inspectionType: '테스트',
+          inspectionArea: 'N/A',
+          department: 'R&D',
+          position: '개발자',
+          phoneNumber: '',
+          witness: '',
+          level: 3,
+          modelStatus: 'ready',
+          modelProgress: 100,
+          modelStage: 'TEST MODE',
+          modelSource: 'test',
+          loadedPreModelId: null,
+          uploadedFileName: null,
+          uploadedFileSize: null,
+          uploadedImageDataUrl: null,
+          wallsData: null,
+          outline: null,
+          sessionId: `test-${crypto.randomUUID()}`,
+          startedAt: Date.now(),
+          finishedAt: null,
+        })
+      },
+
+      /** 테스트 이미지 소스 전환: 'project' ↔ 'upload' */
+      setTestSource: (source) => set({ testSource: source }),
+
+      /** 테스트 재생 상태: 'stopped' | 'playing' | 'paused' */
+      setTestPlayState: (state) => set({ testPlayState: state }),
+
+      /** 테스트 감지 모드: 'bbox' | 'detection' */
+      setTestDetectionMode: (mode) => set({ testDetectionMode: mode }),
+
       /** 비행 종료 시 타임스탬프 기록 (리포트 용) */
       finish: () => set({ finishedAt: Date.now() }),
 
@@ -213,6 +263,10 @@ const useSessionStore = create(
           modelStage: '',
           modelSource: null,
           loadedPreModelId: null,
+          isTestMode: false,
+          testSource: 'project',
+          testPlayState: 'stopped',
+          testDetectionMode: 'bbox',
           sessionId: null,
           startedAt: null,
           finishedAt: null,
@@ -243,6 +297,9 @@ const useSessionStore = create(
         modelStatus: state.modelStatus,
         modelSource: state.modelSource,
         loadedPreModelId: state.loadedPreModelId,
+        isTestMode: state.isTestMode,
+        testSource: state.testSource,
+        testDetectionMode: state.testDetectionMode,
         sessionId: state.sessionId,
         startedAt: state.startedAt,
         finishedAt: state.finishedAt,

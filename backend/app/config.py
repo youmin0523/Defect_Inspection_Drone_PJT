@@ -31,6 +31,17 @@ class Settings(BaseSettings):
             )
         return self
 
+    # ── Hardware (드론/카메라/LiDAR 연결 플래그) ──
+    # False면 카메라·LiDAR·추론 파이프라인 초기화를 모두 건너뜀 (API만 기동)
+    DRONE_CONNECTED: bool = False
+
+    # ── Test Mode (드론 미연결 시 로컬 이미지/영상으로 하자 검출 프로토타입 테스트) ──
+    TEST_MODE_ENABLED: bool = True
+    TEST_IMAGE_INTERVAL: float = 3.0      # 이미지 전환 주기 (초)
+    TEST_IMAGES_DIR: str = "./training/test_external"
+    TEST_THERMAL_DIR: str = "./training/gdrive_raw/B01_B02_D01_crack900_thermal_rgb_seg/Crack900/data/Images/2_IR/train"
+    TEST_UPLOAD_DIR: str = "./uploads/test_files"
+
     # ── Camera ───────────────────────────────
     RGB_CAMERA_INDEX: int = 0
     THERMAL_CAMERA_INDEX: int = 1

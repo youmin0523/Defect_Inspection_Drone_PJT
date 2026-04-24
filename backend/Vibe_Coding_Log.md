@@ -812,3 +812,43 @@ TODO 주석: SLAM/Floorplan 은 site/org FK 추가 후 `get_current_org_member` 
   - `PUSH_PROVIDER=fcm` (firebase-admin 연결 후)
   - `WS_BACKEND=redis` + `REDIS_URL` (수평 확장 시)
 - Telemetry POST 오픈 상태 확인 — VPC/방화벽 레벨 접근 제어 전제
+
+---
+
+## 📝 기본 정보 (Meta)
+
+- 작성자 (Who): @youminsu0523
+- 작성 일자 (When): 2026-04-23 14:00
+- 목표 기능 (Objective): 학습 데이터셋 출처 관리 문서화 및 .gitignore 설정
+- 작업 브랜치/환경: `MS`
+
+---
+
+## 💬 바이브코딩 대화 흐름 (Vibe Coding Log)
+
+### 1️⃣ 학습 데이터셋 출처 문서 추가 (Training Datasets Source Management)
+
+> ⏱ 2026-04-23 14:00
+
+#### 배경
+- 20종 결함 분류 모델 학습에 사용한 데이터셋(63,285장)의 출처·라이선스를 체계적으로 정리할 필요
+- `backend/training/` 디렉토리의 대용량 데이터셋 파일이 Git 추적에서 제외되어야 함
+
+#### 작업 내용
+
+**① `backend/training/.gitignore` 신규 생성**
+- 학습용 대용량 데이터셋 디렉토리(`datasets/`, `gdrive_raw/`, `weights/` 등)를 Git 추적에서 제외
+- 모델 가중치(`.pt`, `.onnx` 등)도 추적 제외 대상
+
+**② `backend/training/datasets_sources.md` 신규 생성**
+- 데이터셋 총괄표: 9개 데이터셋, 총 63,285장 이미지
+- 하자코드(A-01~E-02) ↔ 데이터셋 ↔ 모델 클래스 매핑 테이블
+- 원본 데이터 출처 상세 (Roboflow, GitHub, AI Hub 등 28개 소스)
+  - 카테고리별 정리: A 구조·기하 / B 단열·방수 / C 마감·표면 / D 바닥·난방 / E 창호·유리
+- 라이선스 요약: CC BY 4.0(22개), CC BY-NC(2개), Public Domain(1개), MIT(1개), GPL-3.0(1개), Academic(2개), 내부(1개)
+
+#### 커밋
+- `8bf2ad7` — `feat: add .gitignore and documentation for training datasets source management`
+
+#### 비고
+- Hijin 브랜치 PR #27 머지 완료 (`f4a2068`) — 04-22 작업분(refresh token, auth guards, prometheus, push notifications, redis pub/sub)은 이전 세션에서 기록 완료

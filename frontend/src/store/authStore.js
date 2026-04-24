@@ -21,8 +21,9 @@ const useAuthStore = create((set, get) => ({
   currentOrg: JSON.parse(localStorage.getItem('current_org') || 'null'),
 
   // ── 로그인 성공 시 호출 ───────────────────
-  setAuth: (token, user) => {
+  setAuth: (token, user, refreshToken) => {
     localStorage.setItem('access_token', token)
+    if (refreshToken) localStorage.setItem('refresh_token', refreshToken)
     localStorage.setItem('user', JSON.stringify(user))
     const orgs = user?.organizations || []
     // 현재 조직이 없으면 첫 번째 조직을 기본값으로
@@ -43,6 +44,7 @@ const useAuthStore = create((set, get) => ({
   // ── 로그아웃 ──────────────────────────────
   logout: () => {
     localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
     localStorage.removeItem('user')
     localStorage.removeItem('current_org')
     set({ token: null, user: null, isAuthenticated: false, organizations: [], currentOrg: null })

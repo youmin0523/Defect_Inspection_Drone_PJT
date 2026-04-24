@@ -41,6 +41,7 @@ import {
   Activity,
   MessageSquare,
   Shield,
+  FlaskConical,
 } from 'lucide-react'
 import useAuthStore from '../store/authStore.js'
 import useDefectStore from '../store/defectStore.js'
@@ -207,7 +208,7 @@ function EmployeeHeader({ operatorName }) {
   const [editProfileOpen, setEditProfileOpen] = useState(false)
   const profileRef = useRef(null)
 
-  const isAdmin = currentOrg && ['owner', 'admin'].includes(currentOrg.role)
+  const isAdmin = user?.is_superadmin || (currentOrg && ['owner', 'admin'].includes(currentOrg.role))
 
   const handleLogout = () => {
     logout()
@@ -313,6 +314,11 @@ function EmployeeHeader({ operatorName }) {
                 <div className="px-4 py-3 border-b border-gray-100">
                   <p className="font-semibold text-slate-900 text-sm">{displayName}</p>
                   <p className="text-xs text-gray-500 truncate">{user?.email}</p>
+                  {user?.is_superadmin && (
+                    <span className="inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700">
+                      슈퍼어드민
+                    </span>
+                  )}
                   {currentOrg && (
                     <span className={`inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full font-medium ${
                       currentOrg.role === 'owner' ? 'bg-amber-100 text-amber-700' :
@@ -619,14 +625,16 @@ function EditProfileModal({ user, token, onClose }) {
    ────────────────────────────────────────────────────────────── */
 
 function WelcomeBanner({
-  operatorName,
   dateStr,
   weekdayLabel,
   todayCount,
   pendingReports,
   sessionContextLabel,
 }) {
-  const name = operatorName || '게스트'
+  const user = useAuthStore((s) => s.user)
+  const currentOrg = useAuthStore((s) => s.currentOrg)
+  const name = user?.name || '게스트'
+  const position = currentOrg?.position || ''
   return (
     <section className="relative bg-slate-900 text-white overflow-hidden">
       {/* 점무늬 데코 — 랜딩 Hero 와 동일한 노란 닷 패턴 */}
@@ -646,7 +654,7 @@ function WelcomeBanner({
               Employee · Office Hub
             </p>
             <h1 className="text-2xl md:text-4xl font-extrabold leading-tight break-keep">
-              {name} 과장님, 좋은 하루입니다.
+              {name}{position ? ` ${position}` : ''}님, 좋은 하루입니다.
               <br className="hidden md:block" />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-yellow-400">
                 오늘도 안전한 점검을 응원합니다.
@@ -745,22 +753,43 @@ const ACTION_ACCENT = {
   violet: { border: 'border-t-4 border-violet-600', panel: 'bg-violet-50', iconBg: 'bg-violet-600', text: 'text-violet-700', hoverBg: 'group-hover:bg-violet-100' },
   cyan:   { border: 'border-t-4 border-cyan-600',   panel: 'bg-cyan-50',   iconBg: 'bg-cyan-600',   text: 'text-cyan-700',   hoverBg: 'group-hover:bg-cyan-100' },
   amber:  { border: 'border-t-4 border-amber-600',  panel: 'bg-amber-50',  iconBg: 'bg-amber-600',  text: 'text-amber-700',  hoverBg: 'group-hover:bg-amber-100' },
+  red:    { border: 'border-t-4 border-red-500',   panel: 'bg-red-50',    iconBg: 'bg-red-500',   text: 'text-red-700',    hoverBg: 'group-hover:bg-red-100' },
 }
 
 function QuickActionsSection() {
+  const user = useAuthStore((s) => s.user)
   const currentOrg = useAuthStore((s) => s.currentOrg)
-  const isAdmin = currentOrg && ['owner', 'admin'].includes(currentOrg.role)
+  const isAdmin = user?.is_superadmin || (currentOrg && ['owner', 'admin'].includes(currentOrg.role))
+  const navigate = useNavigate()
+  const enterTestMode = useSessionStore((s) => s.enterTestMode)
 
-  const actions = isAdmin
-    ? [...QUICK_ACTIONS, {
-        key: 'admin-members',
-        title: '멤버 관리',
-        desc: '조직 멤버를 관리하고 미소속 사용자를 배정합니다.',
-        to: '/employee/admin/members',
-        icon: Shield,
-        accent: 'amber',
-      }]
-    : QUICK_ACTIONS
+  const adminCard = {
+    key: 'admin-members',
+    title: '멤버 관리',
+    desc: '조직 멤버를 관리하고 미소속 사용자를 배정합니다.',
+    to: '/employee/admin/members',
+    icon: Shield,
+    accent: 'amber',
+  }
+
+  const testModeCard = {
+    key: 'test-mode',
+    title: 'TEST MODE',
+    desc: '테스트 이미지/영상으로 AI 하자 검출을 시험합니다. 드론 연결 없이 대시보드를 체험할 수 있습니다.',
+    icon: FlaskConical,
+    accent: 'red',
+    isTestMode: true,
+  }
+
+  const actions = [
+    ...QUICK_ACTIONS,
+    ...(isAdmin ? [adminCard, testModeCard] : []),
+  ]
+
+  const handleTestModeClick = () => {
+    enterTestMode()
+    navigate('/dashboard')
+  }
 
   return (
     <section>
@@ -784,6 +813,29 @@ function QuickActionsSection() {
               </span>
             </div>
           )
+
+          // TEST MODE 카드: Link 대신 onClick 핸들러 사용
+          if (action.isTestMode) {
+            return (
+              <button
+                key={action.key}
+                type="button"
+                onClick={handleTestModeClick}
+                className={`group relative flex flex-col bg-white rounded-xl shadow-md hover:shadow-xl hover:-translate-y-1 transition duration-300 h-full text-left ${style.border}`}
+              >
+                <div className={`h-24 flex items-center justify-center ${style.panel} ${style.hoverBg} transition`}>
+                  <div className={`w-12 h-12 rounded-xl ${style.iconBg} text-white flex items-center justify-center shadow-lg`}>
+                    <Icon size={22} />
+                  </div>
+                </div>
+                {body}
+                <span className="absolute top-3 right-3 text-[10px] font-bold tracking-wider bg-red-500 text-white px-2 py-0.5 rounded">
+                  TEST
+                </span>
+              </button>
+            )
+          }
+
           const CardRoot = action.disabled ? 'div' : Link
           const rootProps = action.disabled
             ? {

@@ -8,6 +8,7 @@
  *       - WebSocket 연결은 DashboardLayout 내부에서만 초기화하여 랜딩/세션 페이지에서는 비용 발생 없음
  */
 
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './components/layout/Sidebar.jsx'
 import Dashboard from './pages/Dashboard.jsx'
@@ -43,6 +44,7 @@ import SessionModeling from './pages/session/SessionModeling.jsx'
 import OAuthCallback from './pages/OAuthCallback.jsx'
 import ReportModal from './components/report/ReportModal.jsx'
 import useWebSocket from './hooks/useWebSocket.js'
+import useSessionStore from './store/sessionStore.js'
 
 // //! [Original Code] 기존 AppLayout: 단일 라우트 `/` = Dashboard + WebSocket 최상단 초기화
 // function AppLayout() {
@@ -68,6 +70,22 @@ import useWebSocket from './hooks/useWebSocket.js'
 function DashboardLayout() {
   // 대시보드 진입 시에만 WebSocket 연결 초기화
   useWebSocket()
+
+  // 테스트 모드: 대시보드 마운트 시 이미지 스캔 + 모델 로드 (재생은 시작하지 않음)
+  const isTestMode = useSessionStore((s) => s.isTestMode)
+  useEffect(() => {
+    if (!isTestMode) return
+    const apiBase = import.meta.env.VITE_API_BASE_URL || ''
+    // 초기화만 실행 (스캔 + 모델 로드). 재생은 사용자가 START 클릭 시 시작
+    fetch(`${apiBase}/api/v1/stream/test/init`, { method: 'POST' })
+      .then((r) => r.json())
+      .then((data) => console.log('[TestMode] Initialized:', data))
+      .catch((err) => console.warn('[TestMode] Init failed:', err))
+
+    return () => {
+      fetch(`${apiBase}/api/v1/stream/test/stop`, { method: 'POST' }).catch(() => {})
+    }
+  }, [isTestMode])
 
   return (
     <div className="flex h-screen overflow-hidden bg-dashboard-bg">

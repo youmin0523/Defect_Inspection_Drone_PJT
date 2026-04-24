@@ -42,21 +42,40 @@ export default function AdminMembers() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const requests = [
-        axios.get(`${API_BASE}/api/v1/organizations/members`, { headers }),
-        axios.get(`${API_BASE}/api/v1/organizations/unaffiliated-users`, { headers }),
-        axios.get(`${API_BASE}/api/v1/organizations/departments`, { headers }),
-      ]
+      // 슈퍼어드민: 전체 사용자 목록 우선, 조직 API는 소속 있을 때만
       if (isSuperadmin) {
-        requests.push(axios.get(`${API_BASE}/api/v1/organizations/admin/all-users`, { headers }))
-      }
-      const results = await Promise.all(requests)
-      setOrgInfo(results[0].data.organization)
-      setMembers(results[0].data.members)
-      setUnaffiliated(results[1].data)
-      setDepartments(results[2].data)
-      if (isSuperadmin && results[3]) {
-        setAllUsers(results[3].data)
+        const allUsersRes = await axios.get(`${API_BASE}/api/v1/organizations/admin/all-users`, { headers })
+        setAllUsers(allUsersRes.data)
+
+        // 조직 소속이면 멤버/부서도 로드, 아니면 빈 배열
+        try {
+          const [membersRes, unaffRes, deptRes] = await Promise.all([
+            axios.get(`${API_BASE}/api/v1/organizations/members`, { headers }),
+            axios.get(`${API_BASE}/api/v1/organizations/unaffiliated-users`, { headers }),
+            axios.get(`${API_BASE}/api/v1/organizations/departments`, { headers }),
+          ])
+          setOrgInfo(membersRes.data.organization)
+          setMembers(membersRes.data.members)
+          setUnaffiliated(unaffRes.data)
+          setDepartments(deptRes.data)
+        } catch {
+          // 조직 미소속 슈퍼어드민 — 조직 관련 데이터 비움
+          setOrgInfo(null)
+          setMembers([])
+          setUnaffiliated([])
+          setDepartments([])
+        }
+      } else {
+        // 일반 admin/owner
+        const [membersRes, unaffRes, deptRes] = await Promise.all([
+          axios.get(`${API_BASE}/api/v1/organizations/members`, { headers }),
+          axios.get(`${API_BASE}/api/v1/organizations/unaffiliated-users`, { headers }),
+          axios.get(`${API_BASE}/api/v1/organizations/departments`, { headers }),
+        ])
+        setOrgInfo(membersRes.data.organization)
+        setMembers(membersRes.data.members)
+        setUnaffiliated(unaffRes.data)
+        setDepartments(deptRes.data)
       }
     } catch (err) {
       setError(err.response?.data?.detail || '데이터를 불러오지 못했습니다.')
@@ -185,8 +204,18 @@ export default function AdminMembers() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredAll.map((u) => (
-                  <tr key={u.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-slate-900">{u.name}</td>
+                  <tr key={u.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => {
+                    if (u.organization_name) {
+                      // 소속 조직 있는 사용자 → 멤버 수정 모달
+                      setDetailModal({ user_id: u.id, name: u.name, email: u.email, phone: u.phone, initials: u.name?.slice(0,2)?.toUpperCase() || '??', role: u.role || 'member', department: u.department || '', position: u.position || '', status: u.status || 'active', started_at: null, ended_at: null })
+                      setEditForm({ role: u.role || 'member', department: u.department || '', position: u.position || '', status: u.status || 'active', started_at: '', ended_at: '' })
+                    } else {
+                      // 미소속 사용자 → 조직 배정 모달
+                      setAssignModal({ id: u.id, name: u.name, email: u.email })
+                      setAssignForm({ role: 'member', department: '', position: '' })
+                    }
+                  }}>
+                    <td className="px-4 py-3 font-medium text-slate-900 hover:text-blue-600">{u.name}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{u.email}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{u.phone}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{u.organization_name || <span className="text-gray-300">미소속</span>}</td>

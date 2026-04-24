@@ -43,6 +43,9 @@ backend/training/eval/evaluation_results.json
 # 학습 로그 (재생성 가능)
 backend/training/*_log.txt
 
+# 하자 점검 참고 영상 (대용량)
+datasets/defect_videos/
+
 # YOLO 학습 결과 (프로젝트 루트)
 runs/
 
