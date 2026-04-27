@@ -1688,3 +1688,23 @@ localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT �
 | `frontend/src/pages/SampleReport.jsx` | 신규 — 25평 아파트 3D 점검 시뮬레이션 데모 (R3F, 가구 12종, 드론 격자스캔, 근접탐지, 컨트롤UI) |
 | `frontend/src/components/landing/HeroSection.jsx` | `useNavigate` + 「3D 리포트 샘플 보기」→ `/sample-report` 연결 |
 | `frontend/src/App.jsx` | `SampleReport` import + `/sample-report` Route 추가 |
+
+---
+
+#### ⏱ 2026-04-27 | 실시간 채팅 WebSocket 재연결 및 안정성 향상
+
+- **피드백 (요청)**: 기존에는 초기 마운트 시 한 번만 WebSocket이 연결되어 네트워크 끊김 시 재연결이 자동으로 이루어지지 않아 실시간 채팅 알림을 놓칠 수 있음.
+- **반영**:
+  - `components/chat/ChatRealtimeListener.jsx`:
+    - WebSocket 자동 재연결(Exponential Backoff 폴링) 로직 구현 (`connect` 함수).
+    - `useRef`를 도입하여 다중 연결 등 컴포넌트 생명주기와 타이머를 동기화(`mountedRef`).
+  - `hooks/useWebSocket.js`:
+    - 내부 Ping / Pong 타이머 재구축.
+  - 백엔드 Ping 타임아웃 주기가 3초로 감소한 부분에 기민하게 대응함.
+
+### 🔗 변경 파일 목록 (2개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/components/chat/ChatRealtimeListener.jsx` | WebSocket 자동 재연결 백오프 타이머 도입 |
+| `frontend/src/hooks/useWebSocket.js` | Heartbeat 기반 Connection 보강 |
