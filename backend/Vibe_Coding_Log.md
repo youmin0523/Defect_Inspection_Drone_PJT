@@ -1527,3 +1527,36 @@ API 시그니처 변경에 따른 Store 수정:
 | 파일 | 변경 유형 |
 |------|----------|
 | `backend/app/api/notifications.py` | `DELETE /notifications` 일괄 삭제 엔드포인트 추가 + 헤더 주석 갱신 |
+
+---
+
+## 📅 2026-04-27 — WS 알림 채널 화이트리스트 + DB 마이그레이션 정리 메모
+
+> **작업자**: @Hijin554 (Claude Opus 4.7 바이브코딩)
+> **브랜치**: `Hijin`
+> **목표**: `notification_service.create()` 가 broadcast 하는 `notifications:{user_id}` 채널이 WS 게이트웨이에서 거부되어 실시간 푸시가 막혀 있던 문제 해결.
+
+### ⏱ 알림 채널 화이트리스트 추가
+
+- **문제**: `app/services/notification_service.py` 가 `notifications:{user_id}` 로 WS broadcast 하는데, `app/api/websocket.py` 의 `_is_valid_channel()` 이 `chat:`, `user:` 만 허용하고 `notifications:` 는 거부 → 알림 DB 에는 저장되지만 실시간 푸시는 안 가서 사용자가 새로고침해야만 벨 아이콘에 뜨는 상태.
+- **해결**: `_DYNAMIC_CHANNEL_PREFIXES` 튜플로 동적 채널 prefix 일원화 (`chat:`, `user:`, `notifications:`). 팀원이 만든 기존 startswith() 패턴과 일관성 유지.
+- **검증**: `tests/test_ws_channel_whitelist.py` 신규 — static 4개 + dynamic prefix 3개 + notification_service 형식 + 알 수 없는 채널 거부, 총 9 케이스 모두 통과.
+
+### ⏱ DB 마이그레이션 정리 TODO 메모
+
+- **문제 인식**: `init_db.py` 가 `Base.metadata.create_all` 로 테이블을 자동 생성하고 있고, alembic versions 폴더에 9개 마이그레이션 파일이 별도로 존재. 이중 운영 상태 → 컬럼 추가 시 기존 테이블에 반영 안 됨, 환경별 스키마 drift, `alembic_version` 추적 불가.
+- **반영**: `backend/README.md` 의 "DB 마이그레이션 절차" 섹션 맨 앞에 ⚠️ 경고 박스 추가. 출시 전 정리 작업 3단계 (init_db에서 create_all 제거 → `alembic stamp head` → 이후 alembic 단일화) 명시.
+- **유지 사유**: 로컬 개발은 init_db 방식으로 잘 돌아가는 중. 운영 RDS 손대기 전 백업 후 일괄 정리할 항목으로 미룸.
+
+### 🔗 변경 파일 목록 (3개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `backend/app/api/websocket.py` | `_DYNAMIC_CHANNEL_PREFIXES` 도입 + `notifications:` prefix 추가 + docstring 갱신 |
+| `backend/README.md` | DB 마이그레이션 정리 ⚠️ TODO 메모 추가 |
+| `backend/tests/test_ws_channel_whitelist.py` | 채널 화이트리스트 검증 테스트 9개 신규 |
+
+### 📐 설계 결정 사항
+
+- **prefix 화이트리스트 vs 정규식**: 팀원이 만든 기존 코드가 `channel.startswith("chat:")` 방식이라 같은 스타일 채택. UUID 형식 검증은 안 함 (다른 채널들도 형식 검증 없음, 일관성 우선). TODO 주석으로 JWT 인증 보강 필요성 명시.
+- **DB 마이그레이션 즉시 처리 vs 메모만**: 운영 RDS 손대면 데이터 손실 위험 + 팀원 로컬 다 깨질 수 있어 즉시 작업 위험 큼. README 메모로 출시 전 체크리스트화 → 안전한 시점에 일괄 처리.
