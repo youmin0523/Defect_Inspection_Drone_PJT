@@ -125,7 +125,7 @@ export default function MessageInput() {
         <p className="text-xs text-red-500 mb-1">{fileSizeError}</p>
       )}
 
-      <div className="flex items-end gap-2">
+      <div className="flex items-center gap-2">
         {/* 파일 첨부 버튼 */}
         <button
           type="button"

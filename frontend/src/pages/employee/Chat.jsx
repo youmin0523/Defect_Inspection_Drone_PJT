@@ -38,10 +38,10 @@ export default function Chat() {
         useChatStore.getState().receiveMessage(data)
       }
       if (type === 'chat.read' && data) {
-        // 상대방이 읽음 → 현재 대화방 메시지의 읽음 상태 갱신
+        // 상대방이 읽음 → 읽음 카운트만 갱신 (selectConversation 금지 — markRead 재호출로 무한루프)
         const activeId = useChatStore.getState().activeConversationId
         if (data.conversation_id === activeId) {
-          useChatStore.getState().selectConversation(activeId)
+          useChatStore.getState().refreshMessages(activeId)
         }
       }
       if (type === 'ping') {
@@ -110,7 +110,7 @@ export default function Chat() {
               to="/employee"
               className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-blue-600 transition"
             >
-              <ArrowLeft size={16} /> 직원 허브
+              <ArrowLeft size={16} />
             </Link>
             <div className="h-5 w-px bg-gray-200" />
             <div className="flex items-center gap-2">

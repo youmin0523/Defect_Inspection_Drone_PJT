@@ -1360,3 +1360,116 @@ localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT �
 - **파일 전송 전략**: 10개 파일 동시 선택 → 각각 별도 API 호출로 순차 전송 (첫 파일에만 텍스트 포함). 서버 메모리 부담 분산
 - **읽음 표시 방식**: 개별 메시지 읽음 테이블 없이 `ConversationMember.last_read_at` timestamp 비교로 계산 → DB 스키마 추가 없이 효율적 구현
 - **이중 WebSocket 채널**: 활성 대화방 채널 + 개인 채널. 페이지 밖에서도 알림 수신 가능. 30초 폴링은 WS 끊김 대비 백업
+
+---
+
+## 세션 9 — 채팅 사이드바 UI 개선 (2026-04-27)
+
+- 작성자 (Who): @youminsu0523
+- 작성 일자 (When): 2026-04-27
+- 작업 브랜치: `MS`
+
+### 1️⃣ 프롬프트 / 목표
+> 채팅 사이드바(ConversationList)의 검색창·필터 탭 좌측 패딩 보완, 대화 목록의 가로 스크롤 및 하단 검은색 여백 제거
+
+### 2️⃣ 수행된 작업 요약
+
+#### 검색창·필터 탭 좌측 패딩 추가 (`ConversationList.jsx`)
+- 검색 컨테이너: `p-3` → `px-4 py-3` (좌측 패딩 12px → 16px)
+- 필터 탭 컨테이너: `px-3 pt-2 pb-2` → `px-4 pt-2 pb-2` (좌측 패딩 12px → 16px)
+- 대화 목록 컨테이너: `overflow-y-auto py-1` → `overflow-y-auto overflow-x-hidden py-1 px-1` (항목 간격 확보 + 가로 스크롤 차단)
+
+#### 가로 스크롤 및 하단 검은 여백 제거 (`ConversationItem.jsx`)
+- 원인: 버튼에 `w-full` + `mx-1`이 동시 적용되어 부모 너비를 8px 초과하는 오버플로우 발생 → 가로 스크롤바 + 하단 검은 공간 표시
+- 수정: 버튼에서 `mx-1` 제거. 대신 `ConversationList`의 목록 컨테이너에 `px-1` 추가하여 동일한 좌우 여백 유지
+
+### 🔗 변경 파일 목록 (2개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `components/chat/ConversationList.jsx` | 검색·필터 패딩 증가 + 목록 컨테이너 `px-1 overflow-x-hidden` 추가 |
+| `components/chat/ConversationItem.jsx` | 버튼에서 `mx-1` 제거 (오버플로우 원인 해소) |
+
+---
+
+#### ⏱ 2026-04-27 | 채팅 사이드바 검색 기능 버그 수정 (`ConversationList.jsx`)
+
+- **피드백**: 검색창에 '확인' 등 단어를 입력해도 결과가 나오지 않음. 대화 목록에 해당 단어가 포함된 항목이 다수 보임에도 검색이 전혀 동작하지 않는 증상.
+- **원인 1 — TypeError 크래시**: `c.name?.toLowerCase().includes(q)` 구문에서 DM 대화방의 `c.name`이 `null`인 경우, `c.name?.toLowerCase()`가 `undefined`를 반환하고 이어서 `.includes(q)`를 호출하면 `TypeError` 발생 → `.filter()` 전체가 throw되어 검색 결과가 빈 배열로 떨어짐.
+- **원인 2 — 검색 범위 누락**: 마지막 메시지 텍스트(`c.last_message?.text`)가 검색 대상에 포함되지 않아, 목록에 미리보기로 보이는 메시지 내용으로는 검색 불가.
+- **반영**:
+  - `c.name?.toLowerCase().includes(q)` → `c.name?.toLowerCase()?.includes(q)` (옵셔널 체이닝 추가로 TypeError 방지)
+  - `other?.name?.toLowerCase().includes(q)` → `other?.name?.toLowerCase()?.includes(q) ?? false` (동일 패턴 통일)
+  - `c.last_message?.text?.toLowerCase()?.includes(q)` 조건 추가 (마지막 메시지 내용 검색 지원)
+
+#### ⏱ 2026-04-27 | 채팅 검색 범위 확대 — 탭 필터 무시 + 파일명·그룹 참여자 검색 추가 (`ConversationList.jsx`)
+
+- **피드백**: '완료' 같은 단어를 검색하면 1개만 나옴. 1:1·그룹·채널 전체를 통틀어 검색되어야 함.
+- **원인**: 검색어가 있어도 탭 필터(`filterType`)가 먼저 적용되어, 예를 들어 '1:1' 탭이 활성 상태면 DM 대화방만 뒤지고 그룹·채널은 검색 대상에서 제외됨. 결과적으로 이름에 검색어가 있는 채널 1개만 통과되던 상황.
+- **반영**:
+  - `isSearching` 플래그 도입. 검색어가 있으면 탭 필터를 건너뛰고 `conversations` 전체를 대상으로 검색.
+  - 검색어가 없을 때는 기존 탭 필터 동작 유지.
+  - `c.last_message?.file_name` 검색 추가 (파일 메시지 미리보기에 보이는 파일명도 검색 가능).
+  - 그룹·채널의 참여자 이름 검색 추가 (`c.participants?.some(...)`). DM 외 대화방도 멤버 이름으로 찾을 수 있음.
+
+#### ⏱ 2026-04-27 | 채팅 레이아웃 수평 정렬 수정 — 헤더 border 기준선 불일치 + 입력 아이콘 수직 정렬
+
+- **피드백 1 — border 기준선 불일치**: 대화 목록 검색창 컨테이너 하단 border와 ChatHeader 하단 border가 서로 평행하지 않아 시각적으로 어긋나 보임.
+- **원인**: 검색창 컨테이너(`px-4 py-3`)에서 `<input>`(border-box 포함 38px) + 수직 패딩(12+12=24px) = 62px 렌더 높이. ChatHeader(`px-5 py-3`)에서 텍스트 div(약 36px) + 수직 패딩(24px) = 60px. 2px 차이로 border 위치가 엇갈림.
+- **반영**:
+  - `ConversationList.jsx` 검색 컨테이너: `px-4 py-3 border-b border-gray-100` → `h-[60px] flex items-center px-4 border-b border-gray-100` (고정 높이로 콘텐츠 차이 흡수)
+  - `ChatHeader.jsx` 루트 div: `flex items-center justify-between px-5 py-3 bg-white border-b border-gray-200` → `h-[60px] flex items-center justify-between px-5 bg-white border-b border-gray-200` (동일한 60px 고정 높이 적용)
+
+- **피드백 2 — 메시지 입력 아이콘 수직 정렬**: 첨부파일·이모지·전송 아이콘이 서로 평행하지 않음. 전송 버튼이 아래로 쏠려 보이는 현상.
+- **원인**: 입력 행 컨테이너에 `items-end` 적용 → 모든 자식 요소가 flex 컨테이너 하단 기준 정렬. textarea(`min-height: 40px`)와 버튼들(34–36px)의 높이가 달라 각 아이콘 중심점이 서로 다른 높이에 위치.
+- **반영**: `MessageInput.jsx` 입력 행 div: `flex items-end gap-2` → `flex items-center gap-2` (수직 중앙 정렬로 통일)
+
+### 🔗 변경 파일 목록 (3개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `components/chat/ConversationList.jsx` | 검색 컨테이너 `py-3` 제거 → `h-[60px] flex items-center` 적용 |
+| `components/chat/ChatHeader.jsx` | 루트 div `py-3` 제거 → `h-[60px]` 고정 높이 적용 |
+| `components/chat/MessageInput.jsx` | 입력 행 `items-end` → `items-center` 변경 |
+
+---
+
+#### ⏱ 2026-04-27 | 검색창 X 버튼 + 필터 탭 중앙 정렬 + 이미지 수신 버그 수정
+
+- **피드백 1 — 검색창 X 버튼**: 검색어가 있을 때 오른쪽 끝에 X 버튼을 눌러 한 번에 지우고 전체 목록으로 돌아갈 수 있도록 요청.
+- **반영**: `ConversationList.jsx` 검색 입력 내부에 `{searchQuery && <button onClick={() => setSearch('')}><X size={14}/></button>}` 추가. 검색어 없으면 숨김, 있을 때만 노출. `pr-3` → `pr-8`로 우측 패딩 확보. `X` 아이콘을 `lucide-react`에서 추가 임포트.
+
+- **피드백 2 — 필터 탭 중앙 정렬**: 전체/1:1/그룹/채널 탭이 좌측 정렬되어 있어 중앙으로 변경 요청.
+- **반영**: `ConversationList.jsx` 필터 탭 컨테이너에 `justify-center` 추가.
+
+- **피드백 3 — 이미지 수신 시 파일명만 표시되는 버그**:
+  - **원인 A — 백엔드 WS 채널 차단**: `backend/app/api/websocket.py`의 `VALID_CHANNELS`에 `chat:*`, `user:*`가 없어 채팅 WS 연결이 모두 "defects" 채널로 리다이렉트됨. 채팅 실시간 메시지가 수신자에게 전달되지 않는 근본 버그.
+  - **원인 B — `file_content_type` null 처리 누락**: `file.content_type`이 브라우저에 따라 `null` 또는 빈 문자열로 올 경우 DB에도 `null`로 저장됨. `isImage = message.file_content_type?.startsWith('image/')` → `false`로 평가돼 이미지 대신 파일 다운로드 링크가 렌더링됨.
+  - **반영**:
+    - `backend/app/api/websocket.py`: `VALID_CHANNELS` 고정 집합 검사를 `_is_valid_channel()` 함수로 교체. `chat:` 또는 `user:` 접두어 채널을 명시적으로 허용. 드론 모니터링 기존 채널은 그대로 유지.
+    - `frontend/components/chat/MessageBubble.jsx`: `FileAttachment` 내 `isImage` 판정에 파일 확장자 fallback 추가. `file_content_type`이 null이어도 `IMAGE_EXT` 정규식(`.jpg/.png/.gif/.webp` 등)으로 파일명에서 이미지 여부를 판별.
+
+### 🔗 변경 파일 목록 (4개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/components/chat/ConversationList.jsx` | 검색창 X 버튼 추가 + 필터 탭 `justify-center` |
+| `frontend/components/chat/MessageBubble.jsx` | `isImage` 확장자 fallback 추가 |
+| `backend/app/api/websocket.py` | `chat:*` / `user:*` 채널 WS 허용 (`_is_valid_channel` 함수) |
+
+---
+
+#### ⏱ 2026-04-27 | 채팅 WS 수정 후 메시지 무한 로딩 루프 버그 수정
+
+- **증상**: WS 채널 수정 이후 어떤 대화방을 선택해도 로딩 스피너가 멈추지 않고 계속 돌아감.
+- **원인**: `mark_read` 백엔드가 `chat:{convId}` 채널에도 `chat.read` 이벤트를 브로드캐스트 → 읽음 처리를 요청한 본인도 이벤트를 수신 → `Chat.jsx` 핸들러가 `selectConversation` 호출 → `selectConversation` 내부에서 `markConversationRead` 재호출 → 다시 `chat.read` 이벤트 → 무한반복. WS가 broken이던 동안에는 이 루프가 이벤트를 수신하지 못해 잠복해 있었음.
+- **반영**:
+  - `store/chatStore.js`: `refreshMessages(convId)` 액션 추가. `getMessages`만 호출하고 `markConversationRead`는 호출하지 않음. 다른 대화방으로 이동한 경우 store 오염 방지를 위해 `activeConversationId === convId` 확인 후에만 반영.
+  - `pages/employee/Chat.jsx`: `chat.read` 핸들러에서 `selectConversation` → `refreshMessages` 교체. 루프의 진입점 제거.
+
+### 🔗 변경 파일 목록 (2개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/store/chatStore.js` | `refreshMessages` 액션 추가 |
+| `frontend/src/pages/employee/Chat.jsx` | `chat.read` 핸들러 `selectConversation` → `refreshMessages` |

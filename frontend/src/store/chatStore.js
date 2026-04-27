@@ -160,6 +160,16 @@ const useChatStore = create((set, get) => ({
     }
   },
 
+  /** 읽음 카운트 갱신용 메시지 재로드 — markConversationRead 없이 messages 만 갱신 */
+  refreshMessages: async (convId) => {
+    try {
+      const msgs = await getMessages(convId)
+      if (get().activeConversationId === convId) {
+        set({ messages: msgs })
+      }
+    } catch {}
+  },
+
   // 필터 / 검색
   setFilter: (type) => set({ filterType: type }),
   setSearch: (query) => set({ searchQuery: query }),

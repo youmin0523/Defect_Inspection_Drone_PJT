@@ -34,7 +34,7 @@ export default function ChatHeader() {
   const statusConfig = otherMember ? USER_STATUS_CONFIG[otherMember.online_status] : null
 
   return (
-    <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-gray-200">
+    <div className="h-[60px] flex items-center justify-between px-5 bg-white border-b border-gray-200">
       <div className="flex items-center gap-3">
         {/* 아이콘 */}
         {conv.type === 'channel' ? (
