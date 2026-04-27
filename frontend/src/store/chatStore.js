@@ -18,6 +18,7 @@ import {
   findDMConversation,
   leaveConversation as leaveConvApi,
 } from '../api/chatApi.js'
+import useNotificationStore from './notificationStore.js'
 
 /** authStore에서 현재 사용자 가져오기 (store 순환 import 방지) */
 function getCurrentUser() {
@@ -54,9 +55,11 @@ const useChatStore = create((set, get) => ({
     }
   },
 
-  /** 대화방 선택 → 메시지 로드 + 읽음 처리 */
+  /** 대화방 선택 → 메시지 로드 + 읽음 처리 + 해당 대화의 채팅 알림 일괄 읽음 */
   selectConversation: async (convId) => {
     set({ activeConversationId: convId, messagesLoading: true })
+    // 알림 벨 안의 해당 대화방 채팅 알림도 같이 읽음 처리 (UX 일관성)
+    useNotificationStore.getState().markChatNotificationsReadByConversation(convId)
     try {
       const [msgs] = await Promise.all([
         getMessages(convId),
@@ -158,6 +161,16 @@ const useChatStore = create((set, get) => ({
     } catch (err) {
       set({ error: err.message })
     }
+  },
+
+  /** 읽음 카운트 갱신용 메시지 재로드 — markConversationRead 없이 messages 만 갱신 */
+  refreshMessages: async (convId) => {
+    try {
+      const msgs = await getMessages(convId)
+      if (get().activeConversationId === convId) {
+        set({ messages: msgs })
+      }
+    } catch {}
   },
 
   // 필터 / 검색

@@ -1511,3 +1511,19 @@ API 시그니처 변경에 따른 Store 수정:
 - **200MB 제한**: 업무용 CAD 도면, 점검 보고서, 드론 영상 등 대용량 파일 대응
 - **읽음 계산 방식**: 기존 `ConversationMember.last_read_at` 인프라 활용. 메시지별 개별 읽음 테이블 없이 timestamp 비교로 효율적 계산
 - **이중 WS 채널 브로드캐스트**: `chat:{conversation_id}` (활성 대화방) + `user:{user_id}` (다른 대화방/페이지 밖 알림)
+
+---
+
+#### ⏱ 2026-04-27 | 알림 일괄 삭제 엔드포인트 추가
+
+- **피드백**: 프런트의 「전체 삭제」 액션이 단건 `DELETE /{id}`를 N회 호출하는 방식이라 라운드트립이 누적되고 부분 실패 처리가 복잡함. `read-all`이 이미 단일 PATCH 엔드포인트인 것과 대칭으로 일괄 삭제 엔드포인트를 추가.
+- **반영**:
+  - `app/api/notifications.py`: `DELETE /api/v1/notifications` 추가. 현재 사용자 소유 알림을 단일 `DELETE … WHERE user_id = current_user.id` 쿼리로 일괄 삭제. 응답: `{"deleted": <rowcount>}`.
+  - 라우트 등록 순서 영향: 기존 `DELETE /{notification_id}` 와 충돌 없음(빈 path 와 path 파라미터는 FastAPI 에서 별도 매칭).
+  - 모듈 헤더 라우트 일람 주석에 「전체 삭제」 항목 추가.
+
+### 🔗 변경 파일 목록 (1개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `backend/app/api/notifications.py` | `DELETE /notifications` 일괄 삭제 엔드포인트 추가 + 헤더 주석 갱신 |

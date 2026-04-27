@@ -64,9 +64,11 @@ function ImageModal({ src, alt, onClose }) {
 }
 
 /** 첨부파일 렌더링 */
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|avif|svg)$/i
+
 function FileAttachment({ message, isMine, onImageClick }) {
   const fullUrl = `${API_BASE}${message.file_url}`
-  const isImage = message.file_content_type?.startsWith('image/')
+  const isImage = message.file_content_type?.startsWith('image/') || IMAGE_EXT.test(message.file_name || '')
 
   if (isImage) {
     return (

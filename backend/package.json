@@ -8,5 +8,8 @@
     "postinstall": "npm run setup:python",
     "dev": "venv\\Scripts\\python.exe -m uvicorn app.main:app --reload",
     "start": "venv\\Scripts\\python.exe -m uvicorn app.main:app --reload"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
   }
 }

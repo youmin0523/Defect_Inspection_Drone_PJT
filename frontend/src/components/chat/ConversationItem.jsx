@@ -46,7 +46,7 @@ export default function ConversationItem({ conv }) {
     <button
       type="button"
       onClick={() => selectConversation(conv.id)}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition rounded-lg mx-1 ${
+      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition rounded-lg ${
         isActive
           ? 'bg-blue-50 border-l-2 border-blue-600 pl-2.5'
           : 'hover:bg-gray-50 border-l-2 border-transparent'

@@ -24,13 +24,10 @@ export default function Chat() {
   const isParticipantPanelOpen = useChatStore((s) => s.isParticipantPanelOpen)
   const isNewChatModalOpen = useChatStore((s) => s.isNewChatModalOpen)
   const openNewChatModal = useChatStore((s) => s.openNewChatModal)
+  const unreadTotal = useChatStore((s) => s.unreadTotal)
   const chatWsRef = useRef(null)
-  const userWsRef = useRef(null)
 
-  // 현재 사용자 ID
-  const currentUserId = JSON.parse(localStorage.getItem('user') || '{}')?.id
-
-  // 공통 WS 메시지 핸들러
+  // 활성 대화방 채널 전용 핸들러 — 개인(user:) 채널은 ChatRealtimeListener(전역)에서 처리
   const handleWsMessage = (event) => {
     try {
       const { type, data } = JSON.parse(event.data)
@@ -38,10 +35,10 @@ export default function Chat() {
         useChatStore.getState().receiveMessage(data)
       }
       if (type === 'chat.read' && data) {
-        // 상대방이 읽음 → 현재 대화방 메시지의 읽음 상태 갱신
+        // 상대방이 읽음 → 읽음 카운트만 갱신 (selectConversation 금지 — markRead 재호출로 무한루프)
         const activeId = useChatStore.getState().activeConversationId
         if (data.conversation_id === activeId) {
-          useChatStore.getState().selectConversation(activeId)
+          useChatStore.getState().refreshMessages(activeId)
         }
       }
       if (type === 'ping') {
@@ -54,22 +51,6 @@ export default function Chat() {
   useEffect(() => {
     fetchConversations()
   }, [fetchConversations])
-
-  // 개인 채널 WebSocket — 모든 대화방의 새 메시지 알림 수신
-  useEffect(() => {
-    if (!currentUserId) return
-
-    const ws = new WebSocket(`${WS_BASE}/ws?channel=user:${currentUserId}`)
-    userWsRef.current = ws
-    ws.onmessage = handleWsMessage
-    ws.onerror = () => {}
-    ws.onclose = () => {}
-
-    return () => {
-      ws.close()
-      userWsRef.current = null
-    }
-  }, [currentUserId])
 
   // 활성 대화방 WebSocket — 현재 보고 있는 대화의 실시간 메시지
   useEffect(() => {
@@ -110,7 +91,7 @@ export default function Chat() {
               to="/employee"
               className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-blue-600 transition"
             >
-              <ArrowLeft size={16} /> 직원 허브
+              <ArrowLeft size={16} />
             </Link>
             <div className="h-5 w-px bg-gray-200" />
             <div className="flex items-center gap-2">
@@ -118,6 +99,14 @@ export default function Chat() {
               <span className="font-extrabold tracking-tight text-slate-800 text-base">
                 메신저
               </span>
+              {unreadTotal > 0 && (
+                <span
+                  className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-[11px] font-bold rounded-full shadow-sm"
+                  title={`읽지 않은 메시지 ${unreadTotal}건`}
+                >
+                  {unreadTotal > 99 ? '99+' : unreadTotal}
+                </span>
+              )}
             </div>
           </div>
           <button
