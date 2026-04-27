@@ -90,14 +90,14 @@ export default function LandingHeader() {
 
   return (
     <header
-      className={`fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 md:px-8 py-2 transition-colors duration-300 ${headerBgClass}`}
+      className={`fixed top-0 left-0 right-0 z-50 grid grid-cols-[auto_1fr_auto] items-center px-6 md:px-8 py-2 transition-colors duration-300 ${headerBgClass}`}
     >
       {/* 로고 */}
       <Link
         to="/"
         onClick={handleLogoClick}
         aria-label="DRONE INSPECT 홈"
-        className="flex items-center focus:outline-none focus:ring-2 focus:ring-blue-400 rounded"
+        className="flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
       >
         {/* //* [Modified Code] 상태에 따라 흰/네이비 로고 스왑 */}
         <img
@@ -107,46 +107,40 @@ export default function LandingHeader() {
         />
       </Link>
 
-      {/* 주 메뉴 (데스크탑) */}
+      {/* 주 메뉴 (데스크탑) — 로그인 시 "직원 전용"이 네비 링크에 합류하여 중앙 정렬 */}
       <nav
         aria-label="주 메뉴"
-        className="hidden md:flex space-x-10 font-semibold text-base lg:text-lg"
+        className="hidden md:flex justify-center space-x-10 font-semibold text-base lg:text-lg"
       >
         {NAV_LINKS.map((link) => (
           <a
             key={link.href}
             href={link.href}
             onClick={(e) => handleAnchorClick(e, link.href, 96, 1400)}
-            className={`${navTextClass} transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 rounded`}
+            className={`${navTextClass} transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded`}
           >
             {link.label}
           </a>
         ))}
-      </nav>
 
-      {/* 우측 버튼 그룹 */}
-      <div className="flex items-center gap-3">
-        {/* //! [Original Code] 직원 전용 버튼이 세션 셋업으로 직행하던 기존 동작
-            <Link to="/session/setup" title="DB 미연결 단계 — 로그인 없이 임시 접근. 세션 셋업 → 모델링 → 대시보드 순으로 진입"> */}
-
-        {/* //* [Modified Code] 직원 전용 진입 랜딩(/employee)을 거치도록 변경
-            - 기존 세션 셋업 플로우는 /employee 화면 내 "점검 세션 시작 →" 버튼에서 이어짐
-            - NOTE: 로그인/권한 가드는 DB 연결 단계에서 추가 예정 (AWS 프리티어 제약) */}
-        {/* 직원 전용 — 로그인 상태에서만 표시 */}
+        {/* 직원 전용 — 로그인 상태에서만 네비 링크로 표시 */}
         {isAuthenticated && (
           <Link
             to="/employee"
-            className={`group hidden md:inline-flex items-center gap-2 px-4 py-2 rounded-md font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-yellow-400 ${
+            className={`inline-flex items-center gap-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 rounded ${
               isAtTop
-                ? 'border border-yellow-300/60 bg-yellow-300/10 text-yellow-200 hover:bg-yellow-300 hover:text-slate-900'
-                : 'border border-yellow-500/70 bg-yellow-50 text-yellow-800 hover:bg-yellow-400 hover:text-slate-900'
+                ? 'text-yellow-300 hover:text-yellow-100'
+                : 'text-yellow-600 hover:text-yellow-500'
             }`}
           >
             <span className={`inline-block h-1.5 w-1.5 rounded-full ${isAtTop ? 'bg-yellow-300' : 'bg-yellow-500'}`} />
             직원 전용
           </Link>
         )}
+      </nav>
 
+      {/* 우측 버튼 그룹 */}
+      <div className="flex items-center gap-3 justify-end">
         {/* 로그인 / 로그아웃 (데스크탑) */}
         {isAuthenticated ? (
           <button

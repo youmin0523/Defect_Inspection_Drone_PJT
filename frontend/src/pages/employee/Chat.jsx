@@ -52,7 +52,7 @@ export default function Chat() {
     fetchConversations()
   }, [fetchConversations])
 
-  // 활성 대화방 WebSocket — 현재 보고 있는 대화의 실시간 메시지
+  // 활성 대화방 WebSocket — 현재 보고 있는 대화의 실시간 메시지 (자동 재연결 포함)
   useEffect(() => {
     if (chatWsRef.current) {
       chatWsRef.current.close()
@@ -60,14 +60,32 @@ export default function Chat() {
     }
     if (!activeConversationId) return
 
-    const ws = new WebSocket(`${WS_BASE}/ws?channel=chat:${activeConversationId}`)
-    chatWsRef.current = ws
-    ws.onmessage = handleWsMessage
-    ws.onerror = () => {}
-    ws.onclose = () => {}
+    let mounted = true
+    let retryDelay = 300
+    let retryTimer = null
+
+    function connect() {
+      if (!mounted) return
+      const ws = new WebSocket(`${WS_BASE}/ws?channel=chat:${activeConversationId}`)
+      chatWsRef.current = ws
+      ws.onopen = () => { retryDelay = 300 }
+      ws.onmessage = handleWsMessage
+      ws.onerror = () => {}
+      ws.onclose = () => {
+        if (!mounted) return
+        retryTimer = setTimeout(() => {
+          retryDelay = Math.min(retryDelay * 2, 2000)
+          connect()
+        }, retryDelay)
+      }
+    }
+
+    connect()
 
     return () => {
-      ws.close()
+      mounted = false
+      clearTimeout(retryTimer)
+      chatWsRef.current?.close()
       chatWsRef.current = null
     }
   }, [activeConversationId])
@@ -77,7 +95,7 @@ export default function Chat() {
     const interval = setInterval(() => {
       refreshUnreadCounts()
       fetchConversations()
-    }, 30000)
+    }, 5000)
     return () => clearInterval(interval)
   }, [refreshUnreadCounts, fetchConversations])
 

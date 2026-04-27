@@ -1602,3 +1602,89 @@ localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT �
 | `frontend/src/pages/EmployeeLanding.jsx` | `NotificationsSection` footer(전체 읽음/전체 삭제) 제거 + `TodayScheduleSection` 시간·KST 컨테이너 `font-pretendard` + `tabular-nums` |
 | `frontend/index.html` | Pretendard Variable dynamic-subset CDN `<link>` 추가 |
 | `frontend/tailwind.config.js` | `fontFamily.pretendard` 폴백 체인 추가 (Pretendard → 시스템 → Noto Sans KR) |
+
+---
+
+#### ⏱ 2026-04-27 | HeroSection「서비스 도입 문의」버튼 → ContactModal 연결 + 로그인 시 폼 자동 기입
+
+- **피드백 (요청)**:
+  1. 랜딩 HeroSection의 「서비스 도입 문의」 버튼이 아무 동작 없음 — LandingHeader의 「도입 문의하기」 버튼과 동일하게 ContactModal을 열도록 연결 요청.
+  2. 회원가입 완료 후 로그인 상태라면 ContactModal의 성함/담당자명, 연락처, 사업자등록번호가 자동 기입되도록 요청.
+- **반영**:
+  - `components/landing/HeroSection.jsx`:
+    - `ContactModal` import 추가.
+    - `isContactOpen` state 추가 + 「서비스 도입 문의」 버튼에 `onClick={() => setIsContactOpen(true)}` 바인딩.
+    - `<ContactModal isOpen={isContactOpen} onClose={...} />` 렌더링 추가.
+  - `components/landing/ContactModal.jsx`:
+    - `useAuthStore` import 추가 → `user`, `isAuthenticated` 구독.
+    - 모달 열릴 때(`isOpen` effect) 로그인 상태 분기:
+      - **로그인 O**: `user.name` → 성함/담당자명, `user.phone` → 연락처, `user.account_type === 'business'`이면 고객 유형 사업자 선택 + `user.business.biz_number` → 사업자등록번호 자동 기입. 문의 내용만 빈 칸.
+      - **로그인 X**: 기존 `INITIAL_FORM` 그대로 초기화.
+- **설계 결정**:
+  - **모달 인스턴스 분리**: ContactModal 상태를 Landing 상위로 끌어올리지 않고 HeroSection에 독립 인스턴스를 둠. Header/Hero 각각 독립적으로 모달을 관리하므로 prop drilling 없이 단순하고, 동시에 두 모달이 열리는 시나리오는 UX상 발생하지 않음.
+  - **자동 기입은 초기값만 세팅**: 폼 필드는 여전히 편집 가능. 로그인 사용자가 다른 담당자명/연락처로 문의하고 싶을 수 있으므로 readOnly 처리하지 않음.
+
+### 🔗 변경 파일 목록 (2개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/components/landing/HeroSection.jsx` | `ContactModal` import + `isContactOpen` state + 버튼 onClick 바인딩 + 모달 렌더링 |
+| `frontend/src/components/landing/ContactModal.jsx` | `useAuthStore` import + 모달 오픈 시 로그인 사용자 정보(name, phone, account_type, biz_number) 자동 기입 |
+
+---
+
+#### ⏱ 2026-04-27 | LandingHeader 네비 레이아웃 개편 — 직원 전용 중앙 합류 + focus-visible 전환
+
+- **피드백 (요청)**:
+  1. 「직원 전용」 버튼이 우측 버튼 그룹(로그아웃/도입문의 옆)에 분리되어 있는데, 「도입 사례」 바로 우측으로 옮겨서 네비 링크와 통일해달라.
+  2. 비로그인 시 `서비스 소개 · 핵심 기술 · 도입 사례` 만 중앙 정렬, 로그인 시 `서비스 소개 · 핵심 기술 · 도입 사례 · 직원 전용` 4개가 중앙 정렬되도록 요청.
+  3. 네비 링크(도입 사례 등) 클릭 후 focus ring이 남아 있어 거슬림 → 제거 요청.
+  4. 로고 클릭 후에도 focus ring 잔존 → 마찬가지로 제거 요청.
+- **반영**:
+  - `components/landing/LandingHeader.jsx`:
+    - **레이아웃 변경**: `flex justify-between` → `grid grid-cols-[auto_1fr_auto]`. 3-column 그리드로 변경하여 중앙 `<nav>`가 항상 화면 중앙에 위치.
+    - **직원 전용 위치 이동**: 우측 `<div>` 버튼 그룹에서 빼서 중앙 `<nav>` 안 `NAV_LINKS.map()` 뒤에 배치. `isAuthenticated` 조건부 렌더링 유지.
+    - **직원 전용 스타일 변경**: 기존 bordered 버튼(`border border-yellow-300/60 bg-yellow-300/10 …`) → 다른 네비 링크와 동일한 텍스트 링크 스타일 + 노란 점(`h-1.5 w-1.5 rounded-full`) 인디케이터. 스크롤 상태별 `text-yellow-300`/`text-yellow-600` 색상 분기.
+    - **focus → focus-visible 전환**: 로고 `<Link>`, `NAV_LINKS` `<a>`, 직원 전용 `<Link>` 세 곳의 `focus:outline-none focus:ring-2 focus:ring-*` → `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-*`. 마우스 클릭 시 링 없음, 키보드 Tab 이동 시에만 링 표시(접근성 유지).
+    - 우측 버튼 그룹 `<div>`에 `justify-end` 추가 (그리드 우측 정렬).
+- **설계 결정**:
+  - **3-column grid vs flex justify-between**: `justify-between`은 좌/우 요소 크기 변화(직원 전용 추가/제거)에 따라 중앙 네비가 좌우로 밀림. `grid-cols-[auto_1fr_auto]`는 중앙 열이 나머지 공간 전체를 차지하므로 `justify-center`로 네비가 항상 화면 정중앙에 위치. 로그인/로그아웃에 따라 네비 항목 수가 달라져도 중앙 정렬이 흐트러지지 않음.
+  - **focus vs focus-visible**: `focus`는 마우스 클릭에도 반응하여 사용 후 파란 링이 남음. `focus-visible`은 브라우저가 키보드 내비게이션으로 판단할 때만 활성화되어 마우스 UX와 키보드 접근성을 동시에 충족. Tailwind CSS 3.x 이상에서 `focus-visible:` prefix 기본 지원.
+  - **모바일 메뉴 미변경**: 모바일 햄버거 드롭다운 내 「직원 전용」은 기존 위치·스타일 유지. 모바일에서는 모든 메뉴가 드롭다운에 세로로 나열되므로 중앙 정렬 이슈 없음.
+
+### 🔗 변경 파일 목록 (1개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/components/landing/LandingHeader.jsx` | 헤더 레이아웃 `flex→grid`, 직원 전용 우측→중앙 nav 합류, focus→focus-visible 전환(로고·네비링크·직원전용) |
+
+---
+
+#### ⏱ 2026-04-27 | 3D 리포트 샘플 페이지 — 25평 아파트 드론 점검 시뮬레이션 (18라운드)
+
+- **피드백 (요청)**: 랜딩 HeroSection「3D 리포트 샘플 보기」버튼에 데모 페이지 연결, 아파트 내부 3D 모델링 + 드론 점검 시뮬레이션
+- **18라운드 피드백 반영 요약**:
+  1. 기본 샘플 페이지 생성 + 라우트 연결
+  2. 아파트 내부 모델링 (거실/주방/침실/화장실/현관)
+  3. 가구 복합 메시 구성 (12종)
+  4. 드론 경로 — 문 통과 실내 순회
+  5. 하자 발견 시뮬레이션 (진행률 → 근접 기반으로 전환)
+  6. 수직 지그재그 난방배관식 스캔 패턴
+  7. 격자형 교차 스캔 (Pass1 + Pass2)
+  8. 색상 개선 (조명 강화, 벽/바닥/포인트클라우드 밝기)
+  9. 드론 모델 쿼드콥터 교체 (1.5배, 시안/화이트)
+  10. 경로색 주황(#ff9020), 드론색 시안(#00e5ff) 분리
+  11. 가구 배치 한국 아파트 기준 재설계 (5회 반복)
+  12. 가구 rotation prop 미적용 버그 발견 → 전 컴포넌트 수정
+  13. 그림자 제거
+  14. 스캔 컨트롤 UI (일시정지/재개/중지/시작)
+  15. 가구 장애물 회피 로직 (바운딩 박스 기반 높이 조정)
+- **변경 파일**: `SampleReport.jsx`(신규 ~1200줄), `HeroSection.jsx`, `App.jsx`
+
+### 🔗 변경 파일 목록 (3개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/pages/SampleReport.jsx` | 신규 — 25평 아파트 3D 점검 시뮬레이션 데모 (R3F, 가구 12종, 드론 격자스캔, 근접탐지, 컨트롤UI) |
+| `frontend/src/components/landing/HeroSection.jsx` | `useNavigate` + 「3D 리포트 샘플 보기」→ `/sample-report` 연결 |
+| `frontend/src/App.jsx` | `SampleReport` import + `/sample-report` Route 추가 |

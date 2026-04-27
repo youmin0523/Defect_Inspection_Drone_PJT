@@ -6,6 +6,17 @@ AeroInspect AI는 자율 비행 드론과 인공지능(Reinforcement Learning, V
 
 ---
 
+## 🚀 주요 기능 및 현재 개발 진행 상황 (Current Progress)
+
+- **AI 비전 판독 (YOLOv8)**: 드론 촬영 영상 기반 M2, M3, M6 모델 결함 탐지 학습 및 추론 파이프라인
+- **강화학습 (RL) 자율 비행 및 충돌 회피**: Land Masking 및 장애물 회피를 위한 강화학습 환경(`IcebergAvoidanceEnv`) 구축 및 마이크로서비스(API) 연동 완료
+- **3D 디지털 트윈 대시보드**: React, Zustand 기반의 프론트엔드 상태 렌더링 최적화, 3D (R3F) 모니터링 UI 및 통신 Proxy 설정 완료
+- **Vibe Coding 및 자동화 개발 파이프라인**: 
+  - Playwright 기반 웹 UI 스크린샷 자동 캡처 및 Notion 동기화 로직 구현
+  - Git Post-merge 훅을 활용한 `Vibe_Coding_Log.md` 자동 파싱 및 중앙 Notion 데이터베이스 통합
+
+---
+
 ## 🛠️ Onboarding Tutorial (새로운 팀원을 위한 셋업 가이드)
 
 본 프로젝트를 처음 클론(Clone) 받으신 개발자분들은 작업을 시작하기 전 **반드시 아래 순서대로 초기 환경을 구성**하시기 바랍니다.
@@ -25,13 +36,14 @@ _(세팅을 완료하면 커밋 시 잘못된 형식을 작성했을 때 자동�
 
 우리 팀은 **AI(Cursor, Claude, Gemini 등) 에이전트와의 페어 프로그래밍(Vibe Coding)**을 적극 권장합니다.
 
+- 프로젝트 전역 규칙 파일인 `.clauderules`, `.geminirules`, `team_project_rules.md`를 통해 AI 모델이 통일된 개발 표준을 준수하도록 구성되어 있습니다.
 - AI로 기능 개발이나 버그 수정을 진행할 경우, 가장 먼저 AI에게 루트에 있는 `team_project_rules.md`를 읽으라고 지시하세요.
 - AI가 생성하고 트러블슈팅한 모든 의사결정 내역은 로컬의 `Vibe_Coding_Log.md` 파일에 마크다운 형식으로 차곡차곡 쌓이게 됩니다.
 
 ### Step 3: Notion 자동 동기화 구조 이해 (정보성)
 
-우리 프로젝트는 팀원들이 각자 작성해준 `Vibe_Coding_Log.md` 내용이 **팀 리드(Admin)의 리뷰와 `git pull` 과정을 거칠 때 중앙 노션(Notion)에 한 번에 자동 통합**되는 중앙 집중식 파이프라인을 가집니다.
-따라서 **일반 팀원분들은 별도의 API 키 발급 파일(`.env`)을 만드실 필요가 전혀 없습니다!** 그저 AI와 함께 코딩하시고, `Vibe_Coding_Log.md`가 수정되면 기존 코드들과 함께 평소처럼 Commit & Push 해주시기만 하면 됩니다. (노션 동기화는 리드 개발자 PC에서 알아서 백그라운드 처리됩니다 😎)
+우리 프로젝트는 팀원들이 각자 작성해준 `Vibe_Coding_Log.md` 내용과 **Playwright 캡처 스크린샷**이 **팀 리드(Admin)의 리뷰와 `git pull` 과정을 거칠 때 중앙 노션(Notion)에 한 번에 자동 통합**되는 중앙 집중식 파이프라인을 가집니다.
+따라서 **일반 팀원분들은 별도의 API 키 발급 파일(`.env`)을 만들 필요가 전혀 없습니다!** 그저 AI와 함께 코딩하시고, 로그가 쓰여진 마크다운이 수정되면 기존 코드들과 함께 평소처럼 Commit & Push 해주시기만 하면 됩니다. (노션 동기화는 백그라운드 스크립트가 알아서 처리해줍니다 😎)
 
 ---
 
@@ -53,11 +65,12 @@ _(세팅을 완료하면 커밋 시 잘못된 형식을 작성했을 때 자동�
 
 ## 📂 파일 구조 컨텍스트
 
-- `/frontend` : React 기반 3D (R3F) 디지털 트윈 모니터링 대시보드
-- `/backend` : FastAPI 기반 YOLO 비전 판독 및 데이터베이스 연동 엔진
-- `.githooks/` : 전사적 공통 Git 검사 스크립트 모음
-- `sync_notion_logs.py` : 로그를 노션 워크스페이스로 던져주는 자동화 파이썬 엔진
-- `team_project_rules.md` : 풀스택 개발 및 AI 에이전트 행동 지침명세서
+- `/frontend` : React, Zustand, R3F 기반 디지털 트윈 모니터링 프로세스 및 UI
+- `/backend` : FastAPI 기반 비전 엔진 연동, 모델 서빙 및 DB Proxy 엔진
+- `/scripts`, `/tasks` : Playwright 자동 캡쳐 및 유틸리티 운영 스크립트
+- `.githooks/` : 전사적 공통 Git 검사, Post-Merge 노션 훅 스크립트 모음
+- `sync_notion_logs.py` : 로그 데이터와 스크린샷 캡처본을 Notion DB에 푸시하는 파이썬 모듈
+- `.clauderules`, `.geminirules`, `team_project_rules.md` : 프로젝트 전역 풀스택 개발 규칙 및 AI 에이전트 행동 지침
 
 ---
 
