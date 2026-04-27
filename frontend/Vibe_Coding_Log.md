@@ -1365,7 +1365,7 @@ localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT �
 
 ## 세션 9 — 채팅 사이드바 UI 개선 (2026-04-27)
 
-- 작성자 (Who): @youminsu0523
+- 작성자 (Who): @unknownName-15
 - 작성 일자 (When): 2026-04-27
 - 작업 브랜치: `MS`
 
