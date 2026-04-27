@@ -18,6 +18,7 @@ from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db, get_current_org_member
+from app.models.organization import OrganizationMember
 from app.models.report import Report
 from app.models.site import Site
 from app.schemas.report import (
@@ -28,9 +29,28 @@ from app.schemas.report import (
     ReportListResponse,
 )
 from app.services.llm_report import LLMReportService
+from app.services.notification_service import notification_service
 
 router = APIRouter()
 report_service = LLMReportService()
+
+
+def _extract_assigned_user_ids(assigned_members) -> set[UUID]:
+    """Site.assigned_members JSONB ([{id, name, role}, ...]) 에서 user UUID 추출."""
+    ids: set[UUID] = set()
+    if not assigned_members:
+        return ids
+    for m in assigned_members:
+        if not isinstance(m, dict):
+            continue
+        raw = m.get("id") or m.get("user_id")
+        if not raw:
+            continue
+        try:
+            ids.add(raw if isinstance(raw, UUID) else UUID(str(raw)))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return ids
 
 
 @router.post("/generate")
@@ -87,12 +107,13 @@ async def save_report(
     org_tuple=Depends(get_current_org_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """생성된 보고서를 DB에 저장 (site_id 조직 검증)"""
+    """생성된 보고서를 DB에 저장 (site_id 조직 검증) + 관계자에게 알림."""
     user, member, org = org_tuple
-    # site_id가 있으면 소속 조직 검증
+    # site_id가 있으면 소속 조직 검증 + 전체 객체 로드 (현장 관리자 추출용)
+    site = None
     if payload.site_id:
         site = await db.scalar(
-            select(Site.id).where(Site.id == payload.site_id, Site.organization_id == org.id)
+            select(Site).where(Site.id == payload.site_id, Site.organization_id == org.id)
         )
         if not site:
             raise HTTPException(status_code=404, detail="해당 현장을 찾을 수 없습니다.")
@@ -111,6 +132,45 @@ async def save_report(
     )
     db.add(report)
     await db.flush()
+
+    # ── 알림 수신자 합집합 (A: 요청자 / B: 현장 관리자 / C: 조직 관리자) ─
+    recipient_ids: set[UUID] = set()
+
+    # A: 요청자
+    recipient_ids.add(user.id)
+
+    # B: 현장 관리자 (등록자 + 배정 팀원)
+    if site is not None:
+        if site.created_by:
+            recipient_ids.add(site.created_by)
+        recipient_ids |= _extract_assigned_user_ids(site.assigned_members)
+
+    # C: 조직의 owner / admin 전부
+    admin_rows = await db.execute(
+        select(OrganizationMember.user_id)
+        .where(OrganizationMember.organization_id == org.id)
+        .where(OrganizationMember.role.in_(("owner", "admin")))
+        .where(OrganizationMember.status == "active")
+    )
+    for (uid,) in admin_rows.all():
+        recipient_ids.add(uid)
+
+    if recipient_ids:
+        await notification_service.create_for_many(
+            db=db,
+            user_ids=list(recipient_ids),
+            category="report",
+            title=f"보고서 '{report.title or '제목 없음'}'가 저장되었습니다",
+            message=(
+                f"하자 {report.defect_count}건"
+                f" (HIGH {report.high_count} / MED {report.med_count} / LOW {report.low_count})"
+            ),
+            metadata={
+                "report_id": str(report.id),
+                "site_id": str(report.site_id) if report.site_id else None,
+            },
+        )
+
     return ReportSavedResponse.model_validate(report)
 
 

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db, get_ws_manager
+from app.dependencies import get_db, get_ws_manager, verify_ai_webhook
 from app.models.defect import DefectLog
 from app.schemas.defect import (
     DefectLogCreate,
@@ -59,7 +59,12 @@ class BatchDetectionResponse(BaseModel):
     items: list[DefectLogResponse]
 
 
-@router.post("/detection", response_model=DefectLogResponse, status_code=201)
+@router.post(
+    "/detection",
+    response_model=DefectLogResponse,
+    status_code=201,
+    dependencies=[Depends(verify_ai_webhook)],
+)
 async def receive_detection(
     payload: DefectLogCreate,
     db: AsyncSession = Depends(get_db),
@@ -121,7 +126,7 @@ async def receive_detection(
     return response
 
 
-@router.post("/thermal")
+@router.post("/thermal", dependencies=[Depends(verify_ai_webhook)])
 async def receive_thermal_analysis(
     payload: ThermalAnalysisResult,
     manager: ConnectionManager = Depends(get_ws_manager),
@@ -138,7 +143,12 @@ async def receive_thermal_analysis(
     return {"status": "ok", "zone": payload.zone}
 
 
-@router.post("/batch", response_model=BatchDetectionResponse, status_code=201)
+@router.post(
+    "/batch",
+    response_model=BatchDetectionResponse,
+    status_code=201,
+    dependencies=[Depends(verify_ai_webhook)],
+)
 async def receive_batch_detections(
     payload: BatchDetectionRequest,
     db: AsyncSession = Depends(get_db),
