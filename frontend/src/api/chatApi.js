@@ -47,6 +47,19 @@ export async function sendMessage({ conversation_id, text }) {
   return data
 }
 
+/** POST /api/v1/chat/conversations/{id}/messages/file (multipart) */
+export async function sendFileMessage({ conversation_id, file, text }) {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (text) formData.append('text', text)
+  const { data } = await API.post(
+    `/api/v1/chat/conversations/${conversation_id}/messages/file`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  )
+  return data
+}
+
 /** POST /api/v1/chat/conversations */
 export async function createConversation({ type, name, participant_ids }) {
   const { data } = await API.post('/api/v1/chat/conversations', {

@@ -6,7 +6,7 @@
  *       - 우측: ParticipantPanel (참여자 정보, 접기 가능)
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, MessageSquare, Plus } from 'lucide-react'
 import useChatStore from '../../store/chatStore.js'
@@ -15,17 +15,90 @@ import MessageThread from '../../components/chat/MessageThread.jsx'
 import ParticipantPanel from '../../components/chat/ParticipantPanel.jsx'
 import NewChatModal from '../../components/chat/NewChatModal.jsx'
 
+const WS_BASE = (import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/v1/ws').replace('/ws', '')
+
 export default function Chat() {
   const fetchConversations = useChatStore((s) => s.fetchConversations)
+  const refreshUnreadCounts = useChatStore((s) => s.refreshUnreadCounts)
+  const activeConversationId = useChatStore((s) => s.activeConversationId)
   const isParticipantPanelOpen = useChatStore((s) => s.isParticipantPanelOpen)
   const isNewChatModalOpen = useChatStore((s) => s.isNewChatModalOpen)
   const openNewChatModal = useChatStore((s) => s.openNewChatModal)
+  const chatWsRef = useRef(null)
+  const userWsRef = useRef(null)
 
-  // 초기 로드 — 대화방 목록만 가져오고, 자동 선택은 하지 않음
-  // (사용자가 직접 좌측 패널에서 대화방을 선택해야 읽음 처리됨)
+  // 현재 사용자 ID
+  const currentUserId = JSON.parse(localStorage.getItem('user') || '{}')?.id
+
+  // 공통 WS 메시지 핸들러
+  const handleWsMessage = (event) => {
+    try {
+      const { type, data } = JSON.parse(event.data)
+      if (type === 'chat.new_message' && data) {
+        useChatStore.getState().receiveMessage(data)
+      }
+      if (type === 'chat.read' && data) {
+        // 상대방이 읽음 → 현재 대화방 메시지의 읽음 상태 갱신
+        const activeId = useChatStore.getState().activeConversationId
+        if (data.conversation_id === activeId) {
+          useChatStore.getState().selectConversation(activeId)
+        }
+      }
+      if (type === 'ping') {
+        event.target.send(JSON.stringify({ type: 'pong' }))
+      }
+    } catch {}
+  }
+
+  // 초기 로드
   useEffect(() => {
     fetchConversations()
   }, [fetchConversations])
+
+  // 개인 채널 WebSocket — 모든 대화방의 새 메시지 알림 수신
+  useEffect(() => {
+    if (!currentUserId) return
+
+    const ws = new WebSocket(`${WS_BASE}/ws?channel=user:${currentUserId}`)
+    userWsRef.current = ws
+    ws.onmessage = handleWsMessage
+    ws.onerror = () => {}
+    ws.onclose = () => {}
+
+    return () => {
+      ws.close()
+      userWsRef.current = null
+    }
+  }, [currentUserId])
+
+  // 활성 대화방 WebSocket — 현재 보고 있는 대화의 실시간 메시지
+  useEffect(() => {
+    if (chatWsRef.current) {
+      chatWsRef.current.close()
+      chatWsRef.current = null
+    }
+    if (!activeConversationId) return
+
+    const ws = new WebSocket(`${WS_BASE}/ws?channel=chat:${activeConversationId}`)
+    chatWsRef.current = ws
+    ws.onmessage = handleWsMessage
+    ws.onerror = () => {}
+    ws.onclose = () => {}
+
+    return () => {
+      ws.close()
+      chatWsRef.current = null
+    }
+  }, [activeConversationId])
+
+  // 주기적 미읽음 카운트 갱신 (백업 — WS 끊겼을 때 대비, 30초 간격)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshUnreadCounts()
+      fetchConversations()
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [refreshUnreadCounts, fetchConversations])
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 text-slate-800 font-sans antialiased">

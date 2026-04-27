@@ -189,6 +189,32 @@ export default function AdminMembers() {
             <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-center">
               <div className="text-xs text-gray-500 mb-1">초대 코드</div>
               <div className="font-mono text-lg font-bold tracking-widest text-slate-900">{orgInfo.invite_code}</div>
+              {orgInfo.invite_code_expires_at && (() => {
+                const expires = new Date(orgInfo.invite_code_expires_at)
+                const now = new Date()
+                const isExpired = expires <= now
+                const daysLeft = Math.ceil((expires - now) / (1000 * 60 * 60 * 24))
+                return (
+                  <div className="mt-1.5">
+                    <div className={`text-xs ${isExpired ? 'text-red-500 font-semibold' : daysLeft <= 7 ? 'text-amber-600' : 'text-gray-400'}`}>
+                      {isExpired ? '만료됨' : `${daysLeft}일 후 만료`}
+                      <span className="text-gray-300 ml-1">({expires.toLocaleDateString('ko-KR')})</span>
+                    </div>
+                  </div>
+                )
+              })()}
+              <button
+                onClick={async () => {
+                  if (!confirm('초대 코드를 재생성하시겠습니까?\n기존 코드는 즉시 무효화됩니다.')) return
+                  try {
+                    const res = await axios.post(`${API_BASE}/api/v1/organizations/invite-code/regenerate`, {}, { headers })
+                    setOrgInfo({ ...orgInfo, invite_code: res.data.invite_code, invite_code_expires_at: res.data.invite_code_expires_at })
+                  } catch (err) { setError(err.response?.data?.detail || '초대 코드 재생성에 실패했습니다.') }
+                }}
+                className="mt-2 text-xs text-blue-600 hover:text-blue-800 hover:underline transition"
+              >
+                코드 재생성
+              </button>
             </div>
           )}
         </div>

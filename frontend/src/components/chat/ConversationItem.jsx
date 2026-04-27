@@ -95,7 +95,7 @@ export default function ConversationItem({ conv }) {
         {conv.last_message && (
           <p className={`text-xs truncate mt-0.5 ${unread > 0 ? 'text-slate-600 font-medium' : 'text-gray-400'}`}>
             {conv.type !== 'dm' && `${conv.last_message.sender_name}: `}
-            {conv.last_message.text}
+            {conv.last_message.text || (conv.last_message.file_name ? `\ud83d\udcce ${conv.last_message.file_name}` : '')}
           </p>
         )}
       </div>

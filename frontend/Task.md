@@ -1,48 +1,235 @@
 # Frontend Task.md
 
 ## 프로젝트 개요
-- **목적**: AeroInspect AI - 실시간 3D 대시보드 및 리포트 뷰어
-- **주요 스택**: React, Three.js, React Three Fiber, Tailwind CSS
+- **목적**: AeroInspect AI 프론트엔드 — 실시간 3D 드론 관제 대시보드, 세션 워크플로우, 채팅/알림, 현장 관리, 리포트 뷰어
+- **주요 스택**: React 18 (Vite), Three.js + React Three Fiber (R3F), Tailwind CSS, Zustand (9 stores), axios
+- **팀원**: @youminsu0523 (풀스택), @unknownName-15 (인증 UI/반응형)
 
-## 작업 목록
-- [x] v1.0 - 프론트엔드 전용 협업 문서 초기화 (작성자: @youminsu0523 / branch: MS)
-- [x] v1.1 - 독립 레포지토리 운영 대비 가이드라인 파일 복제 (작성자: @youminsu0523 / branch: MS)
-- [x] v1.2 - Frontend 전용 독립 가이드라인 무결성 설정 완료 (작성자: @youminsu0523 / branch: MS)
-- [ ] v1.3 - 프론트엔드 컴포넌트 구조 분석 및 3D 렌더링 검토 (작성자: TBD / branch: TBD)
-- [x] v1.4 - 직원 전용 랜딩(`/employee` · Interior Inspection Dashboard) 신설 및 버튼 라우트 교체 (작성자: @youminsu0523 / branch: MS)
-- [x] v1.5 - 직원 전용 랜딩 "사무실 허브" 형태로 전면 재설계 (v1 현장 HUD → v2 사무실 허브) (작성자: @youminsu0523 / branch: MS)
+---
+
+## 작업 목록 — @youminsu0523 (branch: MS)
+
+### 랜딩 페이지 & 라우팅 (260414~260416)
+- [x] v2.0_260414 — React 대시보드 Header + DefectPanel 구현
+  - `Header.jsx`: `useDroneStore` 텔레메트리(고도/속도/배터리/모드), `useDefectStore` 하자 심각도 카운트(HIGH/MED/LOW), WebSocket 연결 상태 뱃지
+  - `DefectPanel.jsx`: `DefectFilter`(심각도/영역/카테고리) + `DefectCard` 리스트 + `useDefects` REST 초기 로드
+- [x] v2.1_260415 — 랜딩 페이지 **95개 파일** (이미지 ~80개 포함)
+  - `App.jsx` 라우팅: `/` = Landing, `/dashboard` = DashboardLayout (WS는 대시보드 진입 시에만 초기화)
+  - `Landing.jsx`: 6개 섹션 조립 (LandingHeader + HeroSection + ServiceIntroSection + FeaturesSection + CasesSection + DualCTASection)
+  - `HeroSection.jsx`: `import.meta.glob` 이미지 자동 스캔 → 5초 주기 3장 크로스페이드(더블 버퍼링) → 그라데이션 오버레이 → CTA 2개("3D 리포트 샘플 보기"/"서비스 도입 문의")
+  - `LandingHeader.jsx`: 스크롤 위치 기반 투명↔흰색 배경 전환, 로고 스왑(`logoWhite`/`logoDark`), `ContactModal` 연동
+  - `ContactModal.jsx`: 개인/사업자 탭, 사업자등록번호 10자리 진위 시뮬레이션, 담당자/연락처/문의 수집
+  - `ServiceIntroSection.jsx`: 접근성/정밀성/효율성 3가치 카드 + `Reveal` 애니메이션
+  - `FeaturesSection.jsx`: 하이브리드 3D 복원 / AI 하자 식별 / 정밀 공간 매핑 3기술 카드
+  - `CasesSection.jsx`: B2B 건설사 / 정밀 안전진단 / B2C 입주민 3레퍼런스 + `CaseSlideshow` 크로스페이드
+  - `DualCTASection.jsx`: B2B(다크 테마, 통합 관제) / B2C(옐로 테마, 3D 뷰어) 좌우 분할 CTA 체크리스트
+  - `Reveal.jsx`: IntersectionObserver 스크롤 진입 1회 애니메이션 + `prefers-reduced-motion` 존중
+  - `smoothScroll.js`: 앵커 링크 부드러운 스크롤 유틸 (`handleAnchorClick`, `smoothScrollTo`)
+  - 이미지 에셋 ~80개: `assets/hero/`, `cases/`, `cta/`, `features/`, `logo/`
+- [x] v2.2_260416 — 프론트엔드 인증 페이지 + 국세청 API **11개 파일**
+  - `Signup.jsx` (784줄): 개인/사업자 탭, 사업자번호 국세청 진위확인(`checkBusinessStatus` odcloud.kr POST), 이메일 도메인 드롭다운+중복확인, 아이디 중복확인, 비밀번호 자동생성 옵션, 약관 3종(서비스/개인정보/마케팅) 아코디언+전체동의
+  - `Login.jsx` (254줄): 개인/사업자 탭, 소셜 로그인(Google/Naver/Kakao 원형 아이콘), 아이디/비밀번호 찾기 링크
+  - `FindAccount.jsx` (320줄): 아이디찾기/비밀번호찾기 탭, `?tab=id|pw` URL 쿼리 파라미터 연동
+  - `businessVerifyApi.js`: 국세청 odcloud.kr POST (Vite 프록시 `/odcloud` 경유), `interpretStatus()` 상태코드 매핑(01계속/02휴업/03폐업)
+  - `vite.config.js`: `/odcloud` 프록시 + `/api` 프록시 설정
+
+### 대시보드 HUD & 드론 관제 (260416~260417)
+- [x] v2.3_260416 — 풀스크린 HUD 대시보드 UI **31개 파일**
+  - `DashboardTopBar.jsx`: 풀스크린 HUD 상단 바 — 브랜드 로고, Global Search, Satellite Map 토글, Flightpaths 필터, WS 연결 상태, 알림 뱃지, 프로필 아이콘
+  - `DronesPanel.jsx`: 좌하단 Drones 패널 — DRONE 01(RGB) + DRONE 02(THERMAL) 카드, 클릭 시 `setSelectedDrone()` 카메라 자동 매핑
+  - `Dashboard.jsx`: 메인 LIVE 카메라 피드(16:9 safe zone), 좌상단 Thermal Trend PIP, 좌하단 DronesPanel, 우하단 3D Mini Map, 우측 AI Defect Analysis 패널
+  - `DroneStatusCard.jsx`: 드론 상태 카드 (배터리 바, 모드 표시)
+  - `droneStore.js` 확장: `DRONE_CAMERA_MAP`(drone-01=rgb, drone-02=thermal), `selectedDroneId`, `setSelectedDrone()`
+- [x] v2.8_260417 — DroneMarker 비행 경로 시각화
+  - `DroneMarker.jsx` 대폭 개선: 비행 경로 폴리라인(`Line` dashed), `useRef` 위치 히스토리 축적(MAX_PATH_POINTS 500개, MIN_MOVE_DIST 0.05 필터링), 바닥 2D 투영 경로 그림자, 미션 시작 시 초기화
+- [x] v4.4_260424 — 대시보드 인프라 (TestModeBar, DashboardTopBar)
+  - `TestModeBar.jsx` (319줄): 시작/일시중지/정지 재생 버튼, 프로젝트 데이터↔직접 업로드 소스 전환, 이미지/영상 대량 첨부 UI, bbox↔detection 시각화 모드 전환
+
+### 세션 워크플로우 & 3D 시각화 (260416)
+- [x] v3.0_260416 — 세션 3단계 + 3D + 미션 제어 **23개 파일**
+  - `SessionSetup.jsx`: 현장명/운용자/점검일자 입력 폼, 유효성 검증, `sessionStore.setSessionInfo()` → `/session/level`
+  - `SessionLevel.jsx`: L1(CAD .dwg/.dxf/.ifc) / L2(평면도 이미지) / L3(드론 자율비행) 선택 카드, L3에 "추천" 뱃지
+  - `SessionModeling.jsx`: Level별 업로드/시뮬레이션, Mock 프로그레스 6~12초, 완료 후 `/dashboard` 자동 이동
+  - `sessionStore.js` (Zustand+persist, 30+필드): siteName/operatorName/inspectionDate/level/uploadedFile/modelStatus/modelProgress/modelStage + startModeling/cancelModeling/setUploadedFile(이미지 base64 변환)
+  - `mockModeling.js`: L1(CAD 파싱→층고→메시 6~8초), L2(윤곽→역설계 6~8초), L3(SLAM→포인트클라우드→메시 10~12초), `onTick` 콜백
+  - 세션 컴포넌트 5개: `FileDropzone.jsx`(드래그&드롭+클릭+썸네일), `LevelCard.jsx`(아이콘/제목/설명/불릿/추천), `ModelingProgress.jsx`(진행률 바+단계명), `SessionLayout.jsx`(Stepper+centered), `ProtectedSessionLayout.jsx`(인증 가드)
+  - `DroneMarker.jsx`: cone 본체+4프로펠러+고도 라인, `Billboard` ID 라벨, yaw 회전, `missionStatus` 기반 색상(flying=accent, idle=slate)
+  - `BuildingMesh.jsx`: Level별 3D 건물 메시
+  - `MissionControl.jsx`: 미션 시작/중지/착륙 버튼
+
+### 직원 전용 사무실 허브 (260416)
+- [x] v5.0_260416 — `EmployeeLanding.jsx` (749줄) 신규
+  - 사무실 허브 레이아웃: KPI 카드 3개(이번 달 점검 42건/보고서 38건/평균 비행 23분), 오늘 일정 테이블(시간/현장/상태/운용자), 알림/공지(공지/경고/시스템 타입별 아이콘), 팀원 현황(이름/직급/팀/담당현장/상태 office/field/standby), 최근 활동 로그, 현재 세션 카드(sessionStore 실데이터: siteName/operatorName/level/defects severity)
+  - MOCK_* 상수(MOCK_MONTHLY_KPI, MOCK_TODAY_SCHEDULE, MOCK_NOTIFICATIONS, MOCK_TEAM_MEMBERS, MOCK_RECENT_ACTIVITIES) — 동일 스키마 API 훅으로 점진 교체 설계
+  - `App.jsx`: `/employee` 라우트 추가
+  - `LandingHeader.jsx`: 직원 전용 진입 링크
+
+### 리포트 관리 시스템 (260416~260417)
+- [x] v4.0_260416 — 드론 리포트 관리 **36개 파일**
+  - `ReportsList.jsx`: `/employee/reports` 보고서 목록 (현장명/일자/공종/하자 요약/상태 draft/published/열기/삭제)
+  - `ReportDetail.jsx`: 개별 리포트 편집, debounce 500ms 낙관적 업데이트
+  - `ReportEditor.jsx`: 공종별 그룹 테이블 + `suggestTrades()` AI 공종 자동 제안 + LocationMapEditor + AddDefectDialog + ExcelExport/PdfExport
+  - `AddDefectDialog.jsx`: 수동 하자 추가 (유형명/영역A~E/장소 datalist/공종 TradeSelect/심각도 HIGH-MED-LOW/조치메모/이미지)
+  - `DefectEditRow.jsx`: 인라인 수정/삭제/이미지 크롭 표시
+  - `ExcelExportButton.jsx`: SheetJS `.xlsx` 내보내기 (요약 시트 + 하자 목록 시트)
+  - `PdfExportButton.jsx`: `@react-pdf/renderer` `.pdf` (Noto Sans KR 한글 폰트, 요약 페이지+공종별 리스트+이미지)
+  - `LocationMapEditor.jsx`: 장소명 일괄 rename
+  - `TradeSelect.jsx`: 공종 선택 드롭다운 + "직접 입력" 옵션
+  - `reportsStore.js`: Zustand fetchAll/fetchOne/create/update/remove
+  - `reportsApi.js`: localStorage 기반 CRUD (DB 전 대체)
+  - `reportApi.js`: `suggestTrades()` AI API
+  - `preModelStore.js`: 사전 작업 모델 라이브러리 스토어
+  - `trades.js`: 건설 공종 12종 마스터 `TRADES`, `CATEGORY_TRADE_MAP`, `LOCATION_PRESETS`, `TRADE_TO_TEMPLATE_CODE`, `SEVERITY_TO_GRADE`
+  - `PreWork.jsx`: 사전 작업 페이지 (라벨→Level→업로드→Mock 3D→preModelStore 저장)
+- [x] v4.1_260417 — 리포트 내보내기 강화 **50개 파일 중 프론트엔드 핵심**
+  - `ExcelPreviewModal.jsx`: HTML 테이블 미리보기 + 다운로드 버튼
+  - `PdfPreviewModal.jsx`: BlobProvider → iframe 인라인 표시 → 확인 후 다운로드
+  - `TemplateExportButton.jsx`: 양식 기반 Excel 진입 버튼
+  - `templateExport.js`: ExcelJS 양식 주입 (하자점검_결과보고서.xlsx 로드→셀에 점검개요/결과총괄/하자상세 데이터 주입→이미지 삽입)
+  - `하자점검_결과보고서.xlsx`: Excel 보고서 양식 템플릿
+  - 한글 폰트: NotoSansKR-Bold.ttf, NotoSansKR-Regular.ttf
+  - `SessionSetup.jsx` 확장: siteUnit/inspectionType/witness 등 필드
+
+### 인증 & OAuth (260417~260420)
+- [x] v6.0_260417 — 풀스택 인증 연동
+  - `authApi.js`: `login()`, `oauthLogin()`, `getMe()`, OAuth URL 빌더 3종(`getGoogleAuthUrl`, `getKakaoAuthUrl`, `getNaverAuthUrl`)
+  - `authStore.js` (Zustand): token/user/isAuthenticated/organizations/currentOrg + setAuth(localStorage 4키 저장)/switchOrg/logout
+  - `OAuthCallback.jsx`: `/auth/:provider/callback` — URL code 추출→백엔드 전송→JWT 저장→`/employee` 리다이렉트
+  - `Login.jsx`: 소셜 버튼에 실제 OAuth URL 연결
+
+### 현장 관리 (260418)
+- [x] v5.2_260418 — 현장 CRUD UI **22개 파일** (+2,822줄)
+  - `sitesApi.js`: localStorage 기반 + 시드 5건 (헬리오시티/판교 알파돔/위례 자이/성북B2C/강남 래미안)
+  - `sitesStore.js` (Zustand): fetchAll/fetchOne/create/update/remove/clear
+  - `SiteManagement.jsx`: 히어로 배너 + KPI 4카드(전체/진행중/예정/완료) + 통합 검색 + 상태 필터 탭 + 현장 테이블(순번/현장명/점검구분/건물유형/의뢰자/계약기간/점검건수/상태/편집/삭제)
+  - `SiteDetail.jsx`: 히어로 배너 + 미니 KPI 4개 + 의뢰자/운영 2컬럼 그리드 + 탭 3개(보고서/도면3D/촬영영상)
+  - `SiteFormModal.jsx`: 등록/수정 모달 폼
+  - 탭 컴포넌트 3개: SiteReportsTab, SiteModelsTab, SiteRecordingsTab
+  - `siteTypes.js`: 건물 유형, 상태, 의뢰자 유형 상수
+  - `Analytics.jsx` + `TrendReport.jsx` + `WeeklyReport.jsx` + `mockTrendData.js`
+
+### 채팅 & 알림 시스템 (260420~260424)
+- [x] v7.0_260420 — 풀스택 채팅 + 알림 **48개 파일** (+4,313줄) 프론트엔드 부분
+  - **채팅 UI 9컴포넌트**: Chat.jsx(Slack 3컬럼), ConversationList(검색+필터), ConversationItem, MessageThread(히스토리+입력), MessageBubble(카카오톡 스타일 발신/수신), MessageInput, ChatHeader, NewChatModal(조직 멤버 선택), ParticipantPanel, FloatingChatButton
+  - **알림**: NotificationDropdown (227줄), notificationCategories.js (10종 카테고리)
+  - **Store/API**: chatStore.js (fetchConversations/selectConversation/sendMessage/createConversation/startDM/markRead/leaveConversation/refreshUnreadCounts), notificationStore.js, chatApi.js, notificationApi.js, organizationApi.js
+- [x] v7.2_260424 — 채팅 고도화 **15개 파일**
+  - AdminMembers 슈퍼어드민 조직 배정 4단계 워크플로우 (조직→역할→부서→직위, 조직 미선택 시 나머지 비활성화)
+  - ParticipantPanel: "대화 나가기" 버튼 + `leaveConversation()`, 부서/직위 null-safe 표시
+  - ChatHeader/ConversationItem/ConversationList/MessageBubble/NewChatModal: 참여자 데이터 구조 변경 대응
+
+### API 리팩토링 (260424)
+- [x] v8.0_260424 — localStorage 목업 → 실제 백엔드 API 전환
+  - chatApi.js, notificationApi.js, organizationApi.js, reportsApi.js, sitesApi.js에서 총 -1,000줄 이상 목업 코드 제거, axios fetch 호출로 교체
+  - sessionStore.js: 테스트 모드 상태 추가 (testSource/testPlayState/testDetectionMode + setter)
+
+---
+
+## 작업 목록 — @unknownName-15 (branch: SH)
+
+### 인증 UI & 모바일 반응형 (260417~260420)
+- [x] v1.0_260417 — package-lock.json 생성 (의존성 버전 잠금)
+- [x] v1.1_260420 — **7개 파일** (+146줄)
+  - **Remix Icon CDN 도입**: `index.html`에 `remixicon@4.5.0` 전역 등록 (ri-menu-line, ri-close-line, ri-corner-up-left-line 등)
+  - **LandingHeader 모바일 햄버거 메뉴 풀 구현**: `isMobileMenuOpen` state + `mobileMenuRef` 외부클릭 닫기 + 햄버거 버튼(`md:hidden`, aria-label/aria-expanded) + 드롭다운 메뉴(`w-56`, 직원전용+TEMP뱃지/로그인/도입문의) + 스크롤 상태별 배경 분기(hero=slate-900/95 backdrop-blur, 일반=white)
+  - **네비게이션 UX 통일**: Login.jsx/Signup.jsx/FindAccount.jsx "뒤로가기" — `<Link to="/">` → `<button onClick={() => navigate(-1)}>` + `ri-corner-up-left-line` 아이콘 + `aria-label`
+  - **포커스 링 전역 제거**: `index.css` button:focus/focus-visible outline:none + HeroSection/LandingHeader 개별 focus:ring 클래스 일괄 제거
+  - **데스크탑 정리**: "도입 문의하기" CTA `hidden md:block` (모바일 햄버거에서 대신 표시), 불필요 Original/Modified 주석 대량 삭제
+
+---
+
+## 현재 프론트엔드 구조
+```
+frontend/src/
+├── api/              — REST API 호출 모듈 (9개)
+│   authApi, businessVerifyApi, chatApi, defectsApi,
+│   notificationApi, organizationApi, reportApi, reportsApi, sitesApi
+├── components/       — UI 컴포넌트 (15 디렉토리, 40+ 파일)
+│   analytics/(TrendReport, WeeklyReport)
+│   auth/(OrgRequired)
+│   charts/(ThermalGraph)
+│   chat/(ChatHeader, ConversationList, ConversationItem, MessageBubble,
+│         MessageInput, MessageThread, NewChatModal, ParticipantPanel, FloatingChatButton)
+│   common/(Reveal)
+│   dashboard/(DashboardTopBar, DronesPanel, MissionControl, TestModeBar)
+│   defects/(DefectCard, DefectFilter, DefectPanel, SeverityBadge)
+│   landing/(HeroSection, FeaturesSection, CasesSection, CaseSlideshow,
+│            ContactModal, DualCTASection, LandingHeader, ServiceIntroSection)
+│   layout/(Header, Sidebar, DroneStatusCard)
+│   map3d/(BuildingMesh, BuildingScene, DefectMarker, DroneMarker)
+│   notification/(NotificationDropdown)
+│   report/(AddDefectDialog, DefectEditRow, ExcelExportButton, PdfExportButton,
+│           ExcelPreviewModal, PdfPreviewModal, TemplateExportButton,
+│           LocationMapEditor, ReportEditor, TradeSelect)
+│   session/(FileDropzone, LevelCard, ModelingProgress, SessionLayout, ProtectedSessionLayout)
+│   site/(SiteFormModal, SiteReportsTab, SiteModelsTab, SiteRecordingsTab)
+│   video/(비디오 스트리밍 컴포넌트)
+├── pages/
+│   Landing, Dashboard, Login, Signup, FindAccount, OAuthCallback, EmployeeLanding
+│   employee/(AdminMembers, Analytics, Chat, Onboarding, PreWork,
+│             ReportDetail, ReportsList, SiteDetail, SiteManagement)
+│   session/(SessionSetup, SessionLevel, SessionModeling)
+├── store/            — Zustand 상태 관리 (9개)
+│   authStore(token/user/orgs/setAuth/logout)
+│   chatStore(conversations/messages/unread/send/create/leave)
+│   defectStore(defects 500 FIFO/filters/severity counts)
+│   droneStore(telemetry/cameraMode/missionStatus/DRONE_CAMERA_MAP)
+│   notificationStore, preModelStore
+│   reportsStore(CRUD), sessionStore(30+ persist 필드, 테스트모드)
+│   sitesStore(CRUD)
+├── constants/        — trades.js, siteTypes.js, notificationCategories.js
+├── utils/            — mockModeling.js, smoothScroll.js, templateExport.js
+├── hooks/            — useReveal.js
+└── assets/           — hero/, cases/, cta/, features/, logo/, templates/
+```
+
+---
+
+## 라우팅 구조 (App.jsx)
+| 경로 | 컴포넌트 | 가드 | 비고 |
+|------|----------|------|------|
+| `/` | Landing | 없음 | 공개 |
+| `/login` | Login | 없음 | 개인/사업자 탭 + 소셜 3종 |
+| `/signup` | Signup | 없음 | 784줄 개인/사업자+국세청 |
+| `/find-account` | FindAccount | 없음 | 탭+쿼리파라미터 |
+| `/auth/:provider/callback` | OAuthCallback | 없음 | Google/Kakao/Naver |
+| `/employee/onboarding` | Onboarding | 없음 | 미소속 사용자 |
+| `/employee` | EmployeeLanding | OrgRequired | 사무실 허브 |
+| `/employee/pre-work` | PreWork | OrgRequired | 사전 작업 |
+| `/employee/reports` | ReportsList | OrgRequired | 리포트 목록 |
+| `/employee/reports/:id` | ReportDetail | OrgRequired | 리포트 편집 |
+| `/employee/sites` | SiteManagement | OrgRequired | 현장 관리 |
+| `/employee/sites/:id` | SiteDetail | OrgRequired | 현장 상세 |
+| `/employee/analytics` | Analytics | OrgRequired | 분석 |
+| `/employee/chat` | Chat | OrgRequired | 메신저 |
+| `/employee/admin/members` | AdminMembers | OrgRequired adminOnly | 관리자 전용 |
+| `/session/setup` | SessionSetup | SessionLayout | 세션 시작 |
+| `/session/level` | SessionLevel | SessionLayout | 레벨 선택 |
+| `/session/modeling` | SessionModeling | SessionLayout | 모델링 |
+| `/dashboard` | Dashboard | ProtectedSessionLayout | 실시간 관제 (WS 여기서 초기화) |
+| `/dashboard/report` | ReportModal | nested | 리포트 오버레이 |
+
+**특이사항**: GlobalFloatingChat은 `/employee` 경로에서만 표시, DashboardLayout은 테스트모드 시 `/api/v1/stream/test/init` 자동 호출
+
+---
 
 ## 요구사항
 1. `team_project_rules.md` 준수
-2. JSX/TSX `// //!`, `// //*` Better Comment 규칙 적용
-3. 모든 컴포넌트 반응형(`7-2`) 및 상태 UI(`7-1`) 처리 필수
+2. JSX `// //!`, `// //*` Better Comment 규칙
+3. 반응형 필수 (Mobile/Tablet/Desktop, Mobile First)
+4. 상태 UI 4종 세트 (Loading/Empty/Error/Success)
+5. Tailwind CSS 유틸리티 클래스
+
+---
 
 ## Revision History
 
+### v4.0_260427 (작성자: @youminsu0523 / branch: MS)
+- 전면 재작성: git log 기반 전체 팀원 10일간 작업 상세 기록
+- 각 버전별 변경 파일 수, 구체적 파일 경로, 컴포넌트명/함수명/스토어 필드 상세
+
 ### v1.5_260416 (작성자: @youminsu0523 / branch: MS)
-**[src/pages/EmployeeLanding.jsx]** (전면 재작성 — v1 → v2)
-- 교체: v1 "Interior Inspection Dashboard" (실시간 드론 HUD + 평면도 핀 + 결함 사이드패널) → v2 "사무실 허브" (Welcome/QuickActions/KPI/일정·알림/팀원/최근활동)
-- 이유: `/employee` 는 **사무실 허브**, `/session/setup~/dashboard` 는 **현장 실무**라는 UX 경계 재정의 (사용자 피드백)
-- 톤: 랜딩(`/`) 과 톤온톤 — `bg-gray-50` + 흰 카드 + slate-900 다크 배너 + blue/yellow/green accent
-- 데이터: 현재 세션 실데이터(store) + 이번 달 목업 상수(`MOCK_*`) 혼용, 각 KPI 카드에 LIVE/MOCK 뱃지 명시
-- 신규 섹션: 알림·공지, 팀원 현황 및 담당 현장 할당
+- 직원 전용 랜딩 사무실 허브 v2 전면 재설계
 
-**[team_project_rules / 메모리]**
-- 추가: `project_ux_boundary_employee_vs_session.md` — 사무실/현장 UX 경계선 프로젝트 메모리화
-
-### v1.4_260416 (작성자: @youminsu0523 / branch: MS)
-**[src/pages/EmployeeLanding.jsx]** (신규)
-- 추가: Interior Inspection Dashboard 목업 기반 직원 전용 랜딩 (상단 HUD 네비 + 실내 평면도 + Drone-Mini HUD + 결함 분석 패널)
-- 추가: `DefectCard` 서브 컴포넌트로 하자 카드 중복 JSX DRY 처리
-- 추가: `/session/setup`, `/dashboard/report` 로의 실용 링크 2개 (기존 플로우 보존)
-
-**[src/App.jsx]**
-- 추가: `EmployeeLanding` import + `<Route path="/employee" element={<EmployeeLanding />} />` 공개 라우트
-
-**[src/components/landing/LandingHeader.jsx]**
-- 수정: 직원 전용 `<Link>` `to="/session/setup"` → `to="/employee"` (기존 코드 `// //! [Original Code]` 주석 보존, Rule 3-2)
-- 이유: 사용자 요청 — 직원 버튼 클릭 시 Interior Inspection 랜딩을 거치도록 플로우 변경
-
-### v1.1_260413 (작성자: @youminsu0523 / branch: MS)
-**[Frontend]**
-- 추가: `.clauderules`, `.geminirules`, `team_project_rules.md` 복제 (독립 운영 가능)
+### v1.0_260413 (작성자: @Antigravity / branch: main)
+- 프론트엔드 Task.md 초기 생성

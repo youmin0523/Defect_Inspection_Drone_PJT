@@ -7,11 +7,68 @@
  */
 
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import { useNavigate, Navigate } from 'react-router-dom'
 import useAuthStore from '../../store/authStore'
+import { getMe } from '../../api/authApi'
 
+// authApi의 API 인스턴스를 사용하여 401 시 자동 토큰 갱신
+import axios from 'axios'
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const api = axios.create({ baseURL: API_BASE })
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+// 401 시 refresh_token으로 자동 재발급
+let isRefreshing = false
+let failedQueue = []
+function processQueue(error, token = null) {
+  failedQueue.forEach(({ resolve, reject }) => error ? reject(error) : resolve(token))
+  failedQueue = []
+}
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    const orig = error.config
+    if (orig.url?.includes('/auth/refresh')) {
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      localStorage.removeItem('user')
+      localStorage.removeItem('current_org')
+      window.location.href = '/login'
+      return Promise.reject(error)
+    }
+    if (error.response?.status === 401 && !orig._retry) {
+      const rt = localStorage.getItem('refresh_token')
+      if (!rt) return Promise.reject(error)
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject })
+        }).then((tk) => { orig.headers.Authorization = `Bearer ${tk}`; return api(orig) })
+      }
+      orig._retry = true
+      isRefreshing = true
+      try {
+        const { data } = await api.post('/api/v1/auth/refresh', { refresh_token: rt })
+        localStorage.setItem('access_token', data.access_token)
+        orig.headers.Authorization = `Bearer ${data.access_token}`
+        processQueue(null, data.access_token)
+        return api(orig)
+      } catch (e) {
+        processQueue(e, null)
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        localStorage.removeItem('user')
+        localStorage.removeItem('current_org')
+        window.location.href = '/login'
+        return Promise.reject(e)
+      } finally { isRefreshing = false }
+    }
+    return Promise.reject(error)
+  }
+)
 
 export default function Onboarding() {
   const navigate = useNavigate()
@@ -22,21 +79,21 @@ export default function Onboarding() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const headers = { Authorization: `Bearer ${token}` }
+  // 로그인되지 않은 상태라면 로그인 페이지로 리다이렉트
+  if (!token) {
+    return <Navigate to="/login" replace />
+  }
 
   const handleCreateOrg = async () => {
     if (!orgName.trim()) return setError('조직명을 입력해주세요.')
     setLoading(true)
     setError('')
     try {
-      const res = await axios.post(
-        `${API_BASE}/api/v1/organizations`,
-        { name: orgName.trim() },
-        { headers },
-      )
+      await api.post('/api/v1/organizations', { name: orgName.trim() })
       // 조직 생성 후 /auth/me 호출하여 최신 사용자 정보 반영
-      const meRes = await axios.get(`${API_BASE}/api/v1/auth/me`, { headers })
-      setAuth(token, meRes.data)
+      const meRes = await getMe()
+      const currentToken = localStorage.getItem('access_token')
+      setAuth(currentToken, meRes.data)
       navigate('/employee', { replace: true })
     } catch (err) {
       setError(err.response?.data?.detail || '조직 생성에 실패했습니다.')
@@ -50,13 +107,10 @@ export default function Onboarding() {
     setLoading(true)
     setError('')
     try {
-      await axios.post(
-        `${API_BASE}/api/v1/organizations/join`,
-        { invite_code: inviteCode.toUpperCase() },
-        { headers },
-      )
-      const meRes = await axios.get(`${API_BASE}/api/v1/auth/me`, { headers })
-      setAuth(token, meRes.data)
+      await api.post('/api/v1/organizations/join', { invite_code: inviteCode.toUpperCase() })
+      const meRes = await getMe()
+      const currentToken = localStorage.getItem('access_token')
+      setAuth(currentToken, meRes.data)
       navigate('/employee', { replace: true })
     } catch (err) {
       setError(err.response?.data?.detail || '초대 코드가 유효하지 않습니다.')
