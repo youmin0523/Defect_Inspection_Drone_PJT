@@ -7,6 +7,7 @@
 # =============================================
 
 from datetime import datetime, timezone
+from hmac import compare_digest
 from typing import AsyncGenerator, Optional
 from uuid import UUID
 
@@ -15,6 +16,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db.session import async_session_factory
 from app.core.jwt import decode_access_token
 from app.core.ws_manager import ws_manager
@@ -156,6 +158,27 @@ async def require_superadmin(
             detail="플랫폼 관리자 권한이 필요합니다.",
         )
     return current_user
+
+
+async def verify_ai_webhook(
+    x_ai_webhook_secret: Optional[str] = Header(None, alias="X-AI-Webhook-Secret"),
+):
+    """
+    AI 추론 서버 → 백엔드 콜백(/api/v1/ai/*) 인증 의존성.
+    settings.AI_WEBHOOK_SECRET 와 X-AI-Webhook-Secret 헤더를 timing-safe 비교.
+    시크릿이 미설정(빈 문자열)이거나 헤더가 없거나 불일치 시 401.
+    """
+    expected = settings.AI_WEBHOOK_SECRET
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="AI 웹훅 시크릿이 서버에 설정되지 않았습니다.",
+        )
+    if not x_ai_webhook_secret or not compare_digest(x_ai_webhook_secret, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="AI 웹훅 인증에 실패했습니다.",
+        )
 
 
 def get_ws_manager():
