@@ -17,6 +17,7 @@ import {
   Users,
   Settings,
   Shield,
+  MessageSquare,
 } from 'lucide-react'
 
 const NOTIFICATION_CATEGORIES = {
@@ -109,6 +110,15 @@ const NOTIFICATION_CATEGORIES = {
     darkBg: 'bg-amber-500/20',
     darkText: 'text-amber-400',
     border: 'border-l-amber-500',
+  },
+  chat: {
+    label: '메시지',
+    icon: MessageSquare,
+    lightBg: 'bg-cyan-100',
+    lightText: 'text-cyan-700',
+    darkBg: 'bg-cyan-500/20',
+    darkText: 'text-cyan-400',
+    border: 'border-l-cyan-500',
   },
 }
 

@@ -29,7 +29,8 @@ export default function DashboardTopBar({ onMissionEnd }) {
   const defects = useDefectStore((s) => s.defects)
   const highCount = defects.filter((d) => d.severity === 'HIGH').length
   const status = STATUS_CONFIG[connectionStatus] ?? STATUS_CONFIG.disconnected
-  const { unreadCount, toggleDropdown } = useNotificationStore()
+  const { unreadCount, chatUnreadCount, toggleDropdown } = useNotificationStore()
+  const totalUnreadCount = unreadCount + chatUnreadCount
   const fetchUnreadCount = useNotificationStore((s) => s.fetchUnreadCount)
 
   useEffect(() => { fetchUnreadCount() }, [fetchUnreadCount])
@@ -115,9 +116,9 @@ export default function DashboardTopBar({ onMissionEnd }) {
             onClick={toggleDropdown}
           >
             <Bell size={14} />
-            {unreadCount > 0 && (
+            {totalUnreadCount > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1 border-2 border-neutral-900">
-                {unreadCount > 99 ? '99+' : unreadCount}
+                {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
               </span>
             )}
           </button>

@@ -5,7 +5,8 @@
 #       - GET    /notifications/unread-count  → 미읽음 수
 #       - PATCH  /notifications/{id}/read     → 단건 읽음 처리
 #       - PATCH  /notifications/read-all      → 전체 읽음 처리
-#       - DELETE /notifications/{id}          → 삭제
+#       - DELETE /notifications/{id}          → 단건 삭제
+#       - DELETE /notifications               → 전체 삭제 (현재 사용자)
 # =============================================
 
 from uuid import UUID
@@ -132,6 +133,18 @@ async def delete_notification(
 
     await db.delete(notif)
     await db.flush()
+
+
+@router.delete("")
+async def delete_all_notifications(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """현재 사용자의 알림 전체 삭제"""
+    result = await db.execute(
+        delete(Notification).where(Notification.user_id == current_user.id)
+    )
+    return {"deleted": result.rowcount}
 
 
 # ── 푸시 알림 (FCM/APNs) ────────────────────────────
