@@ -1708,3 +1708,25 @@ localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT �
 |------|----------|
 | `frontend/src/components/chat/ChatRealtimeListener.jsx` | WebSocket 자동 재연결 백오프 타이머 도입 |
 | `frontend/src/hooks/useWebSocket.js` | Heartbeat 기반 Connection 보강 |
+
+---
+
+#### ⏱ 2026-04-27 | 메신저 로딩 성능 최적화 및 렌더링 버그 수정 (Zero-Delay & Skeleton UI)
+
+- **피드백 (요청)**:
+  1. 채팅 화면 진입 시 "메시지 불러오는 중..." 표시 시간을 없애 빠르게 로딩될 수 있도록 성능 개선.
+  2. 화면(JSX 영역)에 개발용 주석(`// Modified Code...` 등)이 그대로 텍스트로 노출되는 렌더링 오류 수정.
+  3. 채팅방 진입 시 스크롤 처리가 지연되어 최신 메시지 대신 이전 대화 내용이 먼저 보이는 불편함 수정.
+- **반영**:
+  - `store/chatStore.js` (채팅 스토어): `messageCache`를 도입하여 한 번 진입했던 방의 메시지 초기 렌더링 대기 시간을 0으로 단축. Promise.all 동기 대기를 백그라운드 fetch로 개선.
+  - `components/chat/MessageThread.jsx`:
+    - **Skeleton UI 적용**: 초기 데이터 호출 중 레이아웃 깨짐을 방지하기 위해 뼈대 UI를 배치해 이질감을 줄이고 체감 성능 향상.
+    - **JSX 구문 에러 수정**: JSX 렌더링 내부 영역에 있던 텍스트형 주석들을 `return` 상단으로 이전하여 브라우저 노출 차단.
+    - **자동 스크롤 안정화**: DOM 업데이트 타이밍 문제 해결을 위해 `requestAnimationFrame`이 아닌 50ms의 `setTimeout`을 통해, DOM 및 스켈레톤 레이아웃이 화면 픽셀로 변환될 때까지 대기 후 맨 아래로 스크롤 이동하도록 확실히 보장.
+
+### 🔗 변경 파일 목록 (2개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/store/chatStore.js` | `messageCache` 구현 및 비동기 조회 로직 백그라운드 호출로 개선 |
+| `frontend/src/components/chat/MessageThread.jsx` | Skeleton UI 구현, 잘못 렌더링되던 JSX 주석 제거, `setTimeout`으로 최하단 스크롤 동기화 해결 |

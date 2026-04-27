@@ -63,15 +63,14 @@ export default function MessageThread() {
     return groups
   }, [messages])
 
-  // 새 메시지 또는 대화방 전환 시 자동 스크롤 (DOM 렌더 완료 후 실행)
+  // //* [Modified Code] DOM 렌더 및 레이아웃 완료 후 스크롤 하단 이동 보장을 위해 setTimeout 사용
   useEffect(() => {
-    if (scrollRef.current) {
-      requestAnimationFrame(() => {
-        if (scrollRef.current) {
-          scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-        }
-      })
-    }
+    const timer = setTimeout(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      }
+    }, 50)
+    return () => clearTimeout(timer)
   }, [messages, messagesLoading])
 
   if (!activeConversationId) {
@@ -84,6 +83,7 @@ export default function MessageThread() {
     )
   }
 
+  // //* [Modified Code] 지루한 로딩 텍스트 대신 스켈레톤(Skeleton UI)을 렌더링하고, 깜빡임을 최소화
   return (
     <div className="flex-1 flex flex-col min-w-0">
       <ChatHeader />
@@ -91,7 +91,24 @@ export default function MessageThread() {
       {/* 메시지 영역 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto bg-blue-50/30 py-4">
         {messagesLoading ? (
-          <p className="text-center text-sm text-gray-400 py-8">메시지 불러오는 중...</p>
+          <div className="flex flex-col gap-5 p-4 opacity-60">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-full bg-gray-200 animate-pulse border border-white shrink-0" />
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-16 h-4 bg-gray-200 rounded animate-pulse" />
+                  <div className="w-10 h-3 bg-gray-200 rounded animate-pulse" />
+                </div>
+                <div className="w-56 h-10 bg-gray-200 rounded-2xl rounded-tl-sm animate-pulse" />
+              </div>
+            </div>
+            <div className="flex items-start gap-3 flex-row-reverse">
+              <div className="flex flex-col gap-1.5 items-end">
+                <div className="w-10 h-3 bg-gray-200 rounded animate-pulse" />
+                <div className="w-40 h-10 bg-blue-200 rounded-2xl rounded-tr-sm animate-pulse" />
+              </div>
+            </div>
+          </div>
         ) : messages.length === 0 ? (
           <p className="text-center text-sm text-gray-400 py-8">아직 메시지가 없습니다. 첫 메시지를 보내보세요!</p>
         ) : (
