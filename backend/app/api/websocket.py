@@ -2,13 +2,12 @@
 # app/api/websocket.py
 # 역할: WebSocket 실시간 이벤트 엔드포인트
 #       - WS /ws?channel={channel} → 채널 구독
-#       - 채널: defects / telemetry / thermal / camera / notifications:{user_uuid}
+#       - 채널: defects / telemetry / thermal / camera
 #       - 연결 시 현재 카메라 모드 즉시 전송
 #       - WS_HEARTBEAT_INTERVAL 초마다 ping 전송으로 죽은 연결 감지
 # =============================================
 
 import asyncio
-import re
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 
@@ -19,18 +18,6 @@ from app.dependencies import get_ws_manager
 router = APIRouter()
 
 VALID_CHANNELS = {"defects", "telemetry", "thermal", "camera"}
-
-# notifications:{user_uuid} 패턴 허용 (사용자별 개인 알림 채널 — notification_service가 사용)
-# TODO: JWT 토큰으로 본인만 자기 채널 구독 가능하게 인증 추가 필요 (현재는 UUID 형식만 검증)
-_NOTIFICATION_CHANNEL_RE = re.compile(
-    r"^notifications:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-)
-
-
-def _is_valid_channel(channel: str) -> bool:
-    """고정 채널 + notifications:{uuid} 패턴 허용."""
-    return channel in VALID_CHANNELS or bool(_NOTIFICATION_CHANNEL_RE.match(channel))
 
 
 @router.websocket("/ws")
@@ -52,7 +39,7 @@ async def websocket_endpoint(
         camera   채널: {"type": "camera.mode_changed", "data": {"mode": "..."}}
     """
     # 유효하지 않은 채널이면 기본값 사용
-    if not _is_valid_channel(channel):
+    if channel not in VALID_CHANNELS:
         channel = "defects"
 
     await manager.connect(websocket, channel)

@@ -163,20 +163,6 @@ function drawDetections(result, canvas) {
 
 ## DB 마이그레이션 절차 (첫 배포)
 
-> ⚠️ **운영 배포 전 정리 필요 (TODO)**
->
-> 현재 [`init_db.py`](app/db/init_db.py)가 `Base.metadata.create_all`로 테이블을 자동 생성하고 있어, alembic 마이그레이션 시스템과 **이중으로 굴러가는 상태**입니다. 이대로 두면:
-> - 모델에 컬럼 추가해도 기존 테이블엔 반영 안 됨 (`create_all`은 신규 테이블만 만듦)
-> - 팀원/서버마다 DB 스키마가 달라질 수 있음
-> - 이미 `versions/`에 9개 마이그레이션 파일이 있는데, 적용 이력(`alembic_version`)이 추적 안 됨
->
-> **출시 전 작업 항목:**
-> 1. `init_db.py` 에서 `create_all` 호출 제거 (시드 데이터 삽입만 남김)
-> 2. 운영 DB에 `alembic stamp head` 1회 실행 (현재 스키마를 최신 리비전으로 도장만 찍기)
-> 3. 이후 모든 모델 변경은 `alembic revision --autogenerate -m "..."` → `alembic upgrade head` 로만 진행
->
-> **현재까지는** 팀이 로컬에서 `init_db` 방식으로 잘 쓰고 있으니 그대로 유지. 출시 직전 운영 DB 백업 후 한 번에 정리할 것.
-
 Alembic 리비전 [0002_defect_class_display.py](alembic/versions/0002_defect_class_display.py)가 `defect_logs`에 4개 컬럼 추가 + 기존 `area/category_code/defect_type`을 `NULLABLE`로 완화합니다. 기존 스키마와 drift 나지 않도록 **baseline은 `stamp` 방식으로 처리**합니다.
 
 ### 신규 DB (비어 있음)
