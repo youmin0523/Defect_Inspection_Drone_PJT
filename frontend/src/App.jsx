@@ -59,6 +59,7 @@ import ProtectedSessionLayout from './components/session/ProtectedSessionLayout.
 import SessionSetup from './pages/session/SessionSetup.jsx'
 import SessionLevel from './pages/session/SessionLevel.jsx'
 import SessionModeling from './pages/session/SessionModeling.jsx'
+import SampleReport from './pages/SampleReport.jsx'
 import OAuthCallback from './pages/OAuthCallback.jsx'
 import ReportModal from './components/report/ReportModal.jsx'
 import useWebSocket from './hooks/useWebSocket.js'
@@ -129,6 +130,7 @@ export default function App() {
       <Routes>
         {/* 공개 라우트 */}
         <Route path="/" element={<Landing />} />
+        <Route path="/sample-report" element={<SampleReport />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/find-account" element={<FindAccount />} />

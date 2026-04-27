@@ -246,6 +246,7 @@
 - [x] v1.2_260413 — Gemini 대응 가이드라인 수정
 - [x] v1.3_260413 — .clauderules, .geminirules 생성
 - [x] v1.8_260414 — Notion 연동 스크린샷 캡쳐 폴백 로직 통합 (`sync_notion_logs.py` 단일화, `.gitignore` 등록)
+- [x] v1.9_260427 — 리포지토리 루트의 README.md 내용을 현재 진행 상황(AI, RL, Frontend)과 맞춰 최신화
 
 ---
 

@@ -8,6 +8,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import ContactModal from './ContactModal.jsx'
 
 // //! [Original Code] 하드코딩된 파일명 배열 + public/images 경로 사용
 // const HERO_IMAGES = [
@@ -72,6 +74,9 @@ function ImageLayer({ picks, opacityClass }) {
 }
 
 export default function HeroSection() {
+  const navigate = useNavigate()
+  const [isContactOpen, setIsContactOpen] = useState(false)
+
   // 2개의 레이어를 번갈아 보여주는 "더블 버퍼링" 패턴
   // - layerA / layerB 각각이 슬롯 3개를 품음
   // - activeLayer 가 가리키는 쪽이 opacity:1, 반대쪽은 0 → transition 으로 dissolve
@@ -139,18 +144,23 @@ export default function HeroSection() {
         <div className="flex flex-col sm:flex-row justify-center gap-4">
           <button
             type="button"
+            onClick={() => navigate('/sample-report')}
             className="bg-yellow-500 hover:bg-yellow-400 text-slate-900 px-8 py-3.5 rounded-md font-bold text-lg transition shadow-lg focus:outline-none focus:ring-2 focus:ring-yellow-300"
           >
             3D 리포트 샘플 보기
           </button>
           <button
             type="button"
+            onClick={() => setIsContactOpen(true)}
             className="bg-transparent border-2 border-gray-400 hover:border-white px-8 py-3.5 rounded-md font-bold text-lg transition focus:outline-none focus:ring-2 focus:ring-white"
           >
             서비스 도입 문의
           </button>
         </div>
       </div>
+
+      {/* 도입 문의 모달 */}
+      <ContactModal isOpen={isContactOpen} onClose={() => setIsContactOpen(false)} />
     </section>
   )
 }

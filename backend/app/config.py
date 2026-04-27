@@ -161,7 +161,7 @@ class Settings(BaseSettings):
     OAUTH_REDIRECT_BASE: str = "http://localhost:5173"
 
     # ── WebSocket ────────────────────────────
-    WS_HEARTBEAT_INTERVAL: int = 30
+    WS_HEARTBEAT_INTERVAL: int = 3
 
     # ── Streaming ────────────────────────────
     MJPEG_JPEG_QUALITY: int = 80

@@ -13,71 +13,94 @@
  *   App.jsx 에서 /employee/* 경로에서만 마운트하여 비로그인/공개 페이지에서는 비용 0.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import useAuthStore from '../../store/authStore.js'
 import useChatStore from '../../store/chatStore.js'
 import useNotificationStore from '../../store/notificationStore.js'
 
 const WS_BASE = (import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/v1/ws').replace('/ws', '')
+const RETRY_DELAY = 300       // 0.3초
+const MAX_RETRY_DELAY = 2000  // 2초
 
 export default function ChatRealtimeListener() {
   const userId = useAuthStore((s) => s.user?.id)
+  const wsRef = useRef(null)
+  const retryDelayRef = useRef(RETRY_DELAY)
+  const retryTimerRef = useRef(null)
+  const mountedRef = useRef(true)
 
   useEffect(() => {
     if (!userId) return
+    mountedRef.current = true
 
-    const ws = new WebSocket(`${WS_BASE}/ws?channel=user:${userId}`)
+    function connect() {
+      if (!mountedRef.current) return
 
-    ws.onmessage = (event) => {
-      try {
-        const { type, data } = JSON.parse(event.data)
+      const ws = new WebSocket(`${WS_BASE}/ws?channel=user:${userId}`)
+      wsRef.current = ws
 
-        if (type === 'chat.new_message' && data) {
-          // 내가 보낸 메시지는 receiveMessage 내부에서 무시되지만, 알림 push도 막아야 하므로 조기 반환
-          if (data.sender_id === userId) return
+      ws.onopen = () => {
+        retryDelayRef.current = RETRY_DELAY  // 연결 성공 시 딜레이 초기화
+      }
 
-          // chatStore: 메시지 추가 / 미읽음 카운트 / 대화방 정렬
-          useChatStore.getState().receiveMessage(data)
+      ws.onmessage = (event) => {
+        try {
+          const { type, data } = JSON.parse(event.data)
 
-          // 알림: 현재 보고 있는 대화가 아닐 때만 push
-          const activeId = useChatStore.getState().activeConversationId
-          if (data.conversation_id !== activeId) {
-            useNotificationStore.getState().pushChatNotification({
-              id: `chat-${data.id}`,
-              message_id: data.id,
-              sender_id: data.sender_id,
-              sender_name: data.sender_name,
-              conversation_id: data.conversation_id,
-              text: data.text,
-              file_name: data.file_name,
-              created_at: data.created_at,
-            })
+          if (type === 'chat.new_message' && data) {
+            if (data.sender_id === userId) return
+
+            useChatStore.getState().receiveMessage(data)
+
+            const activeId = useChatStore.getState().activeConversationId
+            if (data.conversation_id !== activeId) {
+              useNotificationStore.getState().pushChatNotification({
+                id: `chat-${data.id}`,
+                message_id: data.id,
+                sender_id: data.sender_id,
+                sender_name: data.sender_name,
+                conversation_id: data.conversation_id,
+                text: data.text,
+                file_name: data.file_name,
+                created_at: data.created_at,
+              })
+            }
+            return
           }
-          return
-        }
 
-        if (type === 'chat.read' && data) {
-          // 상대방 읽음 → 활성 대화방이면 메시지 다시 로드(읽음 카운트 갱신)
-          const activeId = useChatStore.getState().activeConversationId
-          if (data.conversation_id === activeId) {
-            useChatStore.getState().refreshMessages(activeId)
+          if (type === 'chat.read' && data) {
+            const activeId = useChatStore.getState().activeConversationId
+            if (data.conversation_id === activeId) {
+              useChatStore.getState().refreshMessages(activeId)
+            }
+            return
           }
-          return
-        }
 
-        if (type === 'ping') {
-          ws.send(JSON.stringify({ type: 'pong' }))
+          if (type === 'ping') {
+            ws.send(JSON.stringify({ type: 'pong' }))
+          }
+        } catch {
+          // 파싱 실패 등은 무시 — 네트워크 노이즈로 간주
         }
-      } catch {
-        // 파싱 실패 등은 무시 — 네트워크 노이즈로 간주
+      }
+
+      ws.onerror = () => {}
+      ws.onclose = () => {
+        if (!mountedRef.current) return
+        // 지수 백오프 자동 재연결
+        retryTimerRef.current = setTimeout(() => {
+          retryDelayRef.current = Math.min(retryDelayRef.current * 2, MAX_RETRY_DELAY)
+          connect()
+        }, retryDelayRef.current)
       }
     }
 
-    ws.onerror = () => {}
-    ws.onclose = () => {}
+    connect()
 
     return () => {
-      ws.close()
+      mountedRef.current = false
+      clearTimeout(retryTimerRef.current)
+      wsRef.current?.close()
     }
   }, [userId])
 

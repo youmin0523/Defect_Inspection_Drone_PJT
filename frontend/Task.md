@@ -9,6 +9,17 @@
 
 ## 작업 목록 — @youminsu0523 (branch: MS)
 
+### 3D 리포트 샘플 페이지 (260427)
+- [x] v4.1_260427 — 3D 리포트 샘플 페이지 **SampleReport.jsx** (~1200줄, 신규)
+  - `HeroSection.jsx`「3D 리포트 샘플 보기」버튼 → `/sample-report` 네비게이션 연결
+  - `App.jsx`: `/sample-report` Route 추가
+  - 25평 아파트 3D 모델링: 6개 공간(거실/주방/침실1/침실2/화장실/현관), 외벽/내벽/문/창문, 가구 12종(복합 메시)
+  - 드론 스캔 시뮬레이션: 격자형 3D 수직 지그재그(genScan), 가구 장애물 회피(바운딩 박스 기반 높이 조정), 문 개구부만 통과
+  - 근접 기반 하자 탐지(0.7m): 드론 접근 시 3D 마커+우측 패널 순차 추가
+  - 쿼드콥터 드론 모델(1.5배 스케일, 시안/화이트, 4암+프로펠러+가드+LED+짐벌+스키드)
+  - 스캔 컨트롤 UI: 일시정지/재개/중지/시작 버튼
+  - SLAM 포인트 클라우드 18000점, 경로 트레일(주황), 하자 펄스 애니메이션
+
 ### 랜딩 페이지 & 라우팅 (260414~260416)
 - [x] v2.0_260414 — React 대시보드 Header + DefectPanel 구현
   - `Header.jsx`: `useDroneStore` 텔레메트리(고도/속도/배터리/모드), `useDefectStore` 하자 심각도 카운트(HIGH/MED/LOW), WebSocket 연결 상태 뱃지
@@ -16,9 +27,9 @@
 - [x] v2.1_260415 — 랜딩 페이지 **95개 파일** (이미지 ~80개 포함)
   - `App.jsx` 라우팅: `/` = Landing, `/dashboard` = DashboardLayout (WS는 대시보드 진입 시에만 초기화)
   - `Landing.jsx`: 6개 섹션 조립 (LandingHeader + HeroSection + ServiceIntroSection + FeaturesSection + CasesSection + DualCTASection)
-  - `HeroSection.jsx`: `import.meta.glob` 이미지 자동 스캔 → 5초 주기 3장 크로스페이드(더블 버퍼링) → 그라데이션 오버레이 → CTA 2개("3D 리포트 샘플 보기"/"서비스 도입 문의")
-  - `LandingHeader.jsx`: 스크롤 위치 기반 투명↔흰색 배경 전환, 로고 스왑(`logoWhite`/`logoDark`), `ContactModal` 연동
-  - `ContactModal.jsx`: 개인/사업자 탭, 사업자등록번호 10자리 진위 시뮬레이션, 담당자/연락처/문의 수집
+  - `HeroSection.jsx`: `import.meta.glob` 이미지 자동 스캔 → 5초 주기 3장 크로스페이드(더블 버퍼링) → 그라데이션 오버레이 → CTA 2개("3D 리포트 샘플 보기"/"서비스 도입 문의"), 「서비스 도입 문의」 클릭 시 `ContactModal` 직접 연동
+  - `LandingHeader.jsx`: 스크롤 위치 기반 투명↔흰색 배경 전환, 로고 스왑(`logoWhite`/`logoDark`), `ContactModal` 연동, 3-column grid 중앙 정렬(비로그인: 3링크 / 로그인: 3링크+직원전용), focus→focus-visible 전환
+  - `ContactModal.jsx`: 개인/사업자 탭, 사업자등록번호 10자리 진위 시뮬레이션, 담당자/연락처/문의 수집, 로그인 시 `authStore` user 정보(name/phone/account_type/biz_number) 자동 기입
   - `ServiceIntroSection.jsx`: 접근성/정밀성/효율성 3가치 카드 + `Reveal` 애니메이션
   - `FeaturesSection.jsx`: 하이브리드 3D 복원 / AI 하자 식별 / 정밀 공간 매핑 3기술 카드
   - `CasesSection.jsx`: B2B 건설사 / 정밀 안전진단 / B2C 입주민 3레퍼런스 + `CaseSlideshow` 크로스페이드
@@ -223,6 +234,10 @@ frontend/src/
 ---
 
 ## Revision History
+
+### v4.1_260427 (작성자: @youminsu0523 / branch: MS)
+- 3D 리포트 샘플 페이지 추가: `SampleReport.jsx` (신규), `HeroSection.jsx`, `App.jsx`
+- 25평 아파트 내부 3D 모델링 + 드론 격자스캔 시뮬레이션 + 근접 기반 하자 탐지
 
 ### v4.0_260427 (작성자: @youminsu0523 / branch: MS)
 - 전면 재작성: git log 기반 전체 팀원 10일간 작업 상세 기록

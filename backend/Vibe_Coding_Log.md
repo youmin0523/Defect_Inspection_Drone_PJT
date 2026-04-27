@@ -1560,3 +1560,31 @@ API 시그니처 변경에 따른 Store 수정:
 
 - **prefix 화이트리스트 vs 정규식**: 팀원이 만든 기존 코드가 `channel.startswith("chat:")` 방식이라 같은 스타일 채택. UUID 형식 검증은 안 함 (다른 채널들도 형식 검증 없음, 일관성 우선). TODO 주석으로 JWT 인증 보강 필요성 명시.
 - **DB 마이그레이션 즉시 처리 vs 메모만**: 운영 RDS 손대면 데이터 손실 위험 + 팀원 로컬 다 깨질 수 있어 즉시 작업 위험 큼. README 메모로 출시 전 체크리스트화 → 안전한 시점에 일괄 처리.
+
+---
+
+## 📡 2026-04-27 — 건물 열화상 자동화 데이터셋(Thermal Building) 스크립트 작성
+
+> **작업자**: @youminsu0523
+> **목표**: 건물 점검용 보조 열화상 데이터 수집 스크립트 구현 및 모델 재학습 파이프라인 연동.
+
+### ⏱ 열화상 데이터 구조화 다운로드 및 모델 적용 파이프라인
+
+- **문제**: 가중치 정확도를 올리기 위해 기존 공공 데이터 이외에 추가적인 열화상 데이터셋(Water Leak, Thermal Defect)의 외부 수급 필요성 대두.
+- **반영**:
+  - `backend/training/download_thermal_building.py` (신규):
+    - Roboflow Universe에서 물샘, 단열 결함 등 5종 데이터셋을 자동 다운로드.
+    - 다운로드 된 YOLO 포맷 데이터를 열화상 클래스 스키마(`0: Crack, 1: Moisture, 2: delamination`)에 맞게 전처리 및 매핑.
+  - `backend/training/retrain_m1_v4s_run.py` (신규):
+    - 구조적(Structural) 하자 데이터 2만 장에 대응하는 YOLOv8s 훈련 최적화 파이프라인 실행 래퍼.
+    - 에폭 50, batch 32, box=10.0으로 파인튜닝 후 최고 성능 가중치(Best.pt)를 즉시 ONNX 포맷으로 변환.
+  - `backend/app/config.py`:
+    - 시스템 Heartbeat 설정 설정 축소 변경(`WS_HEARTBEAT_INTERVAL: int = 3`).
+
+### 🔗 변경 파일 목록 (3개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `backend/training/download_thermal_building.py` | Roboflow 기반 열화상 데이터 스크래핑 및 클래스 맵핑 모듈 |
+| `backend/training/retrain_m1_v4s_run.py` | YOLOv8s 리트레이닝 스크립트 및 ONNX 최적화 |
+| `backend/app/config.py` | WebSocket Heartbeat 변수 최적화 |
