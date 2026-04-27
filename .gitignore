@@ -67,3 +67,7 @@ runs/
 
 # Claude Code lock
 .claude/scheduled_tasks.lock
+
+# AI Agent Temp Dirs (Gemini, Taskmaster)
+.gemini/
+.taskmaster/
