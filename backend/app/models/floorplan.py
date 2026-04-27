@@ -7,7 +7,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, Integer, Text, DateTime, func
+from sqlalchemy import Column, String, Integer, Float, Text, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from app.db.base import Base
@@ -39,6 +39,15 @@ class Floorplan(Base):
     walls_data = Column(JSONB, comment="벽체 좌표 JSON [{x1,y1,x2,y2}, ...]")
     gazebo_world_path = Column(String(500), comment="생성된 .world 파일 경로")
     error_message = Column(Text, comment="처리 실패 시 오류 메시지")
+
+    # ── 스케일 보정 (FR-015) ─────────────────
+    # 사용자가 평면도 위 두 점을 찍고 "이 거리는 실제 3m" 라고 지정 → px/m 환산
+    # 이후 모든 길이 계산(면적, 커버리지)이 미터 단위로 가능
+    scale_px_per_meter = Column(Float, comment="1m 당 픽셀 수 (환산 계수)")
+    scale_reference = Column(
+        JSONB,
+        comment="사용자 지정 기준 {p1:[x,y], p2:[x,y], real_length_m:float}",
+    )
 
     # ── 타임스탬프 ───────────────────────────
     created_at = Column(

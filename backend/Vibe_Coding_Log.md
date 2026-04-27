@@ -502,3 +502,1089 @@ def submit(frame):
 - **싱글 워커 제한**: `stream_inference_worker`는 프로세스 내 싱글톤이라 gunicorn multi-worker 구동 불가. 다중 워커 필요 시 Redis pub/sub 기반 리팩터
 - **드론 좌표**: MAVLink/LiDAR 연동 전이라 `lidar_x/y/z`는 당분간 NULL. TF 연동 완료 후 기존 컬럼에 채울 예정
 - **벽지 분류 정확도 0.54**: `WALLPAPER_CONF_THRESHOLD=0.4`로 보수 필터링. 데이터 추가 수집 후 fine-tuning 필요
+
+---
+
+## 🔧 2026-04-21 추가 세션 — 벽지 분류 오탐 감소 (Issue 1)
+
+### 1️⃣ 배경
+- ResNet50 벽지 분류기 val_acc ≈ 54% (19-way). 단일 `top1_conf >= 0.4` 필터는 모호한 예측(top1/top2 근소차)을 걸러내지 못해 오탐 유입.
+- 재학습 없이 **코드 수정만으로** FP 감소 가능한 지점을 찾음.
+
+### 2️⃣ 적용한 개선 — 이중 게이트 (Top-k Margin 투표)
+`is_confident` 판정에 두 조건 모두 만족 요구:
+1. `top1_conf >= WALLPAPER_CONF_THRESHOLD` (기본 0.35로 완화 — 19-way 특성 반영, 랜덤(1/19≈5%) 대비 6배 이상)
+2. `top1_conf - top2_conf >= WALLPAPER_MARGIN_THRESHOLD` (기본 0.15 신규 — 2위와의 분리도)
+
+근거: 1위 점수 높아도 2위와 근소차면 모델이 헷갈린 상태. 그런 케이스는 `is_confident=false` → severity null로 판정 보류시켜 오탐 차단.
+
+### 3️⃣ 변경 파일
+- [app/config.py](app/config.py) — `WALLPAPER_CONF_THRESHOLD` 0.4 → 0.35, `WALLPAPER_MARGIN_THRESHOLD=0.15` 신규 추가
+- [app/services/inference_pipeline.py](app/services/inference_pipeline.py) — `_run_wallpaper()`에 top1/top2 margin 계산 + 이중 게이트 로직. init / load_models 초기화 값 반영
+- [app/schemas/detection.py](app/schemas/detection.py) — `WallpaperPrediction.is_confident` description 이중 조건으로 갱신
+- [.env.example](.env.example) — 두 임계값 반영
+- [README.md](README.md) — 알려진 제약 섹션에 이중 게이트 설명 추가
+
+### 4️⃣ 추후 튜닝 방향
+- 지금 값(0.35 / 0.15)은 "감"으로 지정. 실제 운영 로그(사람이 오탐 태그한 케이스) 축적 후 임계값 스윕 스크립트로 최적점 재산출 예정
+- 드론 건물 검사 특성(하자 놓치면 안전 문제)상 "미탐 최소화" 쪽으로 더 완화(예: 0.30 / 0.10) 검토 가능
+- 재학습 대안: class-weighted CrossEntropy, RandomRotation/ColorJitter 증강, 19→5 계층적 그룹핑 (외부 학습 파이프라인 필요)
+
+---
+
+## 🛠️ 2026-04-21 추가 — Issue 2 LiDAR 3D 좌표 배선 + 품질 개선 일괄
+
+### 1️⃣ Issue 2: MAVLink/LiDAR 3D 좌표 통합 (하드웨어 없이 배선 완료)
+기존 lidar.py(TF-Luna 9-byte 프레임 파서, 중앙값 필터, compute_3d_position) 이미 존재. **빠진 배선 4개** 연결:
+1. `app/services/telemetry_cache.py` **신규** — 최신 드론 pose 메모리 캐시 싱글톤 (asyncio.Lock, stale 5초 판정)
+2. [app/main.py](app/main.py) — lifespan에 `lidar_service.start()/stop()` 호출 (serial 실패해도 graceful), health에 `lidar.connected/distance_m`, `telemetry_cache.ready/age_sec` 노출
+3. [app/api/telemetry.py](app/api/telemetry.py) — POST /telemetry 수신 시 `telemetry_cache.update()` + `lidar_service.update_attitude()` 호출
+4. [app/core/stream_inference.py](app/core/stream_inference.py) — 프레임 추론 시점에 `_compute_lidar_xyz()` (cache_fresh + lidar distance) 호출, 레거시 `defect.new` 이벤트와 `stream` 페이로드에 `lidar_x/y/z` 주입
+
+좌표 없으면 None 유지 → 드론/LiDAR 없어도 서비스 영향 없음.
+
+### 2️⃣ 이미지 저장소 리팩 (Base64 → 파일시스템)
+- `app/services/image_storage.py` **신규** — `save_base64_jpeg(b64) → rel_path`, `get_url()`, `delete()`. 저장 경로: `./uploads/defects/YYYY-MM-DD/uuid.jpg` (이미 mount된 StaticFiles 경유 서빙)
+- [app/models/defect.py](app/models/defect.py) — `image_crop_path` (String 255) 컬럼 추가, `image_crop`(Text)는 DEPRECATED 표시 유지
+- [alembic/versions/c8f1d2e4a7b9_add_image_crop_path_to_defect_logs.py](alembic/versions/c8f1d2e4a7b9_add_image_crop_path_to_defect_logs.py) **신규 마이그레이션**
+- [app/schemas/defect.py](app/schemas/defect.py) — `image_crop_path`, `image_crop_url` 응답 필드
+- [app/api/ai_webhook.py](app/api/ai_webhook.py), [app/api/defects.py](app/api/defects.py) — Base64 수신 시 파일 저장 → `image_crop=None`, `image_crop_path=rel_path` 기록. `_build_response()` 헬퍼로 `image_crop_url` 채움
+
+효과: DB Text 컬럼 용량 폭증 방지. 1건당 ~100KB → 파일 경로만 저장.
+
+### 3️⃣ 로깅 체계 (structlog + Request ID)
+- `app/core/logging.py` **신규** — `configure_logging(json_output, level)`, `get_logger(name)`, contextvars 통합
+- `app/core/middleware.py` **신규** — `RequestIDMiddleware`: `X-Request-ID` 수신/발행, 모든 로그에 `request_id/method/path` 자동 바인딩, 요청 완료 시 `http.request` 이벤트(status, duration_ms) 로깅
+- [app/config.py](app/config.py) — `LOG_JSON=False`, `LOG_LEVEL=INFO`
+- [requirements.txt](requirements.txt) — `structlog` 추가
+- [app/main.py](app/main.py) — import 시점에 `configure_logging()`, `add_middleware(RequestIDMiddleware)`
+- [.env.example](.env.example) — LOG_JSON/LOG_LEVEL 문서화
+
+### 4️⃣ 테스트 추가 (새 모듈 회귀 방지)
+- `tests/test_telemetry_cache.py` — update/snapshot/stale/clear 7 케이스
+- `tests/test_image_storage.py` — base64 저장/삭제/data URL prefix/에러 8 케이스
+- `tests/test_wallpaper_double_gate.py` — monkeypatch 기반 이중 게이트 로직 5 케이스 (모델 없이 검증)
+
+### 5️⃣ 후속 TODO (다음 이터레이션)
+- 카메라 intrinsics 불필요(1D LiDAR) 구조 유지 중. 멀티빔/3D LiDAR로 교체 시 `compute_3d_position` 확장 필요
+- `image_crop` (Text, deprecated) 컬럼은 충분한 마이그레이션 기간 후 drop 예정
+- 운영 배포 시 `LOG_JSON=true` 전환 + Grafana/Datadog 연동
+- DefectLog 삭제 시 파일 cleanup 훅 (`image_storage.delete(defect.image_crop_path)`) 필요
+
+---
+
+## 🔬 20종 결함 분류 ONNX 추론 파이프라인 (2026-04-22)
+
+- 작성자: @youminsu0523
+- 작업 브랜치: `MS`
+
+### 1️⃣ 초기 작업 내용
+
+#### 추론 서비스 (신규)
+- [app/services/onnx_inference.py](app/services/onnx_inference.py) — ONNX Runtime 기반 모델 로더 및 추론 래퍼 (ResNet, PatchCore 지원)
+- [app/services/ensemble.py](app/services/ensemble.py) — 다중 모델 앙상블 투표/가중평균 서비스
+- [app/services/alignment_detector.py](app/services/alignment_detector.py) — 건물 정렬(수직/수평) 감지 서비스
+- [app/services/insulation_detector.py](app/services/insulation_detector.py) — 단열 결함 감지 서비스
+- [app/services/temporal_filter.py](app/services/temporal_filter.py) — 시계열 기반 오탐 필터링
+- [app/services/inference_pipeline_20.py](app/services/inference_pipeline_20.py) — 20종 결함 통합 추론 파이프라인
+
+#### 스키마/모델/마이그레이션
+- [app/models/defect.py](app/models/defect.py) — 20종 결함 컬럼 추가
+- [app/schemas/detection.py](app/schemas/detection.py) — 20종 결함 응답 스키마 확장
+- [app/services/defect_taxonomy.py](app/services/defect_taxonomy.py) — 결함 분류 체계 확장
+- [alembic/versions/0003_add_20defect_pipeline_columns.py](alembic/versions/0003_add_20defect_pipeline_columns.py) — DB 마이그레이션
+- [app/config.py](app/config.py) — ONNX 모델 경로 설정 추가
+- [app/core/stream_inference.py](app/core/stream_inference.py) — 20종 파이프라인 연동
+
+#### 학습 스크립트 & 설정
+- `training/train_m1~m6` — ResNet(m1~m3), Thermal UNet(m4), FrameSeg(m5), PatchCore(m6) 학습 스크립트
+- `training/configs/` — 모델별 YAML 학습 설정
+- `training/eval/` — 벤치마크 및 전체 평가 스크립트
+- `training/export_to_onnx.py` — PyTorch → ONNX 변환
+- `training/AeroInspect_Training.ipynb` — 학습 노트북
+
+### 2️⃣ 피드백 반영 (⏱ 2026-04-22)
+- `.gitignore` 정리: 대용량 바이너리(`*.onnx.data`, `*.npy`), 학습 로그(`*_log.txt`), YOLO 학습 결과(`runs/`), lock 파일을 gitignore에 추가
+- staged에서 불필요 파일 129개 제거 (172개 → 40개)
+
+---
+
+## 🧹 2026-04-22 추가 — 후속 TODO 소진 & 모니터링 엔드포인트 (@Hijin554)
+
+> **착수 시각**: 2026-04-22 오후
+> **작업 브랜치**: `Hijin`
+> **목표**: LiDAR 세션(2026-04-21)에서 남긴 후속 TODO 소진 + 운영 모니터링 기반 마련
+> **배경**: "백엔드 할 거 뭐 있냐"는 질문에 대한 잔여 작업 정리. MS 브랜치(20종 파이프라인)와 겹치지 않는 영역만.
+
+### 1️⃣ 후속 TODO 소진 (LiDAR 세션에서 남김)
+
+#### DefectLog 삭제 시 파일 cleanup 훅
+- [app/api/defects.py](app/api/defects.py) `delete_defect` — DB 레코드 제거 후 `image_storage.delete(defect.image_crop_path)` 호출. DB 트랜잭션 성공 후에만 파일 지움 → 롤백 시 orphan 방지
+- **+ 조직 스코프 적용**: 기존엔 인증만 걸려 있고 `get_current_org_member` 누락 → 다른 조직 레코드까지 UUID만 알면 삭제되는 버그였음. 내 조직 site에 연결된 레코드만 삭제되게 수정
+
+### 2️⃣ 운영 모니터링 API 신규
+
+#### `GET /api/v1/stream/stats`
+- [app/api/stream.py](app/api/stream.py) — `stream_inference_worker.stats` + `telemetry_cache` ready/age + `lidar` connected/distance를 한 번에 반환
+- 대시보드 좌측 상단 배지 / 운영 헬스 체크용. `/health`보다 실시간 추론 파이프라인에 특화
+- 응답은 `StreamStatsResponse` Pydantic 스키마로 타입 고정 → Swagger에 전체 필드 구조 노출
+
+#### `GET /api/v1/coverage/{site_id}`
+- [app/api/coverage.py](app/api/coverage.py) **신규** — 텔레메트리 좌표(pos_x/pos_y)의 convex hull 면적 vs `sites.total_area` 대비 커버리지율
+- **순수 Python Andrew's monotone chain** 구현 (scipy 의존 회피). Shoelace로 면적 산출
+- `sample_limit` 쿼리 파라미터로 최근 N개 샘플 제어 (기본 2000, 최대 20000)
+- 샘플 < 3점이면 `note` 필드로 부족 안내하는 graceful fallback
+- 응답은 `CoverageResponse` Pydantic 스키마. `hull` 필드를 프론트 3D 미니맵 음영 영역용으로 그대로 전달
+
+#### 스키마 모듈 신설
+- [app/schemas/monitoring.py](app/schemas/monitoring.py) **신규** — `StreamStatsResponse`, `CoverageResponse`, `WorkerStats`, `TelemetryCacheStats`, `LidarStats`
+- 기존 `app/schemas/defect.py` 등과 일관된 `from_attributes` 스타일 대신, 모니터링 응답은 완전 DTO라 Plain BaseModel
+
+### 3️⃣ 벽지 임계값 튜닝 스윕 스크립트
+- [scripts/sweep_wallpaper_thresholds.py](scripts/sweep_wallpaper_thresholds.py) **신규**
+- 입력: JSONL (`{"top1_conf": 0.62, "top2_conf": 0.41, "label": "defect"}`)
+- `WALLPAPER_CONF_THRESHOLD × WALLPAPER_MARGIN_THRESHOLD` 격자 탐색 → precision / recall / F1 / TP / FP / FN / TN 테이블
+- F1 내림차순 정렬, 동점이면 recall 우선 (건물 검사 특성상 미탐 < 오탐)
+- `--out sweep.csv`로 결과 저장 옵션
+
+### 4️⃣ 운영 로그 전환 준비
+- [.env.example](.env.example) — `LOG_JSON` / `LOG_LEVEL` 주석 보강. 운영 전환 방법과 Grafana/Datadog 적재 시나리오 명시
+- [README.md](README.md) — "운영 모니터링 & 관측성" 섹션 신설 (`/health` / `/stream/stats` / `/coverage/{id}` 비교표, structlog 설정, 스윕 스크립트 사용법)
+
+### 5️⃣ 회귀 테스트 & 품질 강화
+- `tests/test_coverage_geometry.py` **신규** — convex hull (사각형/삼각형/중복점/공선/45도 회전), shoelace 면적 (6 케이스)
+- `tests/test_defect_delete_cleanup.py` **신규** — storage.delete 호출 여부, 경로 None 스킵, DB→파일 순서, 404 경로 (4 케이스, `unittest.mock` 기반 DB·storage 독립 검증)
+- `tests/test_coverage_response_shape.py` **신규** — `CoverageResponse` / `StreamStatsResponse` Pydantic 스키마 직렬화 (5 케이스)
+- **pre-existing 테스트 버그 수정**: `tests/test_wallpaper_double_gate.py::test_edge_exact_thresholds` — float 정밀도로 `0.35 - 0.20 = 0.14999...`가 되어 경계값 비교 실패. 경계 바로 위(0.36/0.20) 값으로 대체하고 테스트명도 `test_edge_just_above_thresholds`로 정정
+
+### 6️⃣ config.py 잔존 merge conflict 해소
+- [app/config.py](app/config.py) — `<<<<<<< Updated upstream ... =======  ... >>>>>>> Stashed changes` 마커가 그대로 커밋돼 있어 `SyntaxError`로 venv 기동 불가 상태였음
+- 양쪽 변경(로깅 설정 + 20종 ONNX 파이프라인 설정)이 상호 독립이라 **둘 다 보존**하고 마커만 제거
+
+### 🧪 회귀 결과
+- 새 테스트 3종 (15개 케이스) 모두 통과
+- 전체 regression: `test_coverage_geometry / test_coverage_response_shape / test_defect_delete_cleanup / test_image_storage / test_inference_pipeline / test_telemetry_cache / test_wallpaper_double_gate / test_ws_manager` → **59/59 통과**
+- 제외한 2개 파일은 내 변경과 무관한 pre-existing 이슈:
+  - `test_yolo_inference.py`: 가중치 파일(`models_weights/*.pt`) 미배치 환경
+  - `test_defects_api.py`: 선대 멀티테넌트 org-scoping 적용 이후 인증 토큰 없이 돌리면 401 반환 — 테스트 쪽이 옛 버전
+
+### 📋 이번 세션 후속 TODO
+- `test_defects_api.py` auth 토큰 fixture 달아서 org-scoping과 함께 작동하도록 갱신 (그동안 CI에서도 계속 빨간 불)
+- coverage 엔드포인트를 `site_id`별 telemetry 분리(`telemetry_logs.site_id` FK 추가)로 확장. 현재는 전역 최근 샘플 기반
+- 스윕 스크립트를 재학습 대신 threshold 조정 근거로 쓰려면 운영 JSONL 로그 수집 파이프라인(`logs/wallpaper_predictions.jsonl`) 분리 필요
+
+---
+
+## 🪢 2026-04-22 후속 — 후속 TODO 소진 (@Hijin554)
+
+> **착수 시각**: 2026-04-22 늦은 오후
+> **작업 브랜치**: `Hijin`
+> **목표**: 바로 위 블록에서 남긴 "이번 세션 후속 TODO" 중 2개 클로즈
+
+### 1️⃣ `test_defects_api.py` 재작성 — 401 빨간 불 해소
+
+기존 테스트는 `httpx` 클라이언트만 만들고 실제 API 호출 시 JWT 토큰이 없어 모든 요청이 401로 귀결 → CI에서 7개 실패. 근본 원인은 멀티테넌트 org-scoping 적용 후 테스트 대응이 안 된 것.
+
+- **접근 방식**: 실제 DB 띄우지 않고 FastAPI `dependency_overrides`로 `get_current_org_member` / `get_db` 주입
+- `_make_org_tuple()` — 가짜 (user, member, org) `SimpleNamespace` 튜플. role="owner"
+- `_make_empty_db()` — `AsyncMock` 기반 DB. `scalar` 0 / `execute` empty result 반환하도록 구성
+- `authed_client` fixture — 두 override 적용한 `AsyncClient`
+- `unauth_client` fixture — override 없는 순수 클라이언트 → 401 검증용
+- 8 케이스: 200 empty / summary 구조 / severity 필터 / area 필터 / 404 / 무인증 GET 401 / 무인증 summary 401 / **무인증 DELETE 401** (오늘 추가한 DELETE org-scope 회귀 방지)
+
+결과: **8/8 통과**. CI 안정화.
+
+### 2️⃣ `telemetry_logs.site_id` FK 추가 — coverage 정확도 개선
+
+이전 커밋에서 `/api/v1/coverage/{site_id}` 만들 때 텔레메트리에 `site_id` FK가 없어서 **site가 바뀌어도 같은 면적**이 나오던 버그.
+
+- [app/models/telemetry.py](app/models/telemetry.py) — `site_id: UUID → sites.id` FK 컬럼 추가. nullable (현장 미지정 비행 허용), `index=True` (쿼리 최적화)
+- [alembic/versions/e4c9a8b27f10_add_site_id_to_telemetry_logs.py](alembic/versions/e4c9a8b27f10_add_site_id_to_telemetry_logs.py) **신규 마이그레이션**
+  - `down_revision = "c8f1d2e4a7b9"` (Hijin 체인 끝에 체결)
+  - `ondelete="SET NULL"` — site 삭제 시 비행 기록은 보존
+  - ⚠️ 현재 프로젝트는 **마이그레이션 그래프가 2 heads 상태** (`0003` / `c8f1d2e4a7b9`). 통합 배포 전 `alembic merge -m "merge heads" <id1> <id2>` 한 번 실행 필요 — 리비전 파일에도 주석으로 명시
+- [app/schemas/telemetry.py](app/schemas/telemetry.py) — `TelemetryCreate.site_id` / `TelemetryResponse.site_id` Optional 추가
+- [app/api/telemetry.py](app/api/telemetry.py) `create_telemetry` — `site_id=payload.site_id` 반영
+- [app/api/coverage.py](app/api/coverage.py) — 쿼리 전략 이중화:
+  1. 우선 `telemetry_logs.site_id == site.id` 필터로 조회
+  2. 0건이면 마이그레이션 이전 비행 호환을 위해 **전역 최근 N건으로 fallback** + 응답 `note` 필드에 근사치임을 표기 (`"이 현장에 연결된 텔레메트리가 없어 전역 최근 샘플로 계산된 근사치입니다."`)
+- [CoverageResponse](app/schemas/monitoring.py)의 `note` 필드를 실제로 사용하게 됨 — 사용자/프론트가 근사 여부를 판별 가능
+
+### 🧪 회귀 결과
+- `test_coverage_geometry / test_coverage_response_shape / test_defect_delete_cleanup / test_defects_api / test_image_storage / test_inference_pipeline / test_telemetry_cache / test_wallpaper_double_gate / test_ws_manager` → **67/67 통과**
+- 제외한 `test_yolo_inference.py`는 기존부터 가중치 파일 없는 환경에서 실패하던 것 (내 변경 무관)
+
+### 📋 남은 후속 TODO (다음 누군가의 몫)
+- **alembic heads 병합**: `alembic merge -m "merge 20defect + image_crop_path + site_id chains" 0003 e4c9a8b27f10`
+- **ROS2 브리지/MAVLink 파서** 에서 `POST /telemetry` 호출 시 현재 세션 `site_id` 주입 — 스키마는 준비됨, 호출자 수정 필요
+- 스윕 스크립트용 운영 JSONL 로그 수집 파이프라인 (`logs/wallpaper_predictions.jsonl`) 분리
+
+---
+
+## 🔐 2026-04-22 3rd 세션 — 운영 배포 전 남은 인증·관측·확장 일괄 (@Hijin554)
+
+> **착수 시각**: 2026-04-22 저녁
+> **작업 브랜치**: `Hijin`
+> **목표**: 드론 실기 연동 없이도 가능한 운영 배포 준비 항목 7개 일괄 처리
+> **배경**: "백엔드 드론 없이 할 수 있는 것" 중 고·중 우선순위. MS 브랜치(20종 파이프라인)와 비충돌.
+
+### 1️⃣ Refresh Token
+
+- [app/core/jwt.py](app/core/jwt.py) — `create_refresh_token` / `decode_refresh_token` 추가. payload 에 `type` 클레임(`access` | `refresh`) 분리 → 교차 사용 차단. type 미포함 레거시 토큰은 access 로 호환 허용
+- [app/api/auth.py](app/api/auth.py) `POST /auth/refresh` — 유효 refresh → 새 access 발급. 사용자 존재 재확인 (계정 삭제 케이스 대비)
+- [app/api/auth.py](app/api/auth.py) / [app/api/oauth.py](app/api/oauth.py) — 로그인 응답(`TokenResponse`)에 `refresh_token` 포함. OAuth 3종(Google/Kakao/Naver)도 동일 적용
+- [app/schemas/user.py](app/schemas/user.py) — `TokenResponse.refresh_token`, `RefreshTokenRequest`, `RefreshTokenResponse`
+- [app/config.py](app/config.py) — `JWT_REFRESH_EXPIRE_DAYS: int = 14`
+- 테스트 9개 (roundtrip / 교차 사용 거절 / 레거시 호환 / 만료·변조·서명 오류)
+
+### 2️⃣ SLAM/Floorplan/Telemetry auth 가드 감사
+
+기존에 인증 없이 뚫려 있던 11개 엔드포인트에 `get_current_user` Depends 추가:
+
+| 라우터 | 엔드포인트 | 적용 |
+|--------|-----------|------|
+| SLAM | GET ""  / GET /{id} / POST "" / PATCH /{id} / DELETE /{id} | 전부 |
+| Floorplan | GET "" / GET /{id} / POST /upload / POST /{id}/process / POST /analyze / DELETE /{id} | 전부 |
+| Telemetry | GET /latest / GET "" | GET만 |
+| Telemetry | POST "" | **의도적 오픈** — ROS2 브리지 내부 호출. 주석으로 보안 메모 남김 (향후 `INTERNAL_API_TOKEN` 예정) |
+
+TODO 주석: SLAM/Floorplan 은 site/org FK 추가 후 `get_current_org_member` 로 승격 예정.
+
+### 3️⃣ Prometheus `/metrics`
+
+- [app/core/metrics.py](app/core/metrics.py) **신규** — `CollectorRegistry` 모듈 싱글톤. `http_requests_total`(Counter) / `http_request_duration_seconds`(Histogram) / 추론 워커 카운터 / 결함 카운터 / LiDAR·telemetry·queue gauge
+- `PrometheusMiddleware` — 모든 요청 수/지연 자동 기록. `request.scope["route"].path` 로 템플릿 라벨링 → cardinality 폭증 방지
+- `refresh_sensor_gauges()` — `/metrics` 스크랩 시마다 센서 싱글톤 스냅샷 → Gauge 반영. 미연결 시 -1 sentinel
+- [app/main.py](app/main.py) — 미들웨어 등록 + `/metrics` 엔드포인트 (OpenMetrics 텍스트, `include_in_schema=False`)
+- `prometheus-client` 라이브러리 추가
+- 테스트 5개 (Counter 라벨 증감 / Gauge set / OpenMetrics 렌더 / sentinel / 실값 반영)
+
+### 4️⃣ LOG_JSON 출력 유효성 테스트
+
+- [tests/test_logging_json.py](tests/test_logging_json.py) **신규** — `caplog` fixture 로 structlog 렌더링 결과 회수
+- JSON 라인이 `json.loads` 로 파싱되는지, `event`/`level`/`timestamp` 필드 존재 여부, bound contextvars (`request_id`, `path`) 자동 병합 검증
+- `LOG_JSON=false` 출력은 JSON 파싱 실패해야 함 (구분 확증)
+- 테스트 3개
+
+### 5️⃣ 평면도 스케일 보정 (FR-015)
+
+- [app/models/floorplan.py](app/models/floorplan.py) — `scale_px_per_meter`(Float) + `scale_reference`(JSONB) 컬럼 추가
+- [alembic/versions/f3d1b6c09a12_add_scale_to_floorplans.py](alembic/versions/f3d1b6c09a12_add_scale_to_floorplans.py) **신규**
+- [app/schemas/floorplan.py](app/schemas/floorplan.py) — `FloorplanCalibrateRequest/Response`
+- [app/api/floorplan.py](app/api/floorplan.py) `POST /{id}/calibrate` — `p1`, `p2`, `real_length_m` 입력 → `math.hypot` 픽셀 거리 / 실측 길이 = px/m 환산. 동일 점이면 400
+- 테스트 7개 (가로·대각선 스케일 / 동일점 None / Pydantic 검증: 음수·0·잘못된 좌표 모양)
+
+### 6️⃣ 푸시 알림 (FCM/APNs) 스켈레톤
+
+- [app/models/device_token.py](app/models/device_token.py) **신규** — `device_tokens` 테이블. 사용자 × 토큰 UNIQUE, platform(fcm|apns|web) 구분, `is_active` soft disable
+- [alembic/versions/c7e2d5f3a18b_add_device_tokens.py](alembic/versions/c7e2d5f3a18b_add_device_tokens.py) **신규**
+- [app/services/push_notifications.py](app/services/push_notifications.py) **신규** — `PushNotificationService` 싱글톤. `provider = noop | fcm | apns` 디스패처. 실패 시 `is_active=False` 자동 처리. `_send_fcm`/`_send_apns` 는 TODO 주석 처리된 스켈레톤 (firebase-admin 연결 시 구현)
+- [app/api/notifications.py](app/api/notifications.py):
+  - `POST /notifications/tokens` — 토큰 등록/재활성 (upsert)
+  - `DELETE /notifications/tokens/{id}` — 로그아웃 시 제거 (소유자 검증)
+  - `POST /notifications/push/test` — 본인 디바이스 테스트 발송
+- [app/config.py](app/config.py) `PUSH_PROVIDER: str = "noop"` 기본값
+- [app/models/__init__.py](app/models/__init__.py) — `DeviceToken` export
+- 테스트 3개 (noop 경로 / 디바이스 0건 / 싱글톤 기본값)
+
+### 7️⃣ Redis pub/sub 수평 확장 추상화
+
+- [app/core/ws_manager_redis.py](app/core/ws_manager_redis.py) **신규** — `RedisConnectionManager(ConnectionManager)` — `broadcast` 시 Redis `publish`, 각 워커가 `subscriber_task` 로 수신 후 로컬 연결로 재분배
+- 기존 `ConnectionManager` 상속 구조 → 라우터 코드 수정 불필요
+- `create_ws_manager(backend, redis_url)` 팩토리. 기본 `memory`, `WS_BACKEND=redis` 로 전환
+- Redis 미기동 상태에서 `broadcast` 호출 시 예외 삼키고 로컬 폴백 (개발 편의)
+- [app/config.py](app/config.py) — `WS_BACKEND`, `REDIS_URL` 추가
+- 테스트 6개 (팩토리 분기 / URL 누락 ValueError / 잘못된 backend / Redis 없이 호출 폴백 / publish 실패 폴백)
+
+### 🧪 전체 회귀
+- `test_coverage_* / test_defect_* / test_defects_api / test_floorplan_calibration / test_image_storage / test_inference_pipeline / test_logging_json / test_metrics / test_push_service / test_refresh_token / test_telemetry_cache / test_wallpaper_double_gate / test_ws_manager / test_ws_manager_redis` → **100/100 통과**
+- 제외: `test_yolo_inference.py` (가중치 미배치 환경)
+
+### 📦 신규 의존성
+- `prometheus-client` (설치 완료)
+- `redis` (설치 선택 — `WS_BACKEND=redis` 로 전환할 때만 필요)
+- `firebase-admin` (나중 푸시 실 발송 시 필요)
+
+### ⚠️ 배포 전 필수 조치
+- **alembic heads 정리** — 신규 2개(`f3d1b6c09a12`, `c7e2d5f3a18b`) 추가로 체인이 더 길어짐. `0003` 과 merge 필요
+- **운영 전환 시 환경변수 점검**:
+  - `LOG_JSON=true`
+  - `PUSH_PROVIDER=fcm` (firebase-admin 연결 후)
+  - `WS_BACKEND=redis` + `REDIS_URL` (수평 확장 시)
+- Telemetry POST 오픈 상태 확인 — VPC/방화벽 레벨 접근 제어 전제
+
+---
+
+## 📝 기본 정보 (Meta)
+
+- 작성자 (Who): @youminsu0523
+- 작성 일자 (When): 2026-04-23 14:00
+- 목표 기능 (Objective): 학습 데이터셋 출처 관리 문서화 및 .gitignore 설정
+- 작업 브랜치/환경: `MS`
+
+---
+
+## 💬 바이브코딩 대화 흐름 (Vibe Coding Log)
+
+### 1️⃣ 학습 데이터셋 출처 문서 추가 (Training Datasets Source Management)
+
+> ⏱ 2026-04-23 14:00
+
+#### 배경
+- 20종 결함 분류 모델 학습에 사용한 데이터셋(63,285장)의 출처·라이선스를 체계적으로 정리할 필요
+- `backend/training/` 디렉토리의 대용량 데이터셋 파일이 Git 추적에서 제외되어야 함
+
+#### 작업 내용
+
+**① `backend/training/.gitignore` 신규 생성**
+- 학습용 대용량 데이터셋 디렉토리(`datasets/`, `gdrive_raw/`, `weights/` 등)를 Git 추적에서 제외
+- 모델 가중치(`.pt`, `.onnx` 등)도 추적 제외 대상
+
+**② `backend/training/datasets_sources.md` 신규 생성**
+- 데이터셋 총괄표: 9개 데이터셋, 총 63,285장 이미지
+- 하자코드(A-01~E-02) ↔ 데이터셋 ↔ 모델 클래스 매핑 테이블
+- 원본 데이터 출처 상세 (Roboflow, GitHub, AI Hub 등 28개 소스)
+  - 카테고리별 정리: A 구조·기하 / B 단열·방수 / C 마감·표면 / D 바닥·난방 / E 창호·유리
+- 라이선스 요약: CC BY 4.0(22개), CC BY-NC(2개), Public Domain(1개), MIT(1개), GPL-3.0(1개), Academic(2개), 내부(1개)
+
+#### 커밋
+- `8bf2ad7` — `feat: add .gitignore and documentation for training datasets source management`
+
+#### 비고
+- Hijin 브랜치 PR #27 머지 완료 (`f4a2068`) — 04-22 작업분(refresh token, auth guards, prometheus, push notifications, redis pub/sub)은 이전 세션에서 기록 완료
+
+---
+
+## 🎮 2026-04-23~24 — TEST MODE 스트리밍 서비스 + Dashboard bbox 객체탐지 시각화 (@youminsu0523)
+
+> **작업자**: @youminsu0523  
+> **작업 브랜치**: `MS`  
+> **목표**: 드론 없이 로컬 이미지/영상으로 AI 하자 검출을 시험할 수 있는 TEST MODE 구축. 대시보드에서 bbox 오버레이로 탐지 결과 실시간 시각화.
+
+### ⏱ TEST MODE 백엔드 — test_stream.py (신규 1053줄)
+
+`backend/app/services/test_stream.py` **신규**:
+- **카테고리별 균등 샘플링**: 각 하자 유형(Crack, Moisture, Delamination 등)이 골고루 노출되도록 라운드로빈
+- **RGB/Thermal 쌍 동기화**: 프레임 버전 카운터로 두 스트림 정합성 보장. 쌍이 없는 데이터는 Thermal에 "No Signal" 표시
+- **재생 제어**: 시작(start) / 일시중지(pause) / 재개(resume) / 정지(stop) 상태 관리
+- **image_crop 생성**: DefectCard 썸네일 표시용 base64 JPEG 생성
+- **20종 ONNX 추론 or 목업 폴백**: 모델 가중치가 있으면 실제 추론, 없으면 랜덤 하자 목업 생성
+- **소스 전환**: 프로젝트 내장 학습 데이터(`training/`) ↔ 사용자 직접 업로드 이미지/영상
+
+### ⏱ TEST MODE 백엔드 — stream.py API 엔드포인트 추가 (189줄+)
+
+`backend/app/api/stream.py` 수정:
+| 메서드 | 경로 | 역할 |
+|--------|------|------|
+| POST | `/stream/test/init` | 테스트 모드 초기화 (이미지 스캔 + 모델 로드) |
+| POST | `/stream/test/start` | 재생 시작 |
+| POST | `/stream/test/pause` | 일시중지 |
+| POST | `/stream/test/resume` | 재개 |
+| POST | `/stream/test/stop` | 정지 |
+| GET | `/stream/test/state` | 현재 재생 상태 조회 |
+| GET | `/stream/test/rgb` | 테스트 RGB MJPEG 스트림 |
+| GET | `/stream/test/thermal` | 테스트 Thermal MJPEG 스트림 |
+| POST | `/stream/test/detection-mode` | 시각화 모드 전환 (bbox/detection) |
+| POST | `/stream/test/source` | 소스 전환 (project/upload) |
+| POST | `/stream/test/upload` | 테스트 이미지/영상 업로드 |
+| DELETE | `/stream/test/upload` | 업로드 파일 삭제 |
+| GET | `/stream/test/upload/list` | 업로드 파일 목록 |
+| GET | `/stream/test/defect/{id}/{channel}` | 특정 하자 시점 프레임 스냅샷 |
+
+### ⏱ TEST MODE config 추가
+
+`backend/app/config.py`:
+- `DRONE_CONNECTED: bool = False` — 드론 미연결 시 테스트 모드 활성화
+- `TEST_MODE_ENABLED: bool = True`
+- `TEST_IMAGE_INTERVAL: float = 3.0` — 이미지 전환 주기(초)
+
+### ⏱ TEST MODE 프론트엔드 — TestModeBar.jsx (신규 319줄)
+
+`frontend/src/components/dashboard/TestModeBar.jsx` **신규**:
+- 시작/일시중지/정지 재생 제어 버튼
+- 프로젝트 데이터 ↔ 직접 업로드 소스 전환 토글
+- 직접 업로드 모드: 이미지/영상 대량 드래그&드롭 첨부 + 파일 목록 표시
+- bbox / detection 시각화 모드 전환
+
+### ⏱ Dashboard + LiveVideoFeed 연동
+
+- **`Dashboard.jsx`** — 테스트 모드일 때 `TestModeBar` 렌더링 + 테스트 스트림 URL(`/stream/test/rgb`, `/stream/test/thermal`)로 전환
+- **`LiveVideoFeed.jsx`** — 테스트 모드 스트림 URL 분기 처리. bbox 오버레이 표시를 위한 `<img>` src 동적 전환
+- **`App.jsx`** — `DashboardLayout`에서 테스트 모드 진입 시 `test/init` 자동 호출, 퇴장 시 `test/stop` cleanup
+- **`sessionStore.js`** — `enterTestMode()`, `testSource`, `testPlayState`, `testDetectionMode`, `setTestSource()`, `setTestPlayState()`, `setTestDetectionMode()` 상태 추가
+- **`camera.py`** — 테스트 모드용 프레임 생성 지원
+
+---
+
+## 🔗 2026-04-24 — Frontend↔Backend 미연결 모듈 일괄 연동 + 슈퍼어드민 + 도면 검증 (@youminsu0523)
+
+> **착수 시각**: 2026-04-24 09:30  
+> **작업자**: @youminsu0523  
+> **작업 브랜치**: `MS`  
+> **목표**: 프론트엔드에서 localStorage Mock으로만 동작하던 5개 모듈을 백엔드 실제 API로 전환. 백엔드에만 구현되어 있던 기능을 프론트에 연결. 기획만 완료된 도면 검증 파이프라인 구현. 슈퍼어드민 시드 계정 생성.
+
+### ⏱ 09:30 | Phase 1 — Frontend Mock → Real API 전환 (5개 파일)
+
+기존 localStorage 기반 Mock API를 axios + JWT 인증 백엔드 호출로 전면 교체. 각 API 파일의 함수 시그니처는 유지하되 body만 fetch로 교체하는 설계대로 진행.
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `frontend/src/api/chatApi.js` | localStorage 시드+CRUD → `axios.get/post/patch` + JWT 헤더. `listConversations(userId)` → `listConversations()` (서버가 JWT로 사용자 식별) |
+| `frontend/src/api/notificationApi.js` | 동일 패턴. `simulateLatency()` 제거, 실제 HTTP 호출로 교체 |
+| `frontend/src/api/sitesApi.js` | 동일 패턴. 필터 파라미터(`status`, `building_type`, `client_type`, `search`) 쿼리스트링 지원 추가 |
+| `frontend/src/api/reportsApi.js` | `POST /report/save` + `GET /report/{id}/download` 마크다운 다운로드 함수(`downloadReport`) 추가 |
+| `frontend/src/api/organizationApi.js` | Mock 시드 제거, `removeMember(userId)` 함수 추가 |
+
+### ⏱ 09:40 | Phase 1 후속 — Store 호출부 수정
+
+API 시그니처 변경에 따른 Store 수정:
+
+- **`chatStore.js`** — `CURRENT_USER` 하드코딩 제거. `getCurrentUser()`를 localStorage에서 읽도록 변경. `sendMessage`에서 sender 정보 제거 (백엔드 JWT에서 자동 식별). `createConversation`에서 `participants` → `participant_ids`로 키 변경. `getUnreadCounts` 응답의 `perConversation` → `per_conversation` 매핑
+- **`reportsStore.js`** — `updateReport` import 제거 (백엔드에 PATCH 없음). `update` 메서드를 로컬 캐시 전용으로 변경
+
+### ⏱ 09:45 | Phase 2 — Refresh Token 프론트 연동
+
+- **`authApi.js`** — 401 응답 인터셉터 추가. `isRefreshing` 플래그 + `failedQueue` 패턴으로 동시 요청 대응. Refresh 실패 시 localStorage 정리 + `/login` 리다이렉트. `uploadProfileImage()`, `deleteProfileImage()`, `updateMe()` 함수 추가
+- **`authStore.js`** — `setAuth(token, user, refreshToken)` 3번째 파라미터 추가. `logout()`에 `refresh_token` 삭제 추가
+- **`Login.jsx`** / **`OAuthCallback.jsx`** — 로그인 응답에서 `refresh_token` 추출하여 `setAuth`에 전달
+
+### ⏱ 09:50 | Phase 2 — 보고서 다운로드 버튼
+
+- **`ReportDetail.jsx`** — 헤더에 `Download` 아이콘 버튼 추가. `downloadReport(id)` 호출 → 마크다운 파일 브라우저 다운로드
+
+### ⏱ 09:52 | Phase 2 — 부서/미소속 사용자/프로필 이미지 확인
+
+- **`AdminMembers.jsx`** — 이미 백엔드 직접 axios 호출로 구현 완료 확인 (부서 CRUD + 미소속 배정 + 멤버 수정)
+- **`EmployeeLanding.jsx` EditProfileModal** — 이미 fetch로 `PUT /auth/me/profile-image` 직접 호출 구현 확인
+
+### ⏱ 09:55 | Phase 3 — Floorplan OpenCV 벽체 추출 (process 엔드포인트 구현)
+
+기존 `POST /floorplan/{id}/process`는 TODO 스텁이었음. 실제 처리 로직 연결:
+
+- **`floorplan.py`** — 파일 존재 확인 → `aiofiles`로 비동기 읽기 → content_type 분기:
+  - **JPG/PNG/WEBP**: `extract_walls_from_bytes()` 직접 호출
+  - **PDF**: `pdf2image.convert_from_bytes()` → OpenCV BGR 변환 → 동일 파이프라인 (pdf2image 미설치 시 422 반환)
+  - **DXF**: `ezdxf.read()` → LINE 엔티티 좌표 추출 → 정규화 (ezdxf 미설치 시 422 반환)
+  - 처리 성공 → `status="completed"`, `wall_count`, `walls_data` DB 갱신
+  - 처리 실패 → `status="failed"` + 500 에러
+
+### ⏱ 10:00 | Phase 3 — 도면 이미지 품질 검증 파이프라인
+
+`project_inspection_area_auto.md` 메모리에 정의된 2단계 검증 사양을 구현:
+
+- **`floorplan_processor.py`** — `validate_floorplan_quality()` 함수 추가. 7개 체크 항목:
+  1. **해상도**: 1000×1000px 이상 권장, 500px 미만 거부
+  2. **선명도**: Laplacian variance. 100+ 양호, 30 미만 거부
+  3. **대비**: 그레이스케일 표준편차. 50+ 양호, 25 미만 거부
+  4. **직선 비율**: HoughLinesP 기반. 에지 대비 직선 픽셀 비율 0.3+ 양호, 0.15 미만 거부
+  5. **직각 교차점**: 수평선×수직선 쌍 수. 4+ 양호, 2 미만 부족
+  6. **기울기**: 직선 각도 중앙값의 수평/수직 편차. 3° 이내 양호, 10°+ 경고
+  7. **벽체 감지 수**: `extract_walls_from_bytes` 호출. 5+ 양호, 3 미만 거부
+
+- **종합 판정**: `status` = `ok` (에러 없음) | `warning` (경고만) | `rejected` (에러 있음). 점수는 항목별 가중 평균.
+
+- **`floorplan.py`** — `POST /floorplan/validate` 엔드포인트 추가. 파일 크기 50KB 미만 즉시 거부. `FloorplanValidateResponse` 스키마로 응답
+- **`schemas/floorplan.py`** — `FloorplanValidateResponse` 스키마 추가
+
+### ⏱ 10:05 | 슈퍼어드민 시드 계정 생성
+
+- **`main.py`** — `_ensure_superadmin_seed()` 함수 추가. lifespan에서 DB 초기화 직후 호출. `admin` username 존재 여부 확인 → 없으면 자동 생성 (중복 방지)
+- **계정 정보**: ID `admin` / PW `admin` / email `admin@aeroinspect.io` / `is_superadmin=True`
+- **DB에 즉시 생성 완료** (스크립트 직접 실행)
+
+### ⏱ 10:10 | bcrypt + passlib 호환성 이슈 해결
+
+- **문제**: `bcrypt 5.0.0` + `passlib 1.7.4` 조합에서 `ValueError: password cannot be longer than 72 bytes` 에러. passlib 내부의 `detect_wrap_bug()` 함수가 72바이트 초과 비밀번호로 테스트하면서 새 bcrypt의 strict 검증에 걸림
+- **해결 1**: `security.py` — passlib `CryptContext` 제거, `bcrypt` 라이브러리 직접 사용으로 전환. `hash_password()` = `bcrypt.hashpw()`, `verify_password()` = `bcrypt.checkpw()`
+- **해결 2**: bcrypt 5.0.0 → 4.2.1 다운그레이드 (안정 버전)
+- **해결 3**: admin 계정 비밀번호 해시 재생성 (bcrypt 4.2.1 기준)
+
+### ⏱ 10:15 | 슈퍼어드민 Pydantic 이메일 검증 에러 해결
+
+- **문제**: `admin@aeroinspect.local` 이메일 → Pydantic `EmailStr`이 `.local` 도메인을 special-use name으로 거부 → 로그인 시 500 에러
+- **해결**: 이메일을 `admin@aeroinspect.io`로 변경 (DB + 시드 코드)
+
+### ⏱ 10:20 | 슈퍼어드민 라우팅 + 권한 가드 수정
+
+슈퍼어드민이 조직 미소속 상태에서도 모든 기능에 접근 가능하도록 수정:
+
+- **`Login.jsx`** / **`OAuthCallback.jsx`** — `is_superadmin`이면 조직 없어도 `/employee`로 직행
+- **`OrgRequired.jsx`** — 슈퍼어드민은 `currentOrg` 체크 건너뜀. `adminOnly` 페이지도 접근 허용
+- **`EmployeeLanding.jsx`** — `isAdmin` 판정에 `user?.is_superadmin` 조건 추가 (2곳: EmployeeHeader, QuickActionsSection). `QuickActionsSection`에서 `user` 미선언 버그 수정 (`useAuthStore` import 누락)
+- **`AdminMembers.jsx`** — `fetchData` 분기 처리: 슈퍼어드민은 `admin/all-users` 우선 호출, 조직 API는 try-catch로 감싸서 미소속 시 빈 배열로 fallback. 전체 사용자 행 클릭 시 편집/배정 모달 연결
+
+### ⏱ 10:30 | 랜딩 헤더 로그인 상태 반영
+
+- **`LandingHeader.jsx`** — `useAuthStore` 연동:
+  - **비로그인**: `로그인` + `도입 문의하기` 표시 (직원전용 숨김)
+  - **로그인 상태**: `직원 전용` + `로그아웃` + `도입 문의하기` 표시
+  - 데스크탑/모바일 메뉴 모두 동일 적용
+
+### ⏱ 10:35 | EmployeeLanding 환영 배너 개인화
+
+- **`WelcomeBanner`** — 하드코딩 `과장님` 제거. `authStore.user.name` + `currentOrg.position` 동적 표시. 직급 미설정 시 이름만 표시
+
+### ⏱ 10:40 | 멤버관리/TEST MODE 권한 분기
+
+- **`QuickActionsSection`** — `멤버 관리` + `TEST MODE` 카드를 `isAdmin` (admin 또는 superadmin) 조건으로 묶어 일반 멤버에게 비노출
+
+### 🔗 변경 파일 목록 (Frontend 17개 + Backend 5개)
+
+**Frontend 수정**:
+- `api/chatApi.js`, `api/notificationApi.js`, `api/sitesApi.js`, `api/reportsApi.js`, `api/organizationApi.js` — Mock → Real API
+- `api/authApi.js` — Refresh Token 인터셉터 + 프로필 이미지 API
+- `store/chatStore.js`, `store/reportsStore.js`, `store/authStore.js` — API 시그니처 변경 대응
+- `pages/Login.jsx`, `pages/OAuthCallback.jsx` — refresh_token 전달 + 슈퍼어드민 라우팅
+- `components/auth/OrgRequired.jsx` — 슈퍼어드민 가드 bypass
+- `pages/EmployeeLanding.jsx` — isAdmin 로직 + 배너 개인화 + TEST MODE 권한
+- `pages/employee/AdminMembers.jsx` — 슈퍼어드민 분기 + 행 클릭 편집
+- `pages/employee/ReportDetail.jsx` — 다운로드 버튼
+- `components/landing/LandingHeader.jsx` — 로그인/로그아웃 상태 분기
+
+**Backend 수정**:
+- `app/core/security.py` — passlib → bcrypt 직접 사용
+- `app/api/floorplan.py` — process 실제 구현 + validate 엔드포인트
+- `app/services/floorplan_processor.py` — `validate_floorplan_quality()` 추가
+- `app/schemas/floorplan.py` — `FloorplanValidateResponse` 추가
+- `app/main.py` — 슈퍼어드민 시드 + bcrypt 4.2.1 호환
+
+### 🔗 신규 API 엔드포인트
+| 메서드 | 경로 | 역할 |
+|--------|------|------|
+| POST | `/api/v1/floorplan/validate` | 도면 이미지 품질 검증 (7개 항목) |
+
+### 📐 설계 결정 사항
+- **Mock → Real 전환 전략**: API 파일의 함수 시그니처 유지 → Store/컴포넌트 호출부 최소 변경. 각 API 파일에 독립 axios 인스턴스 생성 (JWT + X-Organization-Id 헤더 자동 첨부)
+- **Refresh Token 큐잉**: 동시에 여러 요청이 401 받았을 때 refresh 1회만 실행, 나머지는 큐에 대기 후 새 토큰으로 재시도
+- **슈퍼어드민 권한 모델**: 조직 소속 없이도 모든 페이지/기능 접근 가능. `is_superadmin` 플래그가 `currentOrg` 체크보다 우선
+- **도면 검증 판정 기준**: `rejected` (에러 1개 이상) > `warning` (경고만) > `ok` (전부 통과). 점수는 참고용이며 판정은 에러/경고 유무로 결정
+
+---
+
+## ⏱ 2026-04-21 ~ 04-23 | ML 학습 파이프라인 전체 구축
+
+### 📋 작업 개요
+20종 건물 하자 검출 AI를 위한 전체 ML 파이프라인 구축: 데이터 수집 → 폴더링 → 라벨링 → 학습 → ONNX 변환
+
+### 📂 데이터 수집 (gdrive_raw/)
+- **총 63,285장**, 31개 원본 폴더, 하자코드(A-01~E-02) 기준 폴더명 통일
+- **출처**: Roboflow Universe (CC BY 4.0), AI Hub (CC BY-NC), GitHub 공개 데이터셋, 팀 자체 수집
+- **출처 문서**: `training/datasets_sources.md` 생성
+
+| 주요 데이터 | 이미지 수 | 출처 |
+|-----------|----------|------|
+| 균열 (Crack) | ~15,000장 | Roboflow, AI Hub |
+| 벽지/마감 (Wallpaper) | ~12,000장 | Roboflow |
+| 바닥/타일/유리 | ~8,600장 | Roboflow, GitHub |
+| 열화상 (Thermal) | ~4,400장 | Roboflow, Crack900 |
+| 실내 세그멘테이션 | ~7,400장 | Roboflow |
+| 코킹 하자 | ~6,700장 | 팀 자체 수집 |
+
+### 🔧 폴더링 / 라벨링
+1. 중복 제거 — MD5 해시 100% 검증 후 삭제 (1.7GB 회수)
+2. 라벨 포맷 통일 — COCO JSON → YOLO txt, polygon → bbox 변환
+3. 클래스 매핑 — 원본 클래스 → 프로젝트 20종 하자 코드
+4. full-image bbox 제거 — 부정확한 bbox 9,549장 제거, 정밀 bbox 데이터 보강
+
+### 🤖 모델 학습 결과 (v3~v4)
+
+| 모델 | 역할 | 데이터 | 성능 |
+|------|------|--------|------|
+| M1 YOLO | 구조·방수 검출 (A-02,A-03,B-03,B-04) | 20,393장 nc=3 | mAP@0.5=0.685 |
+| M1 ResNet | 균열 유형 분류 | 2,991장 4cls | ValAcc=0.999 |
+| M2 YOLO | 마감·표면 검출 (C-01~C-05) | 6,546장 nc=2 | mAP@0.5=0.939 |
+| M2 ResNet | 표면 유형 분류 | 3,404장 5cls | ValAcc=0.844 |
+| M3 YOLO | 바닥·창호 검출 (D-03,D-04,E-01,E-02) | 8,044장 nc=3 | mAP@0.5=0.762 |
+| 열화상 YOLO | 열화상 결함 (B-01,B-02,B-05) | 4,372장 nc=3 | mAP@0.5=0.536 |
+| M5 YOLO-seg | 기하학 세그 (A-01,A-04) | 7,418장 nc=5 | frames seg |
+| M6 PatchCore | 이상탐지 (비지도) | 5,361장 | coreset 77MB |
+
+### 🛠 신규/수정 파일
+
+**신규**:
+- `training/retrain_all_v3.py` — GPU 순차 학습 파이프라인
+- `training/integrate_new_data.py` — gdrive_raw → datasets 자동 매핑 통합
+- `training/datasets_sources.md` — 데이터셋 출처 문서
+- `training/auto_train_all.py` — 자동 학습 + 모니터링 파이프라인
+
+**수정**:
+- `app/services/alignment_detector.py` — M5+G1+LiDAR 정밀 기하학 검출기 완전 재작성
+  - RANSAC 200회 라인 피팅 + 서브픽셀 엣지 검출
+  - LiDAR 수직/수평 기준값 연동 (드론 roll/pitch 역보정)
+  - KCS 41 46 01 기준 불량 판정 (수직 ±3mm/m, 직각 ±2mm/m)
+
+### 📐 설계 결정 사항
+- **gdrive_raw vs datasets**: gdrive_raw = 원본(하자코드별), datasets = 학습용(모델별, YOLO txt 통일)
+- **bbox 정확도**: full-image bbox 제거 + 정밀 bbox 보강 + box loss 가중치 10.0
+- **GPU/CPU 병렬**: YOLO=GPU, ResNet/PatchCore=CPU 동시 진행
+- **열화상 보강**: 태양광 열화상(열점 유사) 추가 → 1,262→4,372장, mAP 14% 개선
+
+---
+
+## 📅 2026-04-24 (목) — 테스트 모드 고도화: 실시간 오버레이 + 카테고리 균등 샘플링
+
+> **작업자**: @youminsu0523 (Claude Opus 4.6 바이브코딩)
+> **브랜치**: `MS`
+
+### ⏱ 세션 시작 | 이전 대화 복구 + 이슈 파악
+
+이전 대화가 유실되어 git diff 기반으로 테스트 모드 구현 상태를 복구.
+사용자가 보고한 4가지 이슈 확인:
+1. DRONE1(RGB)과 DRONE2(Thermal)에 서로 다른 구간의 이미지가 표시됨
+2. 하자탐지목록에 균열만 나옴 (다른 하자 유형 확인 불가)
+3. DefectCard에 이미지가 "없음"으로 표시됨
+4. onnxruntime 미설치 에러
+
+### ⏱ R1 | 카테고리별 균등 샘플링 구현 (균열만 나오는 문제 해결)
+
+- **문제**: 28,914장을 한꺼번에 셔플 → ext_crack이 82.8%(23,372장) 차지 → 거의 균열만 노출
+- **데이터 분포**:
+  | 카테고리 | 이미지 수 | 비율 |
+  |---------|----------|------|
+  | ext_crack | 23,372 | 82.8% |
+  | ext_glass | 2,745 | 9.7% |
+  | ext_building_crack | 1,064 | 3.8% |
+  | ext_wall_crack | 678 | 2.4% |
+  | ext_floor_crack | 170 | 0.6% |
+  | ext_surface | 144 | 0.5% |
+  | ext_concrete | 10 | 0.04% |
+  | paired_crack (Crack900) | 731 | 2.6% |
+- **해결**: `_category_frames: Dict[str, List[TestFrame]]`로 카테고리별 그룹핑 후, `_advance_frame()`에서 카테고리를 균등 확률(12.5%)로 랜덤 선택
+- **추가 수정**: 디렉토리 구조가 `ext_crack/train/images/*.jpg` 3단계 깊이 → `os.path.relpath()` + `Path(rel_path).parts[0]`으로 1단계 디렉토리명 추출
+
+### ⏱ R2 | RGB-Thermal 쌍 동기화 (프레임 버전 카운터)
+
+- **문제**: 두 MJPEG 스트림이 독립적으로 `sleep(3초)` → 타이밍 어긋남
+- **해결**: `_frame_version: int` 카운터 도입. RGB 제너레이터가 양쪽 프레임 준비 완료 후 `++`, Thermal 제너레이터는 새 버전까지 대기
+
+### ⏱ R3 | DefectCard "없음" → 실제 이미지 표시 (image_crop)
+
+- **문제**: `image_crop` 필드 누락 → DefectCard가 "없음" 표시
+- **해결**: `_generate_random_crop()` — 프레임 랜덤 크롭 → 112x112 → base64 JPEG. 실제 추론에도 bbox 기반 `_crop_to_base64()` 적용
+
+### ⏱ R4 | onnxruntime 설치
+
+- `requirements.txt`에 `onnxruntime` 추가 + pip install 완료 (v1.25.0)
+
+### ⏱ R5 | 하자 클릭 시 DRONE1/DRONE2에 해당 시점 프레임 표시
+
+- **Backend**: `store_defect_frame()` — raw RGB/Thermal JPEG + bbox/label/severity 메타데이터를 `OrderedDict`에 저장 (최대 200건)
+- **Backend**: `GET /test/defect/{defect_id}/{channel}?mode=` — 저장된 프레임에 mode별 시각화 적용 후 JPEG 반환
+- **Frontend**: `LiveVideoFeed.jsx` — `isTestMode && selectedDefect` 조건에서 MJPEG 스트림 대신 defect frame endpoint URL로 전환. "DEFECT VIEW" 배지 표시
+
+### ⏱ R6 | bbox 오버레이에 한글 라벨 깨짐 해결
+
+- **문제**: `cv2.putText()`는 한글 미지원
+- **해결**: PIL + Windows `malgunbd.ttf`(맑은 고딕 Bold) 자동 탐색 + 폰트 캐싱. cv2로 네모박스, PIL로 한글 텍스트 렌더링
+
+### ⏱ R7 | 하자 탐지 타이밍 수정 (이미지보다 목록이 먼저 갱신)
+
+- **문제**: WS 전송 → yield 순서 → 하자가 이미지보다 먼저 목록에 표시
+- **해결**: yield 먼저 → 0.5초 대기 → 브로드캐스트 순서로 변경
+
+### ⏱ R8 | BBox / 객체감지(Detection) 2가지 시각화 모드
+
+- **BBox 모드**: 빨간 네모박스 + 한글 라벨
+- **Detection 모드**: 반투명 컬러 마스크(심각도별) + Canny 에지 윤곽 강조 + L자 코너 마커 + 심각도 뱃지
+- **심각도별 색상**: HIGH=빨강, MED=주황, LOW=노랑
+- `TestModeBar.jsx`에 BBOX/DETECT 토글 → `POST /test/detection-mode` API 호출
+
+### ⏱ R9 | 실시간 라이브 스트림 오버레이 (핵심 리팩토링)
+
+- **문제**: 오버레이가 하자 목록 클릭 시에만 보이고 라이브 스트림에는 미표시
+- **해결 — 제너레이터 흐름 전면 리팩토링**:
+  ```
+  기존: 프레임 → 인코딩 → yield(원본) → 추론 → WS 브로드캐스트
+  변경: 프레임 → _detect(결과만) → _apply_live_overlay → 인코딩 → yield(오버레이 포함) → _broadcast_detection
+  ```
+- **추론 분리**: `_detect()`(결과 반환) + `_broadcast_detection()`(WS 전송)
+- `_apply_live_overlay()`: numpy 프레임에 직접 오버레이 (JPEG 디코딩/재인코딩 없음). `_detection_mode`에 따라 bbox 또는 detection 스타일 적용
+- Thermal에도 동일한 오버레이 적용. 영상 프레임에도 동일 흐름
+
+### 🔗 변경 파일 목록
+
+**Backend (3개)**:
+- `app/services/test_stream.py` — 전면 리팩토링
+- `app/api/stream.py` — defect frame 조회 + detection-mode 엔드포인트
+- `requirements.txt` — onnxruntime 추가
+
+**Frontend (3개)**:
+- `src/components/video/LiveVideoFeed.jsx` — 하자 선택 시 defect frame 표시 + detection mode 쿼리
+- `src/components/dashboard/TestModeBar.jsx` — BBOX/DETECT 토글 + API 연동
+- `src/store/sessionStore.js` — `testDetectionMode` 상태 추가
+
+### 🔗 신규 API 엔드포인트
+| 메서드 | 경로 | 역할 |
+|--------|------|------|
+| POST | `/api/v1/stream/test/detection-mode` | 감지 시각화 모드 전환 (bbox ↔ detection) |
+| GET | `/api/v1/stream/test/defect/{id}/{channel}?mode=` | 하자 시점 프레임 조회 |
+
+### 📐 설계 결정 사항
+- **카테고리 균등 샘플링**: 카테고리 단위 랜덤 선택 → 데이터 불균형에도 전체 하자 유형 골고루 노출
+- **프레임 저장 전략**: raw JPEG + 메타데이터 저장, 조회 시 mode별 시각화 적용
+- **라이브 오버레이**: numpy 프레임에 직접 그려서 JPEG 인코딩 1회만 수행
+- **추론/브로드캐스트 분리**: `_detect()` → `_apply_live_overlay()` → `yield` → `_broadcast_detection()` 4단계 분리
+
+---
+
+## 📅 2026-04-24 (목) — 입력 필드 UX 수정 + 멤버 배정 조직 선택 + 채팅 시스템 전면 리팩토링
+
+> **작업자**: @youminsu0523 (Claude Opus 4.6 바이브코딩)
+> **브랜치**: `MS`
+
+### ⏱ 세션 시작 14:00 | 이슈 파악
+
+사용자가 조직명 입력 필드에서 텍스트가 보이지 않는 문제를 발견. 드래그해야만 보임.
+추가로 관리자 멤버 배정 모달에 조직 선택 기능이 없어 슈퍼어드민이 다른 조직에 멤버를 배정할 수 없는 문제도 확인.
+채팅 시스템에서 아이콘이 "??", 이름이 "알 수 없음"으로 표시되고 메시지 좌우 정렬이 안 되는 문제, DM 중복 생성 문제도 발견.
+
+### ⏱ R1 | 전역 입력 필드 텍스트 색상 수정
+
+- **문제**: `body`에 `text-white`가 전역 적용 → 라이트 배경 위 `input/textarea/select`가 흰 배경에 흰 글씨
+- **영향 범위**: Login, Signup, FindAccount, Onboarding, AdminMembers, SessionSetup, PreWork, EmployeeLanding, SiteFormModal, ContactModal, AddDefectDialog 등 전체 폼 요소
+- **해결**: `index.css`에 전역 룰 추가
+  ```css
+  input, textarea, select { color: #111827; }
+  input::placeholder, textarea::placeholder { color: #9ca3af; }
+  ```
+
+### ⏱ R2 | 멤버 배정 모달 — 소속 조직 선택 기능 (슈퍼어드민)
+
+- **프로세스 변경**: 역할→부서→직위(기존) → **소속 조직→역할→부서→직위**(개선)
+- **Backend 추가**:
+  - `GET /admin/all-orgs` — 전체 조직 목록 + 멤버 수 (슈퍼어드민 전용)
+  - `GET /admin/orgs/{org_id}/departments` — 특정 조직의 부서 목록 (슈퍼어드민 전용)
+  - `AssignMemberRequest`에 `organization_id: Optional[UUID]` 추가
+  - `assign_member` — 슈퍼어드민이 `organization_id` 지정 시 해당 조직에 배정, 일반 admin은 자기 조직에만
+- **Frontend**: 배정 모달에서 조직 선택 시 해당 조직의 부서 목록을 동적 로드. 조직 미선택 시 역할/부서/직위 비활성화(opacity-40)
+
+### ⏱ R3 | 채팅 시스템 Mock 제거 — 실제 사용자 데이터 연동
+
+- **근본 원인**: `CURRENT_USER = { id: 't1', ... }` Mock ID를 모든 채팅 컴포넌트가 참조 → 실제 UUID와 불일치
+  - `isMine` 항상 `false` → 모든 메시지가 왼쪽(상대방) 배치
+  - `CHAT_TEAM_MEMBERS` Mock 배열에서 상대방 검색 → 매칭 실패 → "??" 아이콘, "알 수 없음" 이름
+  - `conv.participants`가 `{user_id, name, initials}` 객체 배열인데 ID 문자열처럼 취급
+- **수정 파일 5개**:
+  - `ChatHeader.jsx` — `CHAT_TEAM_MEMBERS` 제거, `conv.participants`에서 직접 상대방 조회
+  - `ConversationItem.jsx` — 동일 Mock 제거, participants 객체에서 이름/이니셜 표시
+  - `MessageBubble.jsx` — `CURRENT_USER.id` → `localStorage.user.id`로 교체. 내 메시지 오른쪽(노란색), 상대 왼쪽(흰색)
+  - `ConversationList.jsx` — 검색 필터도 participants 객체 사용
+  - `NewChatModal.jsx` — `CURRENT_USER` 참조 3곳 모두 `getCurrentUser()` 함수로 교체
+
+### ⏱ R4 14:20 | DM 중복 생성 방지
+
+- **문제**: `findDMConversation`이 `participants.some(p => p.user_id === userId1 || userId2)` — 아무 한 명만 매칭되면 "기존 DM 있음"으로 판단 → 잘못된 DM 반환 or 미매칭 시 중복 생성
+- **Frontend 수정**: `&&` 연산으로 **두 사용자 모두** 참여하는 DM만 매칭
+  ```javascript
+  c.participants.some(p => p.user_id === userId1) &&
+  c.participants.some(p => p.user_id === userId2)
+  ```
+- **Backend 수정**: `create_conversation`에서 DM 생성 시 기존 DM 존재 여부를 서버에서도 검증 (aliased join으로 두 사용자 모두 참여하는 DM 검색)
+
+### ⏱ R5 14:30 | 채팅 나가기 기능 추가
+
+- **Backend**: `DELETE /conversations/{id}/leave` — ConversationMember 삭제, 남은 참여자 없으면 대화방 자체 삭제
+- **Frontend**: `chatApi.js`에 `leaveConversation()` 추가, `chatStore.js`에 `leaveConversation` 액션 추가
+- **UI**: `ParticipantPanel.jsx` 하단에 빨간색 "대화 나가기" 버튼 + `window.confirm` 확인 다이얼로그
+
+### 🔗 변경 파일 목록
+
+**Backend (3개)**:
+- `app/schemas/organization.py` — `AssignMemberRequest`에 `organization_id` 추가
+- `app/api/organization.py` — assign API 수정 + `GET /admin/all-orgs`, `GET /admin/orgs/{id}/departments` 추가
+- `app/api/chat.py` — `DELETE /conversations/{id}/leave` 추가 + DM 중복 방지 로직
+
+**Frontend (8개)**:
+- `src/index.css` — 전역 input/textarea/select 텍스트 색상
+- `src/pages/employee/AdminMembers.jsx` — 배정 모달 조직 선택 UI
+- `src/components/chat/ChatHeader.jsx` — Mock 제거, 실제 participants 사용
+- `src/components/chat/ConversationItem.jsx` — Mock 제거, 실제 participants 사용
+- `src/components/chat/MessageBubble.jsx` — 실제 사용자 ID로 좌우 정렬
+- `src/components/chat/ConversationList.jsx` — 검색 필터 Mock 제거
+- `src/components/chat/NewChatModal.jsx` — Mock 제거
+- `src/components/chat/ParticipantPanel.jsx` — participants 객체 처리 + 채팅 나가기 버튼
+
+**API 파일**:
+- `src/api/chatApi.js` — `leaveConversation()` 추가 + `findDMConversation` 로직 수정
+- `src/store/chatStore.js` — `leaveConversation` 액션 추가
+
+### 🔗 신규 API 엔드포인트
+| 메서드 | 경로 | 역할 |
+|--------|------|------|
+| GET | `/api/v1/organizations/admin/all-orgs` | 전체 조직 목록 (슈퍼어드민) |
+| GET | `/api/v1/organizations/admin/orgs/{org_id}/departments` | 특정 조직 부서 목록 (슈퍼어드민) |
+| DELETE | `/api/v1/chat/conversations/{id}/leave` | 대화방 나가기 |
+
+### 📐 설계 결정 사항
+- **전역 CSS vs 개별 클래스**: `body { text-white }` 상속 문제를 개별 input마다 `text-gray-900` 추가 대신 전역 CSS 규칙으로 일괄 해결 — 유지보수 부담 최소화
+- **Mock 데이터 전면 제거**: `CURRENT_USER`(id: 't1') / `CHAT_TEAM_MEMBERS` 참조를 모든 채팅 컴포넌트에서 제거하고 `localStorage.user` 기반으로 교체 — Phase 1 → Phase 2 전환 완료
+- **DM 중복 방지 이중 잠금**: 프론트엔드 `findDMConversation` + 백엔드 `create_conversation` 양쪽에서 기존 DM 존재 여부 검증
+- **대화 나가기 정리**: 마지막 참여자가 나가면 대화방 자체 자동 삭제 (DB 정리)
+
+## 📅 2026-04-24 (목) — 멤버 관리 초대 코드 표시 버그 수정
+
+> **작업자**: @youminsu0523 (Claude Opus 4.6 바이브코딩)
+> **브랜치**: `MS`
+> **시각**: 14:41
+
+### ⏱ R10 | 멤버 관리 페이지 초대 코드 미표시 버그 수정
+
+- **문제**: AdminMembers 페이지 상단에 조직 초대 코드가 표시되지 않음
+- **원인 분석**:
+  - 프론트엔드(`AdminMembers.jsx`)는 `orgInfo?.invite_code`로 표시 로직이 정상 구현되어 있었음
+  - 그러나 백엔드 `GET /api/v1/organizations/members` 응답에서 `OrganizationResponse` 구성 시 `invite_code` 필드를 누락
+  - 같은 파일의 `GET /api/v1/organizations/my` 엔드포인트에는 `invite_code=org.invite_code`가 포함되어 있었으나, `/members` 엔드포인트에서는 빠져 있었음
+  - 스키마 기본값이 `invite_code: Optional[str] = None`이므로 누락 시 항상 `None` → 프론트엔드 조건부 렌더링 통과 못함
+- **해결**: `app/api/organization.py` line 122에 `invite_code=org.invite_code` 추가
+
+### 🔗 변경 파일 목록
+
+**Backend (1개)**:
+- `app/api/organization.py` — `/members` 응답에 `invite_code` 필드 추가
+
+### 📐 설계 결정 사항
+- **초대 코드 흐름**: 조직 생성 시 8자리 코드 자동 발급 → 관리자가 멤버 관리 페이지에서 확인 → 오프라인/메신저로 신규 직원에게 전달 → 온보딩 페이지에서 입력하여 가입
+- **코드 알파벳**: 혼동 문자(0/O, 1/I/L) 제외한 32종 문자, 약 1조 조합
+
+---
+
+## 🔄 2026-04-24 — 노션 동기화 스크립트 세션별 상세 캡쳐 개선
+
+> **착수 시각**: 2026-04-24 11:10
+> **작업자**: @youminsu0523
+> **목표**: `sync_notion_logs.py`가 새 로그 콘텐츠를 세션별로 분리하여, 각 세션의 작업 내용과 관련된 앱 페이지를 Playwright로 상세 캡쳐 후 노션에 업로드하도록 개선.
+> **배경**: 기존 동기화는 새 콘텐츠 전체를 하나의 세션으로 묶어 스크린샷 1장만 촬영. 여러 기능(테스트 모드, 멤버관리, 로그인 등)이 섞여 있어도 대시보드 1장만 첨부되어 팀원이 어떤 화면이 변경됐는지 알 수 없었음.
+
+### ⏱ 11:10 | 노션 동기화 실행 → 문제 확인
+
+- 기존 스크립트 실행 결과: Backend/Frontend 각 1장씩만 캡쳐 (전체 내용을 하나로 뭉침)
+- 사용자 피드백: "어느 부분인지 상세하게 캡쳐하기로 했었는데"
+
+### ⏱ 11:15 | SESSION_ROUTE_MAP 신규 추가
+
+세션 키워드 → 앱 라우트/페이지 매핑 테이블 추가. 우선순위 기반 매칭:
+
+| 우선순위 | 키워드 예시 | 라우트 | 라벨 |
+|---------|-----------|--------|------|
+| 높음 | `AdminMembers`, `멤버 관리` | `/employee/admin/members` | 멤버 관리 페이지 |
+| 높음 | `Signup`, `회원가입` | `/signup` | 회원가입 페이지 |
+| 높음 | `ReportDetail`, `보고서 다운로드` | `/employee/reports` | 보고서 목록 |
+| 높음 | `floorplan`, `도면` | `/employee` | 직원 랜딩 (도면) |
+| 중간 | `test_stream`, `TestModeBar` | `/dashboard` | 대시보드 테스트 모드 |
+| 중간 | `EmployeeLanding`, `슈퍼어드민` | `/employee` | 직원 전용 랜딩 |
+| 중간 | `Login.jsx`, `Refresh Token` | `/login` | 로그인 페이지 |
+| 낮음 | `Dashboard`, `bbox` | `/dashboard` | 대시보드 |
+
+### ⏱ 11:20 | split_into_sessions() 함수 추가
+
+- 새 콘텐츠를 `\r?\n---\r?\n` (Windows CRLF 대응) 정규식으로 세션별 분리
+- 각 세션에서 `##` 또는 `###` 첫 헤딩을 제목으로 추출
+- 50자 미만 짧은 섹션(메타 블록 등)은 자동 스킵
+
+### ⏱ 11:25 | infer_session_route() 2단계 매칭
+
+기존 `infer_component_hint()` 대체:
+1. **1단계**: 세션 제목(`session_title`)으로 `SESSION_ROUTE_MAP` 매칭 (가장 정확)
+2. **2단계**: 본문 전체 텍스트로 매칭
+3. **3단계**: 기존 `COMPONENT_HINT_MAP` 폴백
+
+### ⏱ 11:30 | capture_app_screenshot() 라우트 기반 캡쳐로 전면 교체
+
+- **UI 로그인 방식 채택**: `update_screenshots.py` 패턴 참고 — `_login_via_ui()`로 실제 로그인 폼 입력 (`input#userId` + `input#password` → submit → `/employee` 대기)
+- 기존 `_inject_auth_token()` (localStorage 직접 주입 + API 로그인 시도) 제거
+- 인증 후 `route_info["route"]`로 직접 이동 → 2.5초 대기 → 캡쳐
+
+### ⏱ 11:35 | main() 세션별 개별 처리 루프
+
+```
+기존 흐름:
+  파일 → [전체 콘텐츠] → 캡쳐 1장 → Notion 1회
+
+변경 흐름:
+  파일 → split_into_sessions() → [세션1] → 라우트 추론 → 캡쳐 → Notion
+                                 → [세션2] → 라우트 추론 → 캡쳐 → Notion
+                                 → [세션3] → 라우트 추론 → 캡쳐 → Notion
+```
+
+### ⏱ 11:40 | CRLF 버그 수정 + 재동기화 검증
+
+- 첫 실행에서 세션이 1개로만 감지됨 → 원인: Windows `\r\n` 때문에 `\n---\n` 패턴 미매칭
+- 정규식을 `\r?\n---\r?\n`으로 수정 → 4개 세션 정상 분리 확인
+- 기존 페이지 아카이브 → 커서 롤백 → 재실행:
+  - Backend 4세션 + Frontend 2세션 = **총 6장 상세 캡쳐** 노션 업로드 완료
+
+### 🛠 변경 파일 목록
+
+**수정 (1개)**:
+- `sync_notion_logs.py` — 세션별 분리 + 라우트 매핑 + UI 로그인 캡쳐 + 개별 Notion append
+
+### 📐 설계 결정 사항
+- **세션 분리 기준**: `---` (마크다운 수평선). Vibe_Coding_Log.md가 이미 이 구분자를 세션 경계로 사용 중
+- **라우트 매핑 우선순위**: 구체적 키워드(멤버관리, 회원가입) > 중간(테스트모드, 슈퍼어드민) > 넓은(대시보드). 제목 매칭이 본문 매칭보다 우선
+- **UI 로그인 채택 이유**: localStorage 직접 주입은 React 상태와 불일치 → 빈 화면. 실제 폼 로그인이 안정적 (`update_screenshots.py` 검증 완료)
+- **커서 갱신 시점**: 모든 세션 처리 완료 후 한 번에 갱신 (중간 실패 시 전체 재시도)
+
+---
+
+## 🔄 2026-04-25 ~ 04-27 — 조직 초대 버그 수정 + 초대코드 만료 + 실시간 채팅 + 첨부파일·읽음 표시
+
+> **착수 시각**: 2026-04-25 14:00
+> **작업자**: @youminsu0523
+> **목표**: 멤버 초대 플로우 버그 수정, 초대코드 보안 강화(30일 만료), 실시간 채팅 WebSocket 연결, 채팅 첨부파일 전송 및 읽음 표시 기능 구현
+> **배경**: 관리자가 멤버를 초대해도 로그인 시 온보딩 페이지가 뜨고, 초대코드 입력 시 401 에러 발생. 퇴사자 보안 우려로 초대코드 주기적 변경 필요. 채팅이 새로고침 없이는 갱신되지 않는 문제. 채팅에 파일 첨부/이모지/읽음 표시 기능 부재.
+
+### ⏱ 04-25 14:00 | 멤버 초대 버그 진단 및 수정
+
+**문제 1**: `invite_member` 엔드포인트가 `status="invited"`로 생성하지만, `_get_user_orgs`는 `active`만 반환 → 초대받은 사용자가 로그인 시 조직 미소속으로 인식
+
+**문제 2**: `join_by_invite_code`가 `invited` 상태 멤버도 "이미 소속" (409)으로 차단 → 교착 상태
+
+**수정**:
+- `invite_member`: `status="invited"` → `"active"`로 변경 (즉시 활성화)
+- `join_by_invite_code`: invited 상태 멤버가 초대코드 입력 시 active로 전환, deactivated는 403 반환
+
+### ⏱ 04-25 15:00 | 초대코드 30일 만료 기능
+
+**모델 변경** (`models/organization.py`):
+- `invite_code_expires_at` 컬럼 추가 (DateTime, nullable, default=30일 후)
+- `regenerate_invite_code()` / `is_invite_code_expired()` 메서드 추가
+
+**API 변경** (`api/organization.py`):
+- `join_by_invite_code`: 만료 여부 확인 → 410 "초대 코드가 만료되었습니다"
+- `POST /invite-code/regenerate`: 새 코드 발급 + 30일 연장 (admin/owner 전용)
+- 모든 조직 응답에 `invite_code_expires_at` 포함
+
+**마이그레이션**: `g1a2b3c4d5e6` — `invite_code_expires_at` 컬럼 추가 + 기존 조직에 30일 기본값
+
+### ⏱ 04-26 10:00 | 실시간 채팅 WebSocket 연결
+
+**문제**: 프론트엔드 WebSocket이 `defects` 채널에만 연결 → 백엔드의 `chat:{id}` 브로드캐스트를 수신 불가 → 새로고침 없이 메시지 미표시
+
+**수정** (`api/chat.py`):
+- 메시지 전송 시 `chat:{conversation_id}` + 각 참여자 `user:{user_id}` 채널로 이중 브로드캐스트
+
+### ⏱ 04-27 09:00 | 채팅 첨부파일 전송 기능
+
+**모델 변경** (`models/message.py`):
+- `file_url` (String 500), `file_name` (String 300), `file_content_type` (String 100) 컬럼 추가
+- `text` → `nullable=True` (파일만 보내는 경우)
+
+**API 변경** (`api/chat.py`):
+- `POST /conversations/{id}/messages/file` 신규 엔드포인트 (multipart/form-data)
+- 저장 경로: `./uploads/chat/{uuid}.ext`, 제한: 200MB/파일
+- `aiofiles` 비동기 파일 저장 (기존 프로필 이미지 패턴 재사용)
+
+**스키마 변경** (`schemas/chat.py`):
+- `MessageResponse`: `file_url`, `file_name`, `file_content_type`, `read_by_count`, `sender_profile_image_url` 필드 추가
+- `LastMessageBrief`: `file_name` 필드 추가
+
+**마이그레이션**: `h1b2c3d4e5f6` — messages 테이블에 파일 컬럼 + text nullable 변경
+
+### ⏱ 04-27 10:00 | 읽음 표시 기능
+
+**API 변경** (`api/chat.py`):
+- `get_messages`: 다른 멤버들의 `last_read_at`을 조회하여 각 메시지별 `read_by_count` 계산 (내 메시지에만 표시)
+- `mark_read`: 읽음 처리 후 `chat.read` WebSocket 이벤트를 대화방 + 참여자 개인 채널로 브로드캐스트
+
+### 🛠 변경 파일 목록
+
+**수정 (5개)**:
+| 파일 | 변경 내용 |
+|------|----------|
+| `models/organization.py` | `invite_code_expires_at` 컬럼 + 재생성/만료확인 메서드 |
+| `models/message.py` | `file_url`, `file_name`, `file_content_type` 컬럼 + text nullable |
+| `schemas/organization.py` | `OrganizationResponse`에 `invite_code_expires_at` |
+| `schemas/chat.py` | `MessageResponse`에 파일+읽음+프로필 필드, `LastMessageBrief`에 `file_name` |
+| `api/organization.py` | invite_member active 전환, join 만료검증, regenerate 엔드포인트 |
+| `api/chat.py` | 파일 업로드 엔드포인트, 읽음상태 응답, mark_read WS broadcast, user 채널 broadcast |
+| `main.py` | `./uploads/chat` 디렉토리 생성 |
+
+**신규 (2개)**:
+| 파일 | 내용 |
+|------|------|
+| `alembic/versions/g1a2b3c4d5e6_*.py` | invite_code_expires_at 마이그레이션 |
+| `alembic/versions/h1b2c3d4e5f6_*.py` | messages 파일 컬럼 마이그레이션 |
+
+### 📐 설계 결정 사항
+- **초대코드 만료**: 30일 기본값. 퇴사자가 기존 코드를 알아도 만료 후 사용 불가. 관리자가 수동으로 즉시 재생성 가능
+- **파일 업로드 분리**: 텍스트 전용 `POST /messages` (JSON)와 파일 포함 `POST /messages/file` (multipart) 분리 → backward compatibility 유지
+- **200MB 제한**: 업무용 CAD 도면, 점검 보고서, 드론 영상 등 대용량 파일 대응
+- **읽음 계산 방식**: 기존 `ConversationMember.last_read_at` 인프라 활용. 메시지별 개별 읽음 테이블 없이 timestamp 비교로 효율적 계산
+- **이중 WS 채널 브로드캐스트**: `chat:{conversation_id}` (활성 대화방) + `user:{user_id}` (다른 대화방/페이지 밖 알림)
+
+---
+
+#### ⏱ 2026-04-27 | 알림 일괄 삭제 엔드포인트 추가
+
+- **피드백**: 프런트의 「전체 삭제」 액션이 단건 `DELETE /{id}`를 N회 호출하는 방식이라 라운드트립이 누적되고 부분 실패 처리가 복잡함. `read-all`이 이미 단일 PATCH 엔드포인트인 것과 대칭으로 일괄 삭제 엔드포인트를 추가.
+- **반영**:
+  - `app/api/notifications.py`: `DELETE /api/v1/notifications` 추가. 현재 사용자 소유 알림을 단일 `DELETE … WHERE user_id = current_user.id` 쿼리로 일괄 삭제. 응답: `{"deleted": <rowcount>}`.
+  - 라우트 등록 순서 영향: 기존 `DELETE /{notification_id}` 와 충돌 없음(빈 path 와 path 파라미터는 FastAPI 에서 별도 매칭).
+  - 모듈 헤더 라우트 일람 주석에 「전체 삭제」 항목 추가.
+
+### 🔗 변경 파일 목록 (1개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `backend/app/api/notifications.py` | `DELETE /notifications` 일괄 삭제 엔드포인트 추가 + 헤더 주석 갱신 |
+
+---
+
+## 📅 2026-04-27 — WS 알림 채널 화이트리스트 + DB 마이그레이션 정리 메모
+
+> **작업자**: @Hijin554 (Claude Opus 4.7 바이브코딩)
+> **브랜치**: `Hijin`
+> **목표**: `notification_service.create()` 가 broadcast 하는 `notifications:{user_id}` 채널이 WS 게이트웨이에서 거부되어 실시간 푸시가 막혀 있던 문제 해결.
+
+### ⏱ 알림 채널 화이트리스트 추가
+
+- **문제**: `app/services/notification_service.py` 가 `notifications:{user_id}` 로 WS broadcast 하는데, `app/api/websocket.py` 의 `_is_valid_channel()` 이 `chat:`, `user:` 만 허용하고 `notifications:` 는 거부 → 알림 DB 에는 저장되지만 실시간 푸시는 안 가서 사용자가 새로고침해야만 벨 아이콘에 뜨는 상태.
+- **해결**: `_DYNAMIC_CHANNEL_PREFIXES` 튜플로 동적 채널 prefix 일원화 (`chat:`, `user:`, `notifications:`). 팀원이 만든 기존 startswith() 패턴과 일관성 유지.
+- **검증**: `tests/test_ws_channel_whitelist.py` 신규 — static 4개 + dynamic prefix 3개 + notification_service 형식 + 알 수 없는 채널 거부, 총 9 케이스 모두 통과.
+
+### ⏱ DB 마이그레이션 정리 TODO 메모
+
+- **문제 인식**: `init_db.py` 가 `Base.metadata.create_all` 로 테이블을 자동 생성하고 있고, alembic versions 폴더에 9개 마이그레이션 파일이 별도로 존재. 이중 운영 상태 → 컬럼 추가 시 기존 테이블에 반영 안 됨, 환경별 스키마 drift, `alembic_version` 추적 불가.
+- **반영**: `backend/README.md` 의 "DB 마이그레이션 절차" 섹션 맨 앞에 ⚠️ 경고 박스 추가. 출시 전 정리 작업 3단계 (init_db에서 create_all 제거 → `alembic stamp head` → 이후 alembic 단일화) 명시.
+- **유지 사유**: 로컬 개발은 init_db 방식으로 잘 돌아가는 중. 운영 RDS 손대기 전 백업 후 일괄 정리할 항목으로 미룸.
+
+### 🔗 변경 파일 목록 (3개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `backend/app/api/websocket.py` | `_DYNAMIC_CHANNEL_PREFIXES` 도입 + `notifications:` prefix 추가 + docstring 갱신 |
+| `backend/README.md` | DB 마이그레이션 정리 ⚠️ TODO 메모 추가 |
+| `backend/tests/test_ws_channel_whitelist.py` | 채널 화이트리스트 검증 테스트 9개 신규 |
+
+### 📐 설계 결정 사항
+
+- **prefix 화이트리스트 vs 정규식**: 팀원이 만든 기존 코드가 `channel.startswith("chat:")` 방식이라 같은 스타일 채택. UUID 형식 검증은 안 함 (다른 채널들도 형식 검증 없음, 일관성 우선). TODO 주석으로 JWT 인증 보강 필요성 명시.
+- **DB 마이그레이션 즉시 처리 vs 메모만**: 운영 RDS 손대면 데이터 손실 위험 + 팀원 로컬 다 깨질 수 있어 즉시 작업 위험 큼. README 메모로 출시 전 체크리스트화 → 안전한 시점에 일괄 처리.
+
+---
+
+## 📡 2026-04-27 — 건물 열화상 자동화 데이터셋(Thermal Building) 스크립트 작성
+
+> **작업자**: @youminsu0523
+> **목표**: 건물 점검용 보조 열화상 데이터 수집 스크립트 구현 및 모델 재학습 파이프라인 연동.
+
+### ⏱ 열화상 데이터 구조화 다운로드 및 모델 적용 파이프라인
+
+- **문제**: 가중치 정확도를 올리기 위해 기존 공공 데이터 이외에 추가적인 열화상 데이터셋(Water Leak, Thermal Defect)의 외부 수급 필요성 대두.
+- **반영**:
+  - `backend/training/download_thermal_building.py` (신규):
+    - Roboflow Universe에서 물샘, 단열 결함 등 5종 데이터셋을 자동 다운로드.
+    - 다운로드 된 YOLO 포맷 데이터를 열화상 클래스 스키마(`0: Crack, 1: Moisture, 2: delamination`)에 맞게 전처리 및 매핑.
+  - `backend/training/retrain_m1_v4s_run.py` (신규):
+    - 구조적(Structural) 하자 데이터 2만 장에 대응하는 YOLOv8s 훈련 최적화 파이프라인 실행 래퍼.
+    - 에폭 50, batch 32, box=10.0으로 파인튜닝 후 최고 성능 가중치(Best.pt)를 즉시 ONNX 포맷으로 변환.
+  - `backend/app/config.py`:
+    - 시스템 Heartbeat 설정 설정 축소 변경(`WS_HEARTBEAT_INTERVAL: int = 3`).
+
+### 🔗 변경 파일 목록 (3개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `backend/training/download_thermal_building.py` | Roboflow 기반 열화상 데이터 스크래핑 및 클래스 맵핑 모듈 |
+| `backend/training/retrain_m1_v4s_run.py` | YOLOv8s 리트레이닝 스크립트 및 ONNX 최적화 |
+| `backend/app/config.py` | WebSocket Heartbeat 변수 최적화 |

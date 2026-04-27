@@ -63,12 +63,16 @@ export default function MessageThread() {
     return groups
   }, [messages])
 
-  // 새 메시지 시 자동 스크롤
+  // 새 메시지 또는 대화방 전환 시 자동 스크롤 (DOM 렌더 완료 후 실행)
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+        }
+      })
     }
-  }, [messages])
+  }, [messages, messagesLoading])
 
   if (!activeConversationId) {
     return (

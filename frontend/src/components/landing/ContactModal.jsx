@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { checkBusinessStatus, interpretStatus } from '../../api/businessVerifyApi'
+import useAuthStore from '../../store/authStore.js'
 
 const INITIAL_FORM = {
   customerType: 'personal',
@@ -22,6 +23,8 @@ export default function ContactModal({ isOpen, onClose }) {
   const [form, setForm] = useState(INITIAL_FORM)
   const [verifyState, setVerifyState] = useState({ status: 'idle', message: '' })
   const dialogRef = useRef(null)
+  const user = useAuthStore((s) => s.user)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
 
   // ESC로 닫기 + 스크롤 잠금
   useEffect(() => {
@@ -38,13 +41,24 @@ export default function ContactModal({ isOpen, onClose }) {
     }
   }, [isOpen, onClose])
 
-  // 모달 열릴 때마다 상태 초기화
+  // 모달 열릴 때마다 상태 초기화 (로그인 상태면 사용자 정보 자동 기입)
   useEffect(() => {
     if (isOpen) {
-      setForm(INITIAL_FORM)
+      if (isAuthenticated && user) {
+        const isBiz = user.account_type === 'business'
+        setForm({
+          customerType: isBiz ? 'business' : 'personal',
+          bizNumber: isBiz ? (user.business?.biz_number || '') : '',
+          name: user.name || '',
+          phone: user.phone || '',
+          message: '',
+        })
+      } else {
+        setForm(INITIAL_FORM)
+      }
       setVerifyState({ status: 'idle', message: '' })
     }
-  }, [isOpen])
+  }, [isOpen, isAuthenticated, user])
 
   if (!isOpen) return null
 

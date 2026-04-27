@@ -31,6 +31,17 @@ class Settings(BaseSettings):
             )
         return self
 
+    # ── Hardware (드론/카메라/LiDAR 연결 플래그) ──
+    # False면 카메라·LiDAR·추론 파이프라인 초기화를 모두 건너뜀 (API만 기동)
+    DRONE_CONNECTED: bool = False
+
+    # ── Test Mode (드론 미연결 시 로컬 이미지/영상으로 하자 검출 프로토타입 테스트) ──
+    TEST_MODE_ENABLED: bool = True
+    TEST_IMAGE_INTERVAL: float = 3.0      # 이미지 전환 주기 (초)
+    TEST_IMAGES_DIR: str = "./training/test_external"
+    TEST_THERMAL_DIR: str = "./training/gdrive_raw/B01_B02_D01_crack900_thermal_rgb_seg/Crack900/data/Images/2_IR/train"
+    TEST_UPLOAD_DIR: str = "./uploads/test_files"
+
     # ── Camera ───────────────────────────────
     RGB_CAMERA_INDEX: int = 0
     THERMAL_CAMERA_INDEX: int = 1
@@ -48,14 +59,70 @@ class Settings(BaseSettings):
 
     # YOLO 공통 신뢰도 임계값 (crack_moisture + delamination)
     YOLO_CONF_THRESHOLD: float = 0.25
-    # ResNet50 벽지 분류 신뢰도 임계값 (val_acc 54% 감안, 보수적으로 0.4)
-    WALLPAPER_CONF_THRESHOLD: float = 0.4
+    # ResNet50 벽지 분류 신뢰도 임계값 (val_acc 54% 감안, top1 최소 신뢰도)
+    WALLPAPER_CONF_THRESHOLD: float = 0.35
+    # top1 - top2 최소 마진. 모호한 예측(top1/top2 근소차) 차단용
+    WALLPAPER_MARGIN_THRESHOLD: float = 0.15
 
     # WebSocket 스트림 추론 — N프레임 중 1프레임만 추론 (GPU 부하 분산)
     FRAME_SKIP: int = 3
 
     # 추론 디바이스: 'auto' | 'cuda' | 'cpu'
     DEVICE: str = "auto"
+
+    # 로깅 — JSON 출력은 운영 권장, 개발은 컬러 콘솔
+    LOG_JSON: bool = False
+    LOG_LEVEL: str = "INFO"
+
+    # ── 20종 하자 검출 ONNX 파이프라인 (6-Model + Geometric) ──
+    # M1: 구조·방수 (2-Stage YOLO→ResNet)
+    M1_YOLO_ONNX: str = "m1_yolo_structural.onnx"
+    M1_RESNET_ONNX: str = "m1_resnet_crack_classifier.onnx"
+    M1_CONF_THRESHOLD: float = 0.15          # 높은 재현율 (구조 하자 놓치면 안 됨)
+
+    # M2: 마감·표면 (2-Stage YOLO→ResNet)
+    M2_YOLO_ONNX: str = "m2_yolo_surface.onnx"
+    M2_RESNET_ONNX: str = "m2_resnet_surface_classifier.onnx"
+    M2_CONF_THRESHOLD: float = 0.20
+
+    # M3: 바닥·창호 (2-Stage YOLO→ResNet)
+    M3_YOLO_ONNX: str = "m3_yolo_floor_window.onnx"
+    M3_RESNET_ONNX: str = "m3_resnet_floor_window_classifier.onnx"
+    M3_CONF_THRESHOLD: float = 0.20
+
+    # M4: 열화상 단열 (U-Net + RGB Context)
+    M4_UNET_ONNX: str = "m4_unet_thermal_insulation.onnx"
+    M4_CONTEXT_ONNX: str = "m4_yolo_context_elements.onnx"
+    M4_INSULATION_WALL_DELTA: float = 3.5    # 벽체 단열 온도차 임계값 (°C)
+    M4_INSULATION_WINDOW_DELTA: float = 2.0  # 창호 단열 온도차 임계값 (°C)
+    M4_AIRTIGHT_DELTA: float = 1.5           # 기밀 불량 온도차 임계값 (°C)
+    M4_FLOOR_HEATING_DELTA: float = 2.0      # 바닥 난방 편차 임계값 (°C)
+
+    # M5+G1: 기하학 (YOLOv8m-seg + Hough/RANSAC)
+    M5_SEG_ONNX: str = "m5_yolo_seg_frames.onnx"
+    ALIGNMENT_ANGLE_THRESHOLD: float = 0.2   # 수직수평 편차 임계값 (도)
+    SQUARENESS_ANGLE_THRESHOLD: float = 0.3  # 직각도 편차 임계값 (도)
+
+    # M6: PatchCore 앙상블 폴백
+    M6_PATCHCORE_ONNX: str = "m6_patchcore_surface.onnx"
+    PATCHCORE_THRESHOLD: float = 0.5         # 이상 점수 임계값
+    PATCHCORE_ENSEMBLE_BOOST: float = 0.15   # 앙상블 신뢰도 승격 값
+
+    # 열화상-RGB 공간 정렬 Homography (3x3 JSON)
+    THERMAL_RGB_HOMOGRAPHY: str = "thermal_rgb_homography.json"
+
+    # 계층적 실행 설정
+    TIER1_FRAME_SKIP: int = 3                # M1+M2 실행 주기
+    TIER2_FRAME_SKIP: int = 6                # M3+M5 실행 주기
+    TIER3_FRAME_SKIP: int = 9                # M4+M6 실행 주기
+
+    # 시간 일관성 필터
+    TEMPORAL_FILTER_WINDOW: int = 5          # 프레임 윈도우 크기
+    TEMPORAL_FILTER_MIN_DETECTIONS: int = 2  # 최소 검출 횟수
+    TEMPORAL_INSTANT_THRESHOLD: float = 0.85 # 즉시 보고 임계값
+
+    # 신규 파이프라인 활성화 플래그 (기존 파이프라인과 전환용)
+    USE_20DEFECT_PIPELINE: bool = False
 
     # ── Legacy (하위 호환용, 신규 코드에선 사용 금지) ──
     YOLO_WEIGHTS_PATH: str = "./models_weights/aeroinspect_yolov8.pt"
@@ -67,6 +134,22 @@ class Settings(BaseSettings):
     # ── JWT ──────────────────────────────────
     JWT_SECRET: str = "change-me-in-production"
     JWT_EXPIRE_MINUTES: int = 120
+    # Refresh token: 장기 유효 (기본 14일). /auth/refresh 엔드포인트로 access token 재발급용.
+    JWT_REFRESH_EXPIRE_DAYS: int = 14
+
+    # ── AI Webhook 인증 ──────────────────────
+    # AI 추론 서버 → 백엔드 콜백(/api/v1/ai/*) 보호용 사전 공유 시크릿.
+    # 빈 값이면 모든 요청이 401로 거부됨 (운영 안전 기본값).
+    AI_WEBHOOK_SECRET: str = ""
+
+    # 푸시 알림 프로바이더: "noop" | "fcm" | "apns"
+    # 운영 배포 시 firebase-admin 설치 후 "fcm" 으로 전환.
+    PUSH_PROVIDER: str = "noop"
+
+    # WebSocket 브로드캐스트 백엔드: "memory" (단일 워커) | "redis" (수평 확장)
+    # redis 선택 시 REDIS_URL 필수.
+    WS_BACKEND: str = "memory"
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # ── OAuth (SNS 로그인) ────────────────────
     GOOGLE_CLIENT_ID: str = ""
@@ -78,7 +161,7 @@ class Settings(BaseSettings):
     OAUTH_REDIRECT_BASE: str = "http://localhost:5173"
 
     # ── WebSocket ────────────────────────────
-    WS_HEARTBEAT_INTERVAL: int = 30
+    WS_HEARTBEAT_INTERVAL: int = 3
 
     # ── Streaming ────────────────────────────
     MJPEG_JPEG_QUALITY: int = 80

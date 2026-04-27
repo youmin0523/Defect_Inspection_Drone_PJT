@@ -15,6 +15,7 @@
 
 import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     Column, String, DateTime, Enum as SAEnum, Index, func, ForeignKey,
@@ -24,11 +25,19 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import Base
 
+# 초대코드 기본 유효기간 (일)
+INVITE_CODE_VALIDITY_DAYS = 30
+
 
 def _generate_invite_code(length: int = 8) -> str:
     """8자리 영숫자 초대 코드 생성 (대문자+숫자, 혼동 문자 제외)"""
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # 0/O, 1/I/L 제외
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _default_invite_code_expires_at() -> datetime:
+    """초대코드 기본 만료 시각 (현재 + 30일)"""
+    return datetime.now(timezone.utc) + timedelta(days=INVITE_CODE_VALIDITY_DAYS)
 
 
 class Organization(Base):
@@ -59,6 +68,13 @@ class Organization(Base):
         comment="8자리 초대 코드 (조직 가입용)",
     )
 
+    invite_code_expires_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=_default_invite_code_expires_at,
+        comment="초대 코드 만료 시각 (null=무제한, 기본 30일)",
+    )
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -66,6 +82,17 @@ class Organization(Base):
         Index("idx_org_biz_number", "biz_number"),
         Index("idx_org_invite_code", "invite_code"),
     )
+
+    def regenerate_invite_code(self):
+        """초대코드 재생성 + 만료일 갱신"""
+        self.invite_code = _generate_invite_code()
+        self.invite_code_expires_at = _default_invite_code_expires_at()
+
+    def is_invite_code_expired(self) -> bool:
+        """초대 코드가 만료되었는지 확인"""
+        if self.invite_code_expires_at is None:
+            return False
+        return datetime.now(timezone.utc) >= self.invite_code_expires_at
 
     def __repr__(self):
         return f"<Organization id={self.id} name={self.name} biz={self.biz_number}>"

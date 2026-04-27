@@ -37,7 +37,9 @@ import LiveVideoFeed from '../components/video/LiveVideoFeed.jsx'
 import DefectPanel from '../components/defects/DefectPanel.jsx'
 import DashboardTopBar from '../components/dashboard/DashboardTopBar.jsx'
 import DronesPanel from '../components/dashboard/DronesPanel.jsx'
+import TestModeBar from '../components/dashboard/TestModeBar.jsx'
 import useDroneStore, { DRONE_CAMERA_MAP } from '../store/droneStore.js'
+import useSessionStore from '../store/sessionStore.js'
 
 const CAMERA_LABEL = {
   rgb: 'RGB · 일반 카메라',
@@ -84,6 +86,7 @@ export default function Dashboard() {
   const selectedDroneId = useDroneStore((s) => s.selectedDroneId)
   const cameraMode = useDroneStore((s) => s.cameraMode)
   const setSelectedDrone = useDroneStore((s) => s.setSelectedDrone)
+  const isTestMode = useSessionStore((s) => s.isTestMode)
 
   // ── 미니맵 확장 상태 ─────────────────────────
   const [minimapExpanded, setMinimapExpanded] = useState(false)
@@ -139,13 +142,16 @@ export default function Dashboard() {
       {/* ── 상단 HUD 바 ─────────────────────────────────────── */}
       <DashboardTopBar onMissionEnd={handleMissionEnd} />
 
+      {/* ── 테스트 모드 제어 바 (토글 + 파일 업로드) ── */}
+      {isTestMode && <TestModeBar />}
+
       {/* ── 중앙: LIVE 카메라 피드 (16:9 유지, safe zone 안에 중앙 배치) ── */}
       {/* //* [Modified Code] 풀스크린 object-cover → 16:9 박스로 변경, 다른 HUD 패널과 겹치지 않도록
            safe zone(SAFE.*) 내에서 flex center + aspectRatio 로 자동 피팅 */}
       <div
         className="absolute z-0 flex items-center justify-center"
         style={{
-          top: SAFE.top,
+          top: isTestMode ? SAFE.top + 44 : SAFE.top,
           bottom: SAFE.bottom,
           left: SAFE.left,
           right: SAFE.right,

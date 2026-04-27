@@ -27,3 +27,43 @@ screenshots/
 .vibe_sync_cursor.json
 sync_notion_logs.py
 capture_result.py
+update_screenshots.py
+new_urls.json
+output.txt
+run.bat
+_capture_rounds_*.py
+
+tasks/
+
+# ML 학습 산출물 (대용량)
+backend/training/runs/
+backend/training/datasets/
+backend/training/eval/evaluation_results.json
+*.onnx
+*.onnx.data
+*.npy
+*.pt
+!backend/models_weights/.gitkeep
+
+# 학습 로그 (재생성 가능)
+backend/training/*_log.txt
+
+# 하자 점검 참고 영상 (대용량)
+datasets/defect_videos/
+
+# YOLO 학습 결과 (프로젝트 루트)
+runs/
+
+# 로그 파일
+*.log
+
+# 로컬 SQLite DB
+*.db
+*.sqlite3
+
+# 임시 / 백업 파일
+*.tmp
+*.bak
+
+# Claude Code lock
+.claude/scheduled_tasks.lock

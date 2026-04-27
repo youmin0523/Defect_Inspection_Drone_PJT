@@ -18,8 +18,8 @@ import useDefectStore from '../store/defectStore.js'
 import useDroneStore from '../store/droneStore.js'
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/v1/ws'
-const INITIAL_RETRY_DELAY = 1000   // 1초
-const MAX_RETRY_DELAY = 30000      // 30초
+const INITIAL_RETRY_DELAY = 300    // 0.3초
+const MAX_RETRY_DELAY = 2000       // 2초
 
 // 채널별 메시지 핸들러 (모듈 레벨 — 리렌더링과 무관)
 const messageHandlers = {

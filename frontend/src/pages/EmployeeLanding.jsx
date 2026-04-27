@@ -41,6 +41,7 @@ import {
   Activity,
   MessageSquare,
   Shield,
+  FlaskConical,
 } from 'lucide-react'
 import useAuthStore from '../store/authStore.js'
 import useDefectStore from '../store/defectStore.js'
@@ -134,8 +135,7 @@ export default function EmployeeLanding() {
     return Math.round((end - missionStartedAt) / 60000)
   }, [missionStartedAt, missionEndedAt])
 
-  // 알림 데이터
-  const notifications = useNotificationStore((s) => s.notifications)
+  // 알림 데이터 — 초기 로드만 트리거 (실제 구독은 NotificationsSection 내부에서)
   const unreadCount = useNotificationStore((s) => s.unreadCount)
   const fetchAll = useNotificationStore((s) => s.fetchAll)
   const fetchUnreadCount = useNotificationStore((s) => s.fetchUnreadCount)
@@ -177,7 +177,7 @@ export default function EmployeeLanding() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <TodayScheduleSection schedules={MOCK_TODAY_SCHEDULE} />
-          <NotificationsSection notifications={notifications} />
+          <NotificationsSection />
         </div>
 
         <TeamAssignmentsSection members={MOCK_TEAM_MEMBERS} />
@@ -201,13 +201,14 @@ function EmployeeHeader({ operatorName }) {
   const user = useAuthStore((s) => s.user)
   const displayName = user?.name || operatorName || '게스트'
   const initials = (displayName?.slice(0, 2) || 'GU').toUpperCase()
-  const { unreadCount, toggleDropdown } = useNotificationStore()
+  const { unreadCount, chatUnreadCount, toggleDropdown } = useNotificationStore()
+  const totalUnreadCount = unreadCount + chatUnreadCount
   const chatUnread = useChatStore((s) => s.unreadTotal)
   const [profileOpen, setProfileOpen] = useState(false)
   const [editProfileOpen, setEditProfileOpen] = useState(false)
   const profileRef = useRef(null)
 
-  const isAdmin = currentOrg && ['owner', 'admin'].includes(currentOrg.role)
+  const isAdmin = user?.is_superadmin || (currentOrg && ['owner', 'admin'].includes(currentOrg.role))
 
   const handleLogout = () => {
     logout()
@@ -273,9 +274,9 @@ function EmployeeHeader({ operatorName }) {
               onClick={toggleDropdown}
             >
               <Bell size={18} className="text-gray-600" />
-              {unreadCount > 0 && (
+              {totalUnreadCount > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1 border-2 border-white">
-                  {unreadCount > 99 ? '99+' : unreadCount}
+                  {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
                 </span>
               )}
             </button>
@@ -313,6 +314,11 @@ function EmployeeHeader({ operatorName }) {
                 <div className="px-4 py-3 border-b border-gray-100">
                   <p className="font-semibold text-slate-900 text-sm">{displayName}</p>
                   <p className="text-xs text-gray-500 truncate">{user?.email}</p>
+                  {user?.is_superadmin && (
+                    <span className="inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700">
+                      슈퍼어드민
+                    </span>
+                  )}
                   {currentOrg && (
                     <span className={`inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full font-medium ${
                       currentOrg.role === 'owner' ? 'bg-amber-100 text-amber-700' :
@@ -619,14 +625,16 @@ function EditProfileModal({ user, token, onClose }) {
    ────────────────────────────────────────────────────────────── */
 
 function WelcomeBanner({
-  operatorName,
   dateStr,
   weekdayLabel,
   todayCount,
   pendingReports,
   sessionContextLabel,
 }) {
-  const name = operatorName || '게스트'
+  const user = useAuthStore((s) => s.user)
+  const currentOrg = useAuthStore((s) => s.currentOrg)
+  const name = user?.name || '게스트'
+  const position = currentOrg?.position || ''
   return (
     <section className="relative bg-slate-900 text-white overflow-hidden">
       {/* 점무늬 데코 — 랜딩 Hero 와 동일한 노란 닷 패턴 */}
@@ -646,7 +654,7 @@ function WelcomeBanner({
               Employee · Office Hub
             </p>
             <h1 className="text-2xl md:text-4xl font-extrabold leading-tight break-keep">
-              {name} 과장님, 좋은 하루입니다.
+              {name}{position ? ` ${position}` : ''}님, 좋은 하루입니다.
               <br className="hidden md:block" />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-yellow-400">
                 오늘도 안전한 점검을 응원합니다.
@@ -745,22 +753,43 @@ const ACTION_ACCENT = {
   violet: { border: 'border-t-4 border-violet-600', panel: 'bg-violet-50', iconBg: 'bg-violet-600', text: 'text-violet-700', hoverBg: 'group-hover:bg-violet-100' },
   cyan:   { border: 'border-t-4 border-cyan-600',   panel: 'bg-cyan-50',   iconBg: 'bg-cyan-600',   text: 'text-cyan-700',   hoverBg: 'group-hover:bg-cyan-100' },
   amber:  { border: 'border-t-4 border-amber-600',  panel: 'bg-amber-50',  iconBg: 'bg-amber-600',  text: 'text-amber-700',  hoverBg: 'group-hover:bg-amber-100' },
+  red:    { border: 'border-t-4 border-red-500',   panel: 'bg-red-50',    iconBg: 'bg-red-500',   text: 'text-red-700',    hoverBg: 'group-hover:bg-red-100' },
 }
 
 function QuickActionsSection() {
+  const user = useAuthStore((s) => s.user)
   const currentOrg = useAuthStore((s) => s.currentOrg)
-  const isAdmin = currentOrg && ['owner', 'admin'].includes(currentOrg.role)
+  const isAdmin = user?.is_superadmin || (currentOrg && ['owner', 'admin'].includes(currentOrg.role))
+  const navigate = useNavigate()
+  const enterTestMode = useSessionStore((s) => s.enterTestMode)
 
-  const actions = isAdmin
-    ? [...QUICK_ACTIONS, {
-        key: 'admin-members',
-        title: '멤버 관리',
-        desc: '조직 멤버를 관리하고 미소속 사용자를 배정합니다.',
-        to: '/employee/admin/members',
-        icon: Shield,
-        accent: 'amber',
-      }]
-    : QUICK_ACTIONS
+  const adminCard = {
+    key: 'admin-members',
+    title: '멤버 관리',
+    desc: '조직 멤버를 관리하고 미소속 사용자를 배정합니다.',
+    to: '/employee/admin/members',
+    icon: Shield,
+    accent: 'amber',
+  }
+
+  const testModeCard = {
+    key: 'test-mode',
+    title: 'TEST MODE',
+    desc: '테스트 이미지/영상으로 AI 하자 검출을 시험합니다. 드론 연결 없이 대시보드를 체험할 수 있습니다.',
+    icon: FlaskConical,
+    accent: 'red',
+    isTestMode: true,
+  }
+
+  const actions = [
+    ...QUICK_ACTIONS,
+    ...(isAdmin ? [adminCard, testModeCard] : []),
+  ]
+
+  const handleTestModeClick = () => {
+    enterTestMode()
+    navigate('/dashboard')
+  }
 
   return (
     <section>
@@ -784,6 +813,29 @@ function QuickActionsSection() {
               </span>
             </div>
           )
+
+          // TEST MODE 카드: Link 대신 onClick 핸들러 사용
+          if (action.isTestMode) {
+            return (
+              <button
+                key={action.key}
+                type="button"
+                onClick={handleTestModeClick}
+                className={`group relative flex flex-col bg-white rounded-xl shadow-md hover:shadow-xl hover:-translate-y-1 transition duration-300 h-full text-left ${style.border}`}
+              >
+                <div className={`h-24 flex items-center justify-center ${style.panel} ${style.hoverBg} transition`}>
+                  <div className={`w-12 h-12 rounded-xl ${style.iconBg} text-white flex items-center justify-center shadow-lg`}>
+                    <Icon size={22} />
+                  </div>
+                </div>
+                {body}
+                <span className="absolute top-3 right-3 text-[10px] font-bold tracking-wider bg-red-500 text-white px-2 py-0.5 rounded">
+                  TEST
+                </span>
+              </button>
+            )
+          }
+
           const CardRoot = action.disabled ? 'div' : Link
           const rootProps = action.disabled
             ? {
@@ -940,9 +992,9 @@ function TodayScheduleSection({ schedules }) {
       <ul className="divide-y divide-gray-100">
         {schedules.map((s) => (
           <li key={s.id} className="px-6 py-4 flex items-center gap-4 hover:bg-gray-50 transition">
-            <div className="flex flex-col items-center w-14 shrink-0">
-              <span className="text-lg font-extrabold text-blue-700 font-mono">{s.time}</span>
-              <span className="text-[10px] text-gray-400 uppercase">KST</span>
+            <div className="flex flex-col items-center w-14 shrink-0 font-pretendard">
+              <span className="text-lg font-extrabold text-blue-700 tabular-nums tracking-tight">{s.time}</span>
+              <span className="text-[10px] text-gray-400 uppercase tracking-wide">KST</span>
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-slate-800 truncate break-keep">{s.site}</p>
@@ -966,22 +1018,35 @@ function TodayScheduleSection({ schedules }) {
    6. 알림/공지 — 2열 중 우측 (notificationStore 연동)
    ────────────────────────────────────────────────────────────── */
 
-function formatRelativeTime(timestamp) {
-  const diff = Date.now() - timestamp
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return '방금 전'
-  if (minutes < 60) return `${minutes}분 전`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}시간 전`
-  const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}일 전`
-  const weeks = Math.floor(days / 7)
-  if (weeks < 5) return `${weeks}주 전`
-  const months = Math.floor(days / 30)
-  return `${months}개월 전`
+/** 채팅 알림의 종류 라벨 — 첨부 유무/이미지 확장자로 구분 */
+const CHAT_IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|avif|svg)$/i
+function getChatKindLabel(n) {
+  if (n.file_name) {
+    return CHAT_IMAGE_EXT.test(n.file_name) ? '사진 발송' : '파일 발송'
+  }
+  return '메시지 발송'
 }
 
-function NotificationsSection({ notifications }) {
+function NotificationsSection() {
+  const notifications = useNotificationStore((s) => s.notifications)
+  const chatNotifications = useNotificationStore((s) => s.chatNotifications)
+
+  // 채팅 알림 + 백엔드 알림 머지 (created_at 내림차순, 최대 6건)
+  const merged = useMemo(() => {
+    const chatItems = chatNotifications.map((n) => ({
+      id: n.id,
+      category: 'chat',
+      title: `${n.sender_name || '알 수 없음'}님께서 메시지를 보냈습니다.`,
+      created_at: typeof n.created_at === 'string' ? new Date(n.created_at).getTime() : n.created_at,
+      is_read: n.is_read,
+      _isChat: true,
+      _kindLabel: getChatKindLabel(n),
+    }))
+    return [...chatItems, ...notifications]
+      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
+      .slice(0, 6)
+  }, [notifications, chatNotifications])
+
   return (
     <section className="bg-white rounded-xl shadow-md overflow-hidden border-t-4 border-yellow-500">
       <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -989,33 +1054,41 @@ function NotificationsSection({ notifications }) {
           <Bell className="text-yellow-500" size={18} />
           <h3 className="font-bold text-slate-800">알림 · 공지</h3>
         </div>
-        <span className="text-xs font-semibold text-gray-500">최근 {notifications.length}건</span>
+        <span className="text-xs font-semibold text-gray-500">최근 {merged.length}건</span>
       </div>
-      <ul className="divide-y divide-gray-100">
-        {notifications.slice(0, 6).map((n) => {
-          const cat = NOTIFICATION_CATEGORIES[n.category] || NOTIFICATION_CATEGORIES.system
-          const Icon = cat.icon
-          return (
-            <li key={n.id} className={`px-6 py-4 flex items-start gap-4 border-l-4 ${cat.border} hover:bg-gray-50 transition`}>
-              <div className={`w-9 h-9 rounded-lg ${cat.lightBg} ${cat.lightText} flex items-center justify-center shrink-0`}>
-                <Icon size={16} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${cat.lightBg} ${cat.lightText}`}>
-                    {cat.label}
-                  </span>
-                  {!n.is_read && (
-                    <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
-                  )}
+      {merged.length > 0 ? (
+        <ul className="divide-y divide-gray-100">
+          {merged.map((n) => {
+            const cat = NOTIFICATION_CATEGORIES[n.category] || NOTIFICATION_CATEGORIES.system
+            const Icon = cat.icon
+            // 채팅: 사용자 지정 라벨, 그 외: 카테고리 라벨로 폴백 (시간 텍스트 자리 대체)
+            const kindLabel = n._isChat ? n._kindLabel : cat.label
+            return (
+              <li key={n.id} className={`px-6 py-4 flex items-start gap-4 border-l-4 ${cat.border} hover:bg-gray-50 transition`}>
+                <div className={`w-9 h-9 rounded-lg ${cat.lightBg} ${cat.lightText} flex items-center justify-center shrink-0`}>
+                  <Icon size={16} />
                 </div>
-                <p className={`text-sm break-keep ${n.is_read ? 'text-slate-500' : 'font-semibold text-slate-800'}`}>{n.title}</p>
-                <p className="text-xs text-gray-500 mt-1">{formatRelativeTime(n.created_at)}</p>
-              </div>
-            </li>
-          )
-        })}
-      </ul>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${cat.lightBg} ${cat.lightText}`}>
+                      {cat.label}
+                    </span>
+                    {!n.is_read && (
+                      <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                    )}
+                  </div>
+                  <p className={`text-sm break-keep ${n.is_read ? 'text-slate-500' : 'font-semibold text-slate-800'}`}>{n.title}</p>
+                  <p className="text-xs text-gray-500 mt-1">{kindLabel}</p>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <div className="py-12 text-center text-sm text-gray-400">
+          새로운 알림이 없습니다
+        </div>
+      )}
     </section>
   )
 }

@@ -12,8 +12,12 @@
 import { useState, useEffect } from 'react'
 import { X, Search, Building2 } from 'lucide-react'
 import useChatStore from '../../store/chatStore.js'
-import { CURRENT_USER, USER_STATUS_CONFIG } from '../../constants/chatConstants.js'
+import { USER_STATUS_CONFIG } from '../../constants/chatConstants.js'
 import { listOrganizationMembers } from '../../api/organizationApi.js'
+
+function getCurrentUser() {
+  return JSON.parse(localStorage.getItem('user') || 'null') || { id: null, name: '사용자' }
+}
 
 export default function NewChatModal() {
   const closeNewChatModal = useChatStore((s) => s.closeNewChatModal)
@@ -36,9 +40,10 @@ export default function NewChatModal() {
         if (!cancelled) {
           setOrgInfo(organization)
           // 자기 자신 제외, active 멤버 우선 정렬
+          const currentUser = getCurrentUser()
           setOrgMembers(
             members
-              .filter((m) => m.user_id !== CURRENT_USER.id)
+              .filter((m) => m.user_id !== currentUser.id)
               .sort((a, b) => {
                 if (a.status === 'active' && b.status !== 'active') return -1
                 if (a.status !== 'active' && b.status === 'active') return 1
@@ -84,7 +89,7 @@ export default function NewChatModal() {
       await startDM(selected[0])
     } else {
       const names = selected.map((id) => orgMembers.find((m) => m.user_id === id)?.name).filter(Boolean)
-      const name = groupName.trim() || `${CURRENT_USER.name}, ${names.join(', ')}`
+      const name = groupName.trim() || `${getCurrentUser().name}, ${names.join(', ')}`
       await createConversation({ type: 'group', name, participants: selected })
     }
     closeNewChatModal()

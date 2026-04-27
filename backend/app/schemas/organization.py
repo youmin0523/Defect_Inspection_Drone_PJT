@@ -27,6 +27,7 @@ class OrganizationResponse(BaseModel):
     name: str
     biz_number: Optional[str]
     invite_code: Optional[str] = None
+    invite_code_expires_at: Optional[datetime] = None
     member_count: int = 0
     created_at: datetime
 
@@ -93,6 +94,7 @@ class JoinByCodeRequest(BaseModel):
 class AssignMemberRequest(BaseModel):
     """미소속 사용자를 조직에 배정"""
     user_id: UUID = Field(..., description="배정할 사용자 ID")
+    organization_id: Optional[UUID] = Field(None, description="배정할 조직 ID (슈퍼어드민 전용, 미지정 시 현재 조직)")
     role: str = Field("member", pattern="^(admin|member)$")
     department: Optional[str] = None
     position: Optional[str] = None

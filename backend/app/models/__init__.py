@@ -30,6 +30,7 @@ from app.models.report import Report  # noqa: F401
 
 # ── 알림 ─────────────────────────────────────
 from app.models.notification import Notification  # noqa: F401
+from app.models.device_token import DeviceToken  # noqa: F401
 
 # ── 조직 / 팀 ────────────────────────────────
 from app.models.organization import Organization, OrganizationMember  # noqa: F401
@@ -59,6 +60,7 @@ __all__ = [
     "Report",
     # 알림
     "Notification",
+    "DeviceToken",
     # 조직 / 팀
     "Organization",
     "OrganizationMember",

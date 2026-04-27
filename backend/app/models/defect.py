@@ -75,8 +75,11 @@ class DefectLog(Base):
     lidar_z = Column(Float, comment="월드 좌표 Z / 고도 (m)")
 
     # ── 이미지 데이터 ─────────────────────────
-    # Base64 인코딩된 JPEG 크롭 이미지
-    image_crop = Column(Text, comment="하자 영역 크롭 이미지 (Base64 JPEG)")
+    # image_crop (deprecated): Base64 인코딩된 JPEG. DB 용량 이슈로 파일 저장 방식으로 전환 중.
+    # image_crop_path: 파일시스템 상대 경로 (예: "defects/2026-04-21/xxx.jpg"). /uploads/ StaticFiles로 서빙.
+    # 신규 레코드는 image_crop_path만 채움. image_crop은 과거 데이터 호환용으로만 유지.
+    image_crop = Column(Text, comment="[DEPRECATED] Base64 JPEG. 신규는 image_crop_path 사용.")
+    image_crop_path = Column(String(255), comment="하자 크롭 이미지 상대 경로 (uploads/ 기준)")
 
     # ── 열화상 데이터 ─────────────────────────
     thermal_max = Column(Float, comment="하자 ROI 최고 온도 (°C)")
@@ -94,6 +97,17 @@ class DefectLog(Base):
 
     # 원시 YOLO 탐지 결과 전체 저장 (디버깅·재분석용)
     raw_payload = Column(JSONB, comment="YOLO 원시 탐지 결과 JSON")
+
+    # ── 20종 파이프라인 확장 컬럼 ────────────
+    # 기하학 하자 (A-01, A-04): 수직수평·직각도 편차
+    deviation_degrees = Column(Float, nullable=True, comment="수직수평/직각도 편차 (도)")
+    deviation_mm_per_m = Column(Float, nullable=True, comment="편차 mm/m 환산")
+
+    # 단열 하자 (B-01, B-02, B-05, D-01): 온도 편차
+    delta_temperature = Column(Float, nullable=True, comment="주변 대비 온도차 (°C)")
+
+    # 앙상블 부스팅 여부
+    ensemble_boosted = Column(String(5), nullable=True, default=None, comment="PatchCore 앙상블 승격 (true/false)")
 
     # ── 인덱스 ───────────────────────────────
     # 필터링 쿼리 최적화: 심각도+시간 / 영역+시간 / 프레임

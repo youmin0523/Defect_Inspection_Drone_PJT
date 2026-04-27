@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db, get_ws_manager
+from app.dependencies import get_current_user, get_db, get_ws_manager
 from app.models.slam_map import SlamMap
 from app.schemas.slam_map import (
     SlamMapCreate,
@@ -29,7 +29,10 @@ router = APIRouter()
 
 
 @router.get("", response_model=SlamMapListResponse)
-async def list_slam_maps(db: AsyncSession = Depends(get_db)):
+async def list_slam_maps(
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),  # TODO: 조직별 SLAM 분리 시 get_current_org_member로 교체
+):
     """SLAM 맵 목록 조회 (이미지 제외, 메타데이터만)"""
     query = select(SlamMap).order_by(desc(SlamMap.created_at))
 
@@ -44,7 +47,11 @@ async def list_slam_maps(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{map_id}", response_model=SlamMapResponse)
-async def get_slam_map(map_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_slam_map(
+    map_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
+):
     """SLAM 맵 상세 조회 (이미지 포함)"""
     result = await db.execute(select(SlamMap).where(SlamMap.id == map_id))
     slam_map = result.scalar_one_or_none()
@@ -58,6 +65,7 @@ async def create_slam_map(
     payload: SlamMapCreate,
     db: AsyncSession = Depends(get_db),
     manager: ConnectionManager = Depends(get_ws_manager),
+    _user=Depends(get_current_user),
 ):
     """새 SLAM 맵 세션 생성"""
     slam_map = SlamMap(
@@ -93,6 +101,7 @@ async def update_slam_map(
     payload: SlamMapUpdate,
     db: AsyncSession = Depends(get_db),
     manager: ConnectionManager = Depends(get_ws_manager),
+    _user=Depends(get_current_user),
 ):
     """
     SLAM 맵 업데이트 (실시간 매핑 중 지도 이미지 갱신).
@@ -126,7 +135,11 @@ async def update_slam_map(
 
 
 @router.delete("/{map_id}", status_code=204)
-async def delete_slam_map(map_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_slam_map(
+    map_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
+):
     """SLAM 맵 삭제"""
     result = await db.execute(select(SlamMap).where(SlamMap.id == map_id))
     slam_map = result.scalar_one_or_none()

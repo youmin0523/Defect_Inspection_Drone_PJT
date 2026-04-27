@@ -28,9 +28,14 @@ export default function AdminMembers() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // 조직 목록 (슈퍼어드민용)
+  const [allOrgs, setAllOrgs] = useState([])
+  // 배정 모달에서 선택한 조직의 부서 목록
+  const [assignOrgDepts, setAssignOrgDepts] = useState([])
+
   // 모달 상태
   const [assignModal, setAssignModal] = useState(null)
-  const [assignForm, setAssignForm] = useState({ role: 'member', department: '', position: '' })
+  const [assignForm, setAssignForm] = useState({ organization_id: '', role: 'member', department: '', position: '' })
   const [detailModal, setDetailModal] = useState(null)
   const [editForm, setEditForm] = useState({ role: 'member', department: '', position: '', status: 'active', started_at: '', ended_at: '' })
   const [deptEditName, setDeptEditName] = useState('')
@@ -42,21 +47,44 @@ export default function AdminMembers() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const requests = [
-        axios.get(`${API_BASE}/api/v1/organizations/members`, { headers }),
-        axios.get(`${API_BASE}/api/v1/organizations/unaffiliated-users`, { headers }),
-        axios.get(`${API_BASE}/api/v1/organizations/departments`, { headers }),
-      ]
+      // 슈퍼어드민: 전체 사용자 목록 우선, 조직 API는 소속 있을 때만
       if (isSuperadmin) {
-        requests.push(axios.get(`${API_BASE}/api/v1/organizations/admin/all-users`, { headers }))
-      }
-      const results = await Promise.all(requests)
-      setOrgInfo(results[0].data.organization)
-      setMembers(results[0].data.members)
-      setUnaffiliated(results[1].data)
-      setDepartments(results[2].data)
-      if (isSuperadmin && results[3]) {
-        setAllUsers(results[3].data)
+        const [allUsersRes, allOrgsRes] = await Promise.all([
+          axios.get(`${API_BASE}/api/v1/organizations/admin/all-users`, { headers }),
+          axios.get(`${API_BASE}/api/v1/organizations/admin/all-orgs`, { headers }),
+        ])
+        setAllUsers(allUsersRes.data)
+        setAllOrgs(allOrgsRes.data)
+
+        // 조직 소속이면 멤버/부서도 로드, 아니면 빈 배열
+        try {
+          const [membersRes, unaffRes, deptRes] = await Promise.all([
+            axios.get(`${API_BASE}/api/v1/organizations/members`, { headers }),
+            axios.get(`${API_BASE}/api/v1/organizations/unaffiliated-users`, { headers }),
+            axios.get(`${API_BASE}/api/v1/organizations/departments`, { headers }),
+          ])
+          setOrgInfo(membersRes.data.organization)
+          setMembers(membersRes.data.members)
+          setUnaffiliated(unaffRes.data)
+          setDepartments(deptRes.data)
+        } catch {
+          // 조직 미소속 슈퍼어드민 — 조직 관련 데이터 비움
+          setOrgInfo(null)
+          setMembers([])
+          setUnaffiliated([])
+          setDepartments([])
+        }
+      } else {
+        // 일반 admin/owner
+        const [membersRes, unaffRes, deptRes] = await Promise.all([
+          axios.get(`${API_BASE}/api/v1/organizations/members`, { headers }),
+          axios.get(`${API_BASE}/api/v1/organizations/unaffiliated-users`, { headers }),
+          axios.get(`${API_BASE}/api/v1/organizations/departments`, { headers }),
+        ])
+        setOrgInfo(membersRes.data.organization)
+        setMembers(membersRes.data.members)
+        setUnaffiliated(unaffRes.data)
+        setDepartments(deptRes.data)
       }
     } catch (err) {
       setError(err.response?.data?.detail || '데이터를 불러오지 못했습니다.')
@@ -67,15 +95,34 @@ export default function AdminMembers() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  // 배정 모달에서 조직 변경 시 → 해당 조직의 부서 목록 로드
+  const handleAssignOrgChange = async (orgId) => {
+    setAssignForm({ ...assignForm, organization_id: orgId, department: '' })
+    setAssignOrgDepts([])
+    if (!orgId) return
+    try {
+      const res = await axios.get(`${API_BASE}/api/v1/organizations/admin/orgs/${orgId}/departments`, { headers })
+      setAssignOrgDepts(res.data)
+    } catch { /* 부서 없으면 빈 배열 유지 */ }
+  }
+
   const handleAssign = async () => {
     if (!assignModal) return
+    if (isSuperadmin && !assignForm.organization_id) {
+      setError('배정할 조직을 선택해주세요.')
+      return
+    }
     try {
       await axios.post(`${API_BASE}/api/v1/organizations/members/assign`, {
-        user_id: assignModal.id, role: assignForm.role,
-        department: assignForm.department || null, position: assignForm.position || null,
+        user_id: assignModal.id,
+        organization_id: isSuperadmin ? assignForm.organization_id : undefined,
+        role: assignForm.role,
+        department: assignForm.department || null,
+        position: assignForm.position || null,
       }, { headers })
       setAssignModal(null)
-      setAssignForm({ role: 'member', department: '', position: '' })
+      setAssignForm({ organization_id: '', role: 'member', department: '', position: '' })
+      setAssignOrgDepts([])
       fetchData()
     } catch (err) { setError(err.response?.data?.detail || '배정에 실패했습니다.') }
   }
@@ -142,6 +189,32 @@ export default function AdminMembers() {
             <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-center">
               <div className="text-xs text-gray-500 mb-1">초대 코드</div>
               <div className="font-mono text-lg font-bold tracking-widest text-slate-900">{orgInfo.invite_code}</div>
+              {orgInfo.invite_code_expires_at && (() => {
+                const expires = new Date(orgInfo.invite_code_expires_at)
+                const now = new Date()
+                const isExpired = expires <= now
+                const daysLeft = Math.ceil((expires - now) / (1000 * 60 * 60 * 24))
+                return (
+                  <div className="mt-1.5">
+                    <div className={`text-xs ${isExpired ? 'text-red-500 font-semibold' : daysLeft <= 7 ? 'text-amber-600' : 'text-gray-400'}`}>
+                      {isExpired ? '만료됨' : `${daysLeft}일 후 만료`}
+                      <span className="text-gray-300 ml-1">({expires.toLocaleDateString('ko-KR')})</span>
+                    </div>
+                  </div>
+                )
+              })()}
+              <button
+                onClick={async () => {
+                  if (!confirm('초대 코드를 재생성하시겠습니까?\n기존 코드는 즉시 무효화됩니다.')) return
+                  try {
+                    const res = await axios.post(`${API_BASE}/api/v1/organizations/invite-code/regenerate`, {}, { headers })
+                    setOrgInfo({ ...orgInfo, invite_code: res.data.invite_code, invite_code_expires_at: res.data.invite_code_expires_at })
+                  } catch (err) { setError(err.response?.data?.detail || '초대 코드 재생성에 실패했습니다.') }
+                }}
+                className="mt-2 text-xs text-blue-600 hover:text-blue-800 hover:underline transition"
+              >
+                코드 재생성
+              </button>
             </div>
           )}
         </div>
@@ -185,8 +258,19 @@ export default function AdminMembers() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredAll.map((u) => (
-                  <tr key={u.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-slate-900">{u.name}</td>
+                  <tr key={u.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => {
+                    if (u.organization_name) {
+                      // 소속 조직 있는 사용자 → 멤버 수정 모달
+                      setDetailModal({ user_id: u.id, name: u.name, email: u.email, phone: u.phone, initials: u.name?.slice(0,2)?.toUpperCase() || '??', role: u.role || 'member', department: u.department || '', position: u.position || '', status: u.status || 'active', started_at: null, ended_at: null })
+                      setEditForm({ role: u.role || 'member', department: u.department || '', position: u.position || '', status: u.status || 'active', started_at: '', ended_at: '' })
+                    } else {
+                      // 미소속 사용자 → 조직 배정 모달
+                      setAssignModal({ id: u.id, name: u.name, email: u.email })
+                      setAssignForm({ organization_id: '', role: 'member', department: '', position: '' })
+                      setAssignOrgDepts([])
+                    }
+                  }}>
+                    <td className="px-4 py-3 font-medium text-slate-900 hover:text-blue-600">{u.name}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{u.email}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{u.phone}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{u.organization_name || <span className="text-gray-300">미소속</span>}</td>
@@ -257,7 +341,7 @@ export default function AdminMembers() {
                       <td className="px-4 py-3 text-sm text-gray-500">{u.account_type === 'personal' ? '개인' : '사업자'}</td>
                       <td className="px-4 py-3 text-sm text-gray-500">{new Date(u.created_at).toLocaleDateString('ko-KR')}</td>
                       <td className="px-4 py-3 text-right">
-                        <button onClick={() => setAssignModal(u)} className="px-3 py-1.5 bg-slate-900 text-white text-sm rounded-lg hover:bg-slate-800 transition">조직 배정</button>
+                        <button onClick={() => { setAssignModal(u); setAssignForm({ organization_id: '', role: 'member', department: '', position: '' }); setAssignOrgDepts([]) }} className="px-3 py-1.5 bg-slate-900 text-white text-sm rounded-lg hover:bg-slate-800 transition">조직 배정</button>
                       </td>
                     </tr>
                   ))}
@@ -312,28 +396,52 @@ export default function AdminMembers() {
             <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
               <h3 className="text-lg font-bold text-slate-900 mb-4">{assignModal.name}님을 조직에 배정</h3>
               <div className="space-y-3">
-                <div>
+                {/* 1단계: 소속 조직 선택 (슈퍼어드민만) */}
+                {isSuperadmin ? (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">소속 조직</label>
+                    <select value={assignForm.organization_id} onChange={(e) => handleAssignOrgChange(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-slate-900 bg-white">
+                      <option value="">조직을 선택하세요</option>
+                      {allOrgs.map((o) => <option key={o.id} value={o.id}>{o.name} ({o.member_count}명)</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">소속 조직</label>
+                    <input type="text" value={orgInfo?.name || ''} disabled className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed" />
+                  </div>
+                )}
+
+                {/* 2단계: 역할 선택 (조직 선택 후 활성화) */}
+                <div className={(!isSuperadmin || assignForm.organization_id) ? '' : 'opacity-40 pointer-events-none'}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">역할</label>
                   <select value={assignForm.role} onChange={(e) => setAssignForm({ ...assignForm, role: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-slate-900 bg-white">
                     <option value="member">멤버</option>
                     <option value="admin">관리자</option>
                   </select>
                 </div>
-                <div>
+
+                {/* 3단계: 부서 선택 (조직 선택 후 해당 조직의 부서 로드) */}
+                <div className={(!isSuperadmin || assignForm.organization_id) ? '' : 'opacity-40 pointer-events-none'}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">부서</label>
                   <select value={assignForm.department} onChange={(e) => setAssignForm({ ...assignForm, department: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-slate-900 bg-white">
                     <option value="">부서를 선택하세요</option>
-                    {departments.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+                    {(isSuperadmin ? assignOrgDepts : departments).map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
                   </select>
+                  {isSuperadmin && assignForm.organization_id && assignOrgDepts.length === 0 && (
+                    <p className="text-xs text-gray-400 mt-1">이 조직에 등록된 부서가 없습니다.</p>
+                  )}
                 </div>
-                <div>
+
+                {/* 4단계: 직위 */}
+                <div className={(!isSuperadmin || assignForm.organization_id) ? '' : 'opacity-40 pointer-events-none'}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">직위</label>
                   <input type="text" value={assignForm.position} onChange={(e) => setAssignForm({ ...assignForm, position: e.target.value })} placeholder="예: 과장" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
                 </div>
               </div>
               <div className="flex gap-3 mt-6">
-                <button onClick={() => setAssignModal(null)} className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">취소</button>
-                <button onClick={handleAssign} className="flex-1 px-4 py-2.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition">배정하기</button>
+                <button onClick={() => { setAssignModal(null); setAssignOrgDepts([]) }} className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">취소</button>
+                <button onClick={handleAssign} disabled={isSuperadmin && !assignForm.organization_id} className="flex-1 px-4 py-2.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed">배정하기</button>
               </div>
             </div>
           </div>

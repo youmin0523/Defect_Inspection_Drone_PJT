@@ -163,6 +163,20 @@ function drawDetections(result, canvas) {
 
 ## DB 마이그레이션 절차 (첫 배포)
 
+> ⚠️ **운영 배포 전 정리 필요 (TODO)**
+>
+> 현재 [`init_db.py`](app/db/init_db.py)가 `Base.metadata.create_all`로 테이블을 자동 생성하고 있어, alembic 마이그레이션 시스템과 **이중으로 굴러가는 상태**입니다. 이대로 두면:
+> - 모델에 컬럼 추가해도 기존 테이블엔 반영 안 됨 (`create_all`은 신규 테이블만 만듦)
+> - 팀원/서버마다 DB 스키마가 달라질 수 있음
+> - 이미 `versions/`에 9개 마이그레이션 파일이 있는데, 적용 이력(`alembic_version`)이 추적 안 됨
+>
+> **출시 전 작업 항목:**
+> 1. `init_db.py` 에서 `create_all` 호출 제거 (시드 데이터 삽입만 남김)
+> 2. 운영 DB에 `alembic stamp head` 1회 실행 (현재 스키마를 최신 리비전으로 도장만 찍기)
+> 3. 이후 모든 모델 변경은 `alembic revision --autogenerate -m "..."` → `alembic upgrade head` 로만 진행
+>
+> **현재까지는** 팀이 로컬에서 `init_db` 방식으로 잘 쓰고 있으니 그대로 유지. 출시 직전 운영 DB 백업 후 한 번에 정리할 것.
+
 Alembic 리비전 [0002_defect_class_display.py](alembic/versions/0002_defect_class_display.py)가 `defect_logs`에 4개 컬럼 추가 + 기존 `area/category_code/defect_type`을 `NULLABLE`로 완화합니다. 기존 스키마와 drift 나지 않도록 **baseline은 `stamp` 방식으로 처리**합니다.
 
 ### 신규 DB (비어 있음)
@@ -197,16 +211,139 @@ YOLO_THERMAL_WEIGHTS=yolov8s_crack_moisture_best.pt
 YOLO_DELAM_WEIGHTS=yolov8s_delamination_best.pt
 WALLPAPER_WEIGHTS=resnet50_wallpaper_best.pt
 YOLO_CONF_THRESHOLD=0.25
-WALLPAPER_CONF_THRESHOLD=0.4
+WALLPAPER_CONF_THRESHOLD=0.35
+WALLPAPER_MARGIN_THRESHOLD=0.15
 FRAME_SKIP=3
 DEVICE=auto
 ```
 
 전체 목록은 [.env.example](.env.example) 참조.
 
+---
+
+## 운영 모니터링 & 관측성
+
+### 상태 조회 엔드포인트
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/health` | 카메라 / 3-모델 / 스트림 워커 / LiDAR / telemetry 캐시 전체 상태 |
+| `GET` | `/api/v1/stream/stats` | 추론 워커 실시간 메트릭 (submitted/processed/dropped/queue_size) + LiDAR 연결 상태 |
+| `GET` | `/api/v1/coverage/{site_id}` | 현장별 점검 커버리지 (텔레메트리 convex hull → covered/supplied/ratio) |
+
+`/api/v1/stream/stats` 응답 예시:
+```json
+{
+  "worker": {"running": true, "submitted": 18420, "processed": 6123, "dropped": 12, "queue_size": 0, "frame_skip": 3},
+  "telemetry_cache": {"ready": true, "age_sec": 0.12},
+  "lidar": {"connected": true, "distance_m": 2.43}
+}
+```
+
+### 구조화 로깅 (structlog)
+
+- `LOG_JSON=false` (기본): 개발용 컬러 콘솔
+- `LOG_JSON=true`: 운영용 JSON 한 줄 로그 → Grafana Loki / Datadog / CloudWatch 바로 적재
+- 모든 로그에 `request_id`, `method`, `path` 자동 바인딩 ([app/core/middleware.py](app/core/middleware.py))
+- 표준 이벤트: `http.request` (status, duration_ms) / `http.request.failed` (traceback)
+- 클라이언트 → `X-Request-ID` 헤더 전달 시 그대로 재사용, 미전달 시 서버가 16자리 hex 자동 발급
+
+### 벽지 이중 게이트 임계값 튜닝
+
+운영 로그(JSONL) 축적 후 [scripts/sweep_wallpaper_thresholds.py](scripts/sweep_wallpaper_thresholds.py)로 `WALLPAPER_CONF_THRESHOLD` × `WALLPAPER_MARGIN_THRESHOLD` 격자 탐색:
+
+```bash
+python scripts/sweep_wallpaper_thresholds.py --input ops_logs.jsonl --out sweep.csv
+```
+
+입력 한 줄: `{"top1_conf": 0.62, "top2_conf": 0.41, "label": "defect"}` (label은 사람이 태깅한 GT).
+
+---
+
+## 20종 하자 검출 파이프라인 (신규)
+
+> `USE_20DEFECT_PIPELINE=true` 설정 시 활성화. 기존 3-모델 파이프라인과 병존.
+
+### 아키텍처: 6-Model + Geometric (ONNX Runtime)
+
+기존 PyTorch 직접 추론에서 **전 모델 ONNX Runtime** 추론으로 전환. 프레임워크 종속성 제거, 추론 속도 ~20% 향상.
+
+| 모델 | 아키텍처 | 커버 하자 | 입력 |
+|------|---------|----------|------|
+| M1 | YOLOv8m → ResNet50 (2-Stage) | A-02 구조균열, A-03 마감균열, B-03 코킹, B-04 방수 | RGB |
+| M2 | YOLOv8m → ResNet50 (2-Stage) | C-01~C-05 (도배/도색/스크래치/걸레받이) | RGB |
+| M3 | YOLOv8m → ResNet50 (2-Stage) | D-03 바닥오염, D-04 줄눈, E-01 유리, E-02 문틀 | RGB |
+| M4 | U-Net (EfficientNet-B3) | B-01 창호단열, B-02 벽체단열, B-05 기밀, D-01 바닥난방 | Thermal+RGB |
+| M5+G1 | YOLOv8m-seg + Hough/RANSAC | A-01 수직수평, A-04 직각도 | RGB+IMU |
+| M6 | PatchCore (Anomalib) | 전체 앙상블 보완 | RGB |
+
+### 2-Stage 구조
+
+YOLO가 하자 영역을 검출(Stage 1) → ROI 크롭 → ResNet50이 하자 유형을 정밀 분류(Stage 2).
+
+### 계층적 실행 (실시간 스트리밍)
+
+```
+Tier 1 (매 3프레임): M1 + M2      → ~50ms  (HIGH severity 즉시 검출)
+Tier 2 (매 6프레임): + M3 + M5+G1  → ~55ms  (MED/LOW + 기하학)
+Tier 3 (매 9프레임): + M4 + M6     → ~70ms  (열화상 + 앙상블)
+```
+
+### 새 환경변수 (.env)
+
+```env
+USE_20DEFECT_PIPELINE=true   # false면 기존 3-모델 사용
+M1_YOLO_ONNX=m1_yolo_structural.onnx
+M1_RESNET_ONNX=m1_resnet_crack_classifier.onnx
+M1_CONF_THRESHOLD=0.15
+# ... (전체 목록은 app/config.py 참조)
+```
+
+### 새 DB 컬럼 (마이그레이션 0003)
+
+```bash
+alembic upgrade head  # deviation_degrees, deviation_mm_per_m, delta_temperature, ensemble_boosted 추가
+```
+
+### `DetectionResult20` 스키마 예시
+
+```json
+{
+  "detections": [
+    {"class":"crack_structural","code":"A-02","class_display_ko":"균열 (구조 균열)",
+     "conf":0.82,"bbox_xyxy":[120,80,340,210],"severity":"HIGH",
+     "defect_source":"yolo_structural"}
+  ],
+  "insulation": [
+    {"class":"wall_insulation_gap","code":"B-02","delta_temperature":4.2,
+     "max_temperature":28.5,"min_temperature":18.2,"severity":"HIGH"}
+  ],
+  "alignment": [
+    {"class":"frame_squareness_defect","code":"A-04",
+     "deviation_degrees":0.35,"deviation_mm_per_m":6.1,"severity":"MED"}
+  ],
+  "anomaly_score": 0.72,
+  "has_defect": true,
+  "defect_count": 3,
+  "image_shape": {"width":640,"height":480},
+  "tier_executed": 3
+}
+```
+
+### ML 학습 가이드
+
+데이터 준비 → 모델 학습 → ONNX 변환 → 배포 전체 과정:
+
+**[training/README.md](training/README.md)** 참조.
+
+---
+
 ## 알려진 제약
 
-- **벽지 분류 val_acc ≈ 54%**: 19-way 분류라 정확도 낮음. `WALLPAPER_CONF_THRESHOLD=0.4`로 보수적으로 필터링하고, `is_confident=false`면 하자 판정 보류 (severity null).
+- **벽지 분류 val_acc ≈ 54%**: 19-way 분류라 정확도 낮음. 이중 게이트로 필터링:
+  - `top1_conf >= WALLPAPER_CONF_THRESHOLD` (기본 0.35, top1 절대 신뢰도)
+  - AND `top1_conf - top2_conf >= WALLPAPER_MARGIN_THRESHOLD` (기본 0.15, top2와의 분리도 — 근소차 예측 차단)
+  - 두 조건 모두 만족해야 `is_confident=true`. 그렇지 않으면 하자 판정 보류 (severity null).
 - **`good` 클래스는 터짐**: 필터링 시 절대 "정상"으로 취급 금지. 위 경고 박스 참조.
 - **단일 워커 프로세스 전제**: `stream_inference_worker`는 프로세스 내 싱글톤. gunicorn multi-worker로 띄우면 워커마다 큐가 생겨 FRAME_SKIP 효과가 배수. uvicorn 단일 워커 또는 Redis pub/sub 기반 리팩터링 필요.
 - **MAVLink/LiDAR 좌표 연동은 아직**: `drone_coordinates`는 당분간 NULL. 추후 TF 연동 시 기존 `lidar_x/y/z` 컬럼에 채움.

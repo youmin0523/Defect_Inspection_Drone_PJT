@@ -30,6 +30,7 @@ torch>=2.1
 torchvision
 ultralytics>=8.3.0
 anomalib
+onnxruntime
 
 # ── Hardware ───────────────────────────────
 pyserial
@@ -45,6 +46,10 @@ pillow
 httpx
 websockets
 aiofiles
+
+# ── Monitoring / Logging ───────────────────
+prometheus_client
+structlog
 
 # ── Test ───────────────────────────────────
 pytest

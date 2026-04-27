@@ -1066,3 +1066,645 @@ Dashboard (12-col grid)
   ```
 
 - **상태**: 반영 완료
+
+---
+
+## 🔧 2026-04-21 | 의존성 재설치로 package-lock.json 동기화
+
+### ⏱ 배경
+- `git pull` 직후 dev 서버 기동 시 Vite 에러: `Failed to resolve import "@react-pdf/renderer" from "src/components/report/ExcelPreviewModal.jsx"`
+- 원인: 최근 PR에서 `@react-pdf/renderer` 의존성이 `package.json`에 추가됐으나 로컬 `node_modules` 미반영
+
+### ⏱ 조치
+- `frontend/` 경로에서 `npm install` 실행
+- `package-lock.json` 갱신 (lockfileVersion/해시 변경)
+- Vite dev 서버 재기동 → ExcelPreviewModal 정상 import
+
+### ⏱ 영향 파일
+- [package-lock.json](package-lock.json) — 자동 갱신 (직접 수정 X)
+
+### ⏱ 비고
+- 앞으로 `git pull` 후에는 `npm install` 한 번 돌려주는 흐름 유지 권장
+- 백엔드도 동일하게 `pip install -r requirements.txt` 확인
+
+---
+
+## 🎮 2026-04-23~24 | TEST MODE 대시보드 인프라 구축
+
+> **작업자**: @youminsu0523  
+> **작업 브랜치**: `MS`  
+> **목표**: 드론 없이 로컬 이미지/영상으로 AI 하자 검출을 시험할 수 있는 TEST MODE 프론트엔드 구축
+
+### ⏱ 신규 컴포넌트
+
+- **`components/dashboard/TestModeBar.jsx`** (319줄 신규)
+  - 시작(Play) / 일시중지(Pause) / 정지(Stop) 재생 제어 버튼
+  - 프로젝트 내장 데이터 ↔ 직접 업로드 소스 전환 토글
+  - 직접 업로드: 이미지/영상 드래그&드롭 대량 첨부 + 파일 목록 관리
+  - bbox / detection 시각화 모드 전환
+  - 백엔드 `/api/v1/stream/test/*` 엔드포인트와 연동
+
+### ⏱ 기존 파일 수정
+
+- **`store/sessionStore.js`** (59줄+)
+  - `enterTestMode()` — 테스트 모드 진입 액션. `modelSource='test'`, `isTestMode=true` 설정
+  - `testSource` — `'project'` | `'upload'` 소스 선택 상태
+  - `testPlayState` — `'idle'` | `'playing'` | `'paused'` 재생 상태
+  - `testDetectionMode` — `'bbox'` | `'detection'` 시각화 모드
+  - `setTestSource()`, `setTestPlayState()`, `setTestDetectionMode()` 액션
+
+- **`pages/Dashboard.jsx`** (8줄+)
+  - 테스트 모드 감지 시 `TestModeBar` 렌더링
+  - 스트림 URL을 `/stream/test/rgb`, `/stream/test/thermal`로 분기
+
+- **`components/video/LiveVideoFeed.jsx`** (69줄+)
+  - 테스트 모드 스트림 URL 분기 처리
+  - bbox 오버레이 표시를 위한 `<img>` src 동적 전환
+
+- **`App.jsx`** (18줄+)
+  - `DashboardLayout`에서 테스트 모드 진입 시 `POST /stream/test/init` 자동 호출 (이미지 스캔 + 모델 로드)
+  - 컴포넌트 퇴장(unmount) 시 `POST /stream/test/stop` cleanup
+
+- **`pages/EmployeeLanding.jsx`** — QuickActions에 TEST MODE 카드 추가 (FlaskConical 아이콘, 빨간 accent). 클릭 시 `enterTestMode()` → `/dashboard` 이동
+
+### ⏱ 동작 흐름
+1. `/employee` 에서 "TEST MODE" 카드 클릭
+2. `sessionStore.enterTestMode()` → `modelSource='test'`, `isTestMode=true`
+3. `/dashboard` 이동 → `DashboardLayout` 마운트 → `POST /test/init` 호출 (이미지 스캔)
+4. `TestModeBar` 에서 ▶ 시작 → `POST /test/start` → MJPEG 스트림 시작
+5. `LiveVideoFeed` 가 `/stream/test/rgb`, `/stream/test/thermal` 구독하여 실시간 표시
+6. AI 추론 결과 → WebSocket `defect.new` → DefectPanel에 실시간 카드 생성
+7. ■ 정지 → `POST /test/stop` → 스트림 중단
+
+---
+
+## 🔗 2026-04-24 | Frontend↔Backend 미연결 모듈 일괄 연동 + 슈퍼어드민 UX
+
+> **작업자**: @youminsu0523  
+> **작업 브랜치**: `MS`  
+> **목표**: localStorage Mock으로만 동작하던 5개 API 모듈을 백엔드 실제 REST API로 전환. Refresh Token 자동 재발급. 슈퍼어드민 라우팅/권한 가드. 랜딩 헤더 로그인 상태 반영.
+
+### ⏱ 09:30 | Mock → Real API 전환 (5개 파일)
+
+localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT 인증 백엔드 호출로 전면 교체:
+
+| 파일 | 변경 전 | 변경 후 |
+|------|--------|--------|
+| `api/chatApi.js` | localStorage CRUD + 시드 15개 메시지 | `axios.get/post/patch` + JWT. `listConversations(userId)` → `listConversations()` (서버가 JWT로 사용자 식별) |
+| `api/notificationApi.js` | localStorage + 14개 시드 알림 | 동일 패턴. `simulateLatency()` 제거 |
+| `api/sitesApi.js` | localStorage + 5개 시드 현장 | 필터 쿼리스트링(`status`, `building_type`, `client_type`, `search`) 지원 추가 |
+| `api/reportsApi.js` | localStorage + updateReport | `POST /report/save` + `downloadReport()` 마크다운 다운로드 추가. updateReport 제거 (백엔드에 PATCH 없음) |
+| `api/organizationApi.js` | localStorage + 7명 시드 멤버 | `removeMember(userId)` 함수 추가 |
+
+### ⏱ 09:40 | Store 호출부 수정
+
+- **`chatStore.js`** — `CURRENT_USER` 하드코딩 제거 → `localStorage.user`에서 읽도록 변경. `sendMessage`에서 sender 정보 불필요 (백엔드 JWT 자동 식별). `createConversation` 키: `participants` → `participant_ids`. 응답 키: `perConversation` → `per_conversation`
+- **`reportsStore.js`** — `updateReport` import 제거. `update` 메서드를 로컬 캐시 전용으로 변경 (async → sync)
+
+### ⏱ 09:45 | Refresh Token 프론트 연동
+
+- **`authApi.js`** — 401 응답 인터셉터 추가:
+  - `isRefreshing` 플래그 + `failedQueue` 큐잉 패턴 → 동시 요청 401 시 refresh 1회만 실행
+  - Refresh 실패 → localStorage 정리 + `/login` 리다이렉트
+  - `uploadProfileImage()`, `deleteProfileImage()`, `updateMe()` 함수 추가
+- **`authStore.js`** — `setAuth(token, user, refreshToken)` 3번째 파라미터 추가. `logout()`에 `refresh_token` localStorage 삭제 추가
+- **`Login.jsx`** / **`OAuthCallback.jsx`** — 로그인 응답에서 `refresh_token` 추출하여 `setAuth`에 전달
+
+### ⏱ 09:50 | 보고서 다운로드 버튼
+
+- **`pages/employee/ReportDetail.jsx`** — 헤더에 `Download` 아이콘 버튼 추가. `reportsApi.downloadReport(id)` 호출 → 브라우저 마크다운 파일 다운로드 (Content-Disposition 파싱)
+
+### ⏱ 10:20 | 슈퍼어드민 라우팅 + 권한 가드 수정
+
+조직 미소속 슈퍼어드민이 모든 기능에 접근 가능하도록 전면 수정:
+
+- **`Login.jsx`** / **`OAuthCallback.jsx`** — `is_superadmin`이면 조직 없어도 `/employee`로 직행 (온보딩 건너뜀)
+- **`components/auth/OrgRequired.jsx`** — `user.is_superadmin === true` 시 `currentOrg` 체크 건너뜀. `adminOnly` 페이지도 접근 허용
+- **`pages/EmployeeLanding.jsx`**:
+  - `isAdmin` 판정에 `user?.is_superadmin` 조건 추가 (EmployeeHeader + QuickActionsSection 2곳)
+  - `QuickActionsSection`에서 `user` 미선언 크래시 수정 (`useAuthStore` import 누락)
+  - 프로필 드롭다운에 슈퍼어드민 뱃지 표시
+- **`pages/employee/AdminMembers.jsx`**:
+  - `fetchData` 분기: 슈퍼어드민은 `admin/all-users` 우선 호출, 조직 API는 try-catch 감싸서 미소속 시 빈 배열 fallback
+  - 전체 사용자 행 클릭 → 소속 있으면 편집 모달, 미소속이면 배정 모달 연결
+
+### ⏱ 10:30 | 랜딩 헤더 로그인 상태 반영
+
+- **`components/landing/LandingHeader.jsx`** — `useAuthStore` 연동:
+  - **비로그인**: `로그인` + `도입 문의하기` 표시 (직원전용 숨김)
+  - **로그인 상태**: `직원 전용` + `로그아웃` + `도입 문의하기` 표시
+  - 데스크탑/모바일 메뉴 모두 동일 적용
+
+### ⏱ 10:35 | EmployeeLanding 개인화 + 권한 분기
+
+- **WelcomeBanner** — 하드코딩 `과장님` 제거. `authStore.user.name` + `currentOrg.position` 동적 표시. 직급 미설정 시 이름만
+- **QuickActionsSection** — `멤버 관리` + `TEST MODE` 카드를 `isAdmin` (admin/owner/superadmin) 조건으로 묶어 일반 멤버에게 비노출
+
+### 🔗 변경 파일 목록 (17개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `api/chatApi.js` | Mock → Real API 전면 교체 |
+| `api/notificationApi.js` | 동일 |
+| `api/sitesApi.js` | 동일 |
+| `api/reportsApi.js` | 동일 + downloadReport 추가 |
+| `api/organizationApi.js` | 동일 + removeMember 추가 |
+| `api/authApi.js` | 401 인터셉터 + 프로필 이미지 API |
+| `store/chatStore.js` | API 시그니처 변경 대응 |
+| `store/reportsStore.js` | updateReport 제거 |
+| `store/authStore.js` | refresh_token 지원 |
+| `pages/Login.jsx` | refresh_token + 슈퍼어드민 라우팅 |
+| `pages/OAuthCallback.jsx` | 동일 |
+| `components/auth/OrgRequired.jsx` | 슈퍼어드민 bypass |
+| `pages/EmployeeLanding.jsx` | isAdmin + 배너 개인화 + 권한 분기 |
+| `pages/employee/AdminMembers.jsx` | 슈퍼어드민 분기 + 행 클릭 편집 |
+| `pages/employee/ReportDetail.jsx` | 다운로드 버튼 |
+| `components/landing/LandingHeader.jsx` | 로그인/로그아웃 상태 분기 |
+| `components/dashboard/TestModeBar.jsx` | 신규 (TEST MODE 제어바) |
+
+### 📐 설계 결정 사항
+- **Mock → Real 전환 전략**: API 파일의 함수 시그니처 유지 → Store/컴포넌트 호출부 최소 변경. 각 API 파일에 독립 axios 인스턴스 (JWT + X-Organization-Id 헤더 자동 첨부)
+- **Refresh Token 큐잉**: 동시 다발 401 시 refresh 1회만 실행, 나머지 큐 대기 후 새 토큰으로 재시도
+- **슈퍼어드민 권한 모델**: 조직 소속 없이도 모든 페이지/기능 접근 가능. `is_superadmin`이 `currentOrg` 체크보다 우선
+- **TEST MODE 접근 제한**: admin/owner/superadmin만 카드 노출 (일반 멤버 비노출)
+
+---
+
+## 세션 7 — 조직·멤버 관리 + 채팅 실사용자 전환
+
+- 작성자 (Who): @youminsu0523
+- 작성 일자 (When): 2026-04-24
+- 작업 브랜치: `MS`
+
+### 1️⃣ 프롬프트 / 목표
+> 채팅 컴포넌트의 하드코딩된 CURRENT_USER/CHAT_TEAM_MEMBERS를 실제 로그인 사용자 + API 데이터로 교체하고, 슈퍼어드민의 다중 조직 멤버 배정 기능을 구현한다.
+
+### 2️⃣ 수행된 작업 요약
+
+#### 채팅 시스템 — 하드코딩 → 실사용자 전환
+- **ChatHeader / ConversationItem / ConversationList / MessageBubble / NewChatModal**: `CURRENT_USER`, `CHAT_TEAM_MEMBERS` import 전부 제거. `localStorage.getItem('user')` 기반 `getCurrentUserId()` 헬퍼로 교체
+- **participants 데이터 구조 변경**: 단순 ID 배열 → `{user_id, name, initials}` 객체 배열로 변경 대응. DM 상대방 매칭 로직 수정
+- **findDMConversation 버그 수정**: `||` 조건 → `&&` 조건으로 수정 (두 사용자 **모두** 참여해야 매칭)
+- **ConversationItem 시간 포맷**: `Date.now() - ts` → `Date.now() - new Date(ts).getTime()` (ISO 문자열 대응)
+- **온라인 상태 키**: `otherMember.status` → `otherMember.online_status`로 변경
+
+#### 대화방 나가기 기능
+- **chatApi.js**: `leaveConversation(conversationId)` — `DELETE /api/v1/chat/conversations/{id}/leave` 추가
+- **chatStore.js**: `leaveConversation` 액션 추가 (API 호출 → 대화 목록 새로고침 → activeConversation 초기화)
+- **ParticipantPanel.jsx**: 하단에 "대화 나가기" 버튼 + `window.confirm` 확인 다이얼로그
+
+#### 슈퍼어드민 다중 조직 멤버 배정
+- **AdminMembers.jsx**: 슈퍼어드민일 때 전체 조직 목록(`/admin/all-orgs`) 로드
+- 배정 모달에 **조직 선택 드롭다운** 추가 → 선택 시 해당 조직의 부서 목록(`/admin/orgs/{id}/departments`) 동적 로드
+- 조직 미선택 시 역할/부서/직위 필드 비활성화 (`opacity-40 + pointer-events-none`)
+- 일반 어드민은 기존 동작 유지 (자기 조직 고정 표시)
+
+#### 글로벌 CSS 수정
+- **index.css**: `body`의 `text-white` 상속으로 `<input>/<textarea>/<select>` 텍스트가 보이지 않던 문제 해결. `color: #111827`, `placeholder: #9ca3af` 명시
+
+### 🔗 변경 파일 목록 (10개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `api/chatApi.js` | `leaveConversation` 추가 + `findDMConversation` 매칭 로직 버그 수정 |
+| `components/chat/ChatHeader.jsx` | CURRENT_USER → localStorage, participants 객체 배열 대응 |
+| `components/chat/ConversationItem.jsx` | 동일 + 시간 포맷 수정 |
+| `components/chat/ConversationList.jsx` | 동일 + 검색 로직 수정 |
+| `components/chat/MessageBubble.jsx` | CURRENT_USER → localStorage |
+| `components/chat/NewChatModal.jsx` | CURRENT_USER → localStorage, 조직 멤버 API 연동 유지 |
+| `components/chat/ParticipantPanel.jsx` | participants 객체 배열 대응 + 대화 나가기 버튼 |
+| `store/chatStore.js` | `leaveConversation` 액션 추가 |
+| `pages/employee/AdminMembers.jsx` | 슈퍼어드민 다중 조직 배정 (조직 선택 → 부서 동적 로드) |
+| `index.css` | 폼 요소 텍스트 가시성 수정 |
+
+### 📐 설계 결정 사항
+- **getCurrentUserId 헬퍼 패턴**: 각 컴포넌트에 인라인 정의 (store 순환 import 방지). authStore를 직접 import하지 않고 localStorage에서 직접 읽음
+- **participants 구조 변경 대응**: 백엔드가 `{user_id, name, initials}` 객체 배열을 반환하도록 변경됨에 따라, 프론트 전체 채팅 컴포넌트를 일괄 수정
+- **조직 배정 UX**: 슈퍼어드민은 조직 선택이 첫 단계이며, 선택 전에는 하위 필드를 시각적으로 비활성화하여 순서를 유도
+
+---
+
+## 세션 8 — 온보딩 인증 수정 + 초대코드 만료 UI + 실시간 채팅 + 첨부파일·이모지·읽음 표시
+
+- 작성자 (Who): @youminsu0523
+- 작성 일자 (When): 2026-04-25 ~ 2026-04-27
+- 작업 브랜치: `MS`
+
+### 1️⃣ 프롬프트 / 목표
+> 1. 온보딩 페이지 401 에러 수정 (토큰 갱신 미지원)
+> 2. 초대코드 만료일 표시 + 재생성 버튼 추가
+> 3. 실시간 채팅 WebSocket 연결 (새로고침 없이 메시지 수신)
+> 4. 채팅 첨부파일 전송 (이미지/문서, 최대 10개·200MB/개)
+> 5. 이모지 피커 구현
+> 6. 카카오톡 스타일 읽음 표시
+
+### 2️⃣ 수행된 작업 요약
+
+#### 온보딩 페이지 인증 수정 (`Onboarding.jsx`)
+- raw `axios` → 401 자동 토큰 갱신 인터셉터 포함 axios 인스턴스로 교체
+- `token` 없으면 `/login`으로 리다이렉트하는 인증 가드 추가
+- `getMe()` 호출 시 `authApi`의 API 인스턴스 재사용
+
+#### 초대코드 만료 UI (`AdminMembers.jsx`)
+- 초대코드 옆에 만료일 표시: 7일 이하 주황색, 만료 시 빨간색
+- "코드 재생성" 버튼 → `POST /invite-code/regenerate` → 즉시 새 코드 발급 + 30일 연장
+- `confirm()` 확인 다이얼로그
+
+#### 실시간 채팅 WebSocket (`Chat.jsx`)
+- **대화방 채널** (`chat:{conversationId}`): 현재 보고 있는 대화의 실시간 메시지
+- **개인 채널** (`user:{userId}`): 다른 대화방/페이지 밖에서의 새 메시지 알림
+- **백업 폴링**: 30초 간격 미읽음 갱신 (WS 끊김 대비)
+- `chatStore.receiveMessage()` 액션: 중복 방지 + 읽음 처리 + 대화 목록 갱신
+
+#### 채팅 첨부파일 전송 (`MessageInput.jsx`)
+- Paperclip 버튼 활성화 → `<input type="file" multiple>` → 최대 10개 선택
+- 200MB 초과 파일 자동 필터 + 경고 메시지
+- 선택 파일 미리보기 리스트 (이미지: 썸네일, 문서: 파일명 뱃지) + 개별 X 제거
+- `sendMessage({ text, files })` → 각 파일 순차 `sendFileMessage()` 호출 (첫 파일에만 텍스트 포함)
+
+#### 이모지 피커 (`MessageInput.jsx`)
+- `emoji-picker-react` 패키지 설치 (`npm install emoji-picker-react`)
+- Smile 버튼 클릭 → 피커 팝업 토글 → 이모지 선택 시 textarea 커서 위치에 삽입
+- 외부 클릭 시 자동 닫기 (`mousedown` 이벤트 리스너)
+- 백엔드 변경 없음 (유니코드 그대로 저장)
+
+#### 첨부파일 렌더링 (`MessageBubble.jsx`)
+- 이미지 파일: 말풍선 내 인라인 미리보기 (max-w-240px, 클릭 시 원본 새 탭)
+- 비이미지 파일: FileText 아이콘 + 파일명 + Download 아이콘 (클릭 시 다운로드)
+- 텍스트 + 파일 동시: 파일 위, 텍스트 아래 배치
+
+#### 읽음 표시 (`MessageBubble.jsx`)
+- 내 메시지 시간 위에 "읽음" 텍스트 (노란색, 카카오톡 스타일)
+- DM: `read_by_count >= 1`이면 "읽음"
+- 그룹: `read_by_count >= 1`이면 "읽음 N" (읽은 사람 수 표시)
+- `chat.read` WebSocket 이벤트 수신 시 실시간 갱신 (`selectConversation` 재호출)
+
+#### 대화 목록 파일 메시지 미리보기 (`ConversationItem.jsx`)
+- `last_message.text`가 null이고 `file_name`이 있으면 `📎 파일명`으로 표시
+
+### 🔗 변경 파일 목록 (8개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `pages/employee/Onboarding.jsx` | raw axios → 토큰 갱신 인터셉터 + 인증 가드 |
+| `pages/employee/AdminMembers.jsx` | 초대코드 만료일 표시 + 재생성 버튼 |
+| `pages/employee/Chat.jsx` | 2채널 WebSocket + 읽음 이벤트 + 30초 폴링 |
+| `store/chatStore.js` | receiveMessage 액션 + sendMessage 파일 지원 |
+| `api/chatApi.js` | sendFileMessage 추가 |
+| `components/chat/MessageInput.jsx` | 파일 첨부(10개/200MB) + 이모지 피커 전면 재작성 |
+| `components/chat/MessageBubble.jsx` | 파일 렌더링 + 읽음 표시 전면 재작성 |
+| `components/chat/ConversationItem.jsx` | 📎 파일 미리보기 텍스트 |
+
+### 📐 설계 결정 사항
+- **이모지 피커 라이브러리**: `emoji-picker-react` 선택 (React 18 호환, 설정 간단, lazy load 지원)
+- **파일 전송 전략**: 10개 파일 동시 선택 → 각각 별도 API 호출로 순차 전송 (첫 파일에만 텍스트 포함). 서버 메모리 부담 분산
+- **읽음 표시 방식**: 개별 메시지 읽음 테이블 없이 `ConversationMember.last_read_at` timestamp 비교로 계산 → DB 스키마 추가 없이 효율적 구현
+- **이중 WebSocket 채널**: 활성 대화방 채널 + 개인 채널. 페이지 밖에서도 알림 수신 가능. 30초 폴링은 WS 끊김 대비 백업
+
+---
+
+## 세션 9 — 채팅 사이드바 UI 개선 (2026-04-27)
+
+- 작성자 (Who): @unknownName-15
+- 작성 일자 (When): 2026-04-27
+- 작업 브랜치: `SH`
+
+### 1️⃣ 프롬프트 / 목표
+> 채팅 사이드바(ConversationList)의 검색창·필터 탭 좌측 패딩 보완, 대화 목록의 가로 스크롤 및 하단 검은색 여백 제거
+
+### 2️⃣ 수행된 작업 요약
+
+#### 검색창·필터 탭 좌측 패딩 추가 (`ConversationList.jsx`)
+- 검색 컨테이너: `p-3` → `px-4 py-3` (좌측 패딩 12px → 16px)
+- 필터 탭 컨테이너: `px-3 pt-2 pb-2` → `px-4 pt-2 pb-2` (좌측 패딩 12px → 16px)
+- 대화 목록 컨테이너: `overflow-y-auto py-1` → `overflow-y-auto overflow-x-hidden py-1 px-1` (항목 간격 확보 + 가로 스크롤 차단)
+
+#### 가로 스크롤 및 하단 검은 여백 제거 (`ConversationItem.jsx`)
+- 원인: 버튼에 `w-full` + `mx-1`이 동시 적용되어 부모 너비를 8px 초과하는 오버플로우 발생 → 가로 스크롤바 + 하단 검은 공간 표시
+- 수정: 버튼에서 `mx-1` 제거. 대신 `ConversationList`의 목록 컨테이너에 `px-1` 추가하여 동일한 좌우 여백 유지
+
+### 🔗 변경 파일 목록 (2개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `components/chat/ConversationList.jsx` | 검색·필터 패딩 증가 + 목록 컨테이너 `px-1 overflow-x-hidden` 추가 |
+| `components/chat/ConversationItem.jsx` | 버튼에서 `mx-1` 제거 (오버플로우 원인 해소) |
+
+---
+
+#### ⏱ 2026-04-27 | 채팅 사이드바 검색 기능 버그 수정 (`ConversationList.jsx`)
+
+- **피드백**: 검색창에 '확인' 등 단어를 입력해도 결과가 나오지 않음. 대화 목록에 해당 단어가 포함된 항목이 다수 보임에도 검색이 전혀 동작하지 않는 증상.
+- **원인 1 — TypeError 크래시**: `c.name?.toLowerCase().includes(q)` 구문에서 DM 대화방의 `c.name`이 `null`인 경우, `c.name?.toLowerCase()`가 `undefined`를 반환하고 이어서 `.includes(q)`를 호출하면 `TypeError` 발생 → `.filter()` 전체가 throw되어 검색 결과가 빈 배열로 떨어짐.
+- **원인 2 — 검색 범위 누락**: 마지막 메시지 텍스트(`c.last_message?.text`)가 검색 대상에 포함되지 않아, 목록에 미리보기로 보이는 메시지 내용으로는 검색 불가.
+- **반영**:
+  - `c.name?.toLowerCase().includes(q)` → `c.name?.toLowerCase()?.includes(q)` (옵셔널 체이닝 추가로 TypeError 방지)
+  - `other?.name?.toLowerCase().includes(q)` → `other?.name?.toLowerCase()?.includes(q) ?? false` (동일 패턴 통일)
+  - `c.last_message?.text?.toLowerCase()?.includes(q)` 조건 추가 (마지막 메시지 내용 검색 지원)
+
+#### ⏱ 2026-04-27 | 채팅 검색 범위 확대 — 탭 필터 무시 + 파일명·그룹 참여자 검색 추가 (`ConversationList.jsx`)
+
+- **피드백**: '완료' 같은 단어를 검색하면 1개만 나옴. 1:1·그룹·채널 전체를 통틀어 검색되어야 함.
+- **원인**: 검색어가 있어도 탭 필터(`filterType`)가 먼저 적용되어, 예를 들어 '1:1' 탭이 활성 상태면 DM 대화방만 뒤지고 그룹·채널은 검색 대상에서 제외됨. 결과적으로 이름에 검색어가 있는 채널 1개만 통과되던 상황.
+- **반영**:
+  - `isSearching` 플래그 도입. 검색어가 있으면 탭 필터를 건너뛰고 `conversations` 전체를 대상으로 검색.
+  - 검색어가 없을 때는 기존 탭 필터 동작 유지.
+  - `c.last_message?.file_name` 검색 추가 (파일 메시지 미리보기에 보이는 파일명도 검색 가능).
+  - 그룹·채널의 참여자 이름 검색 추가 (`c.participants?.some(...)`). DM 외 대화방도 멤버 이름으로 찾을 수 있음.
+
+#### ⏱ 2026-04-27 | 채팅 레이아웃 수평 정렬 수정 — 헤더 border 기준선 불일치 + 입력 아이콘 수직 정렬
+
+- **피드백 1 — border 기준선 불일치**: 대화 목록 검색창 컨테이너 하단 border와 ChatHeader 하단 border가 서로 평행하지 않아 시각적으로 어긋나 보임.
+- **원인**: 검색창 컨테이너(`px-4 py-3`)에서 `<input>`(border-box 포함 38px) + 수직 패딩(12+12=24px) = 62px 렌더 높이. ChatHeader(`px-5 py-3`)에서 텍스트 div(약 36px) + 수직 패딩(24px) = 60px. 2px 차이로 border 위치가 엇갈림.
+- **반영**:
+  - `ConversationList.jsx` 검색 컨테이너: `px-4 py-3 border-b border-gray-100` → `h-[60px] flex items-center px-4 border-b border-gray-100` (고정 높이로 콘텐츠 차이 흡수)
+  - `ChatHeader.jsx` 루트 div: `flex items-center justify-between px-5 py-3 bg-white border-b border-gray-200` → `h-[60px] flex items-center justify-between px-5 bg-white border-b border-gray-200` (동일한 60px 고정 높이 적용)
+
+- **피드백 2 — 메시지 입력 아이콘 수직 정렬**: 첨부파일·이모지·전송 아이콘이 서로 평행하지 않음. 전송 버튼이 아래로 쏠려 보이는 현상.
+- **원인**: 입력 행 컨테이너에 `items-end` 적용 → 모든 자식 요소가 flex 컨테이너 하단 기준 정렬. textarea(`min-height: 40px`)와 버튼들(34–36px)의 높이가 달라 각 아이콘 중심점이 서로 다른 높이에 위치.
+- **반영**: `MessageInput.jsx` 입력 행 div: `flex items-end gap-2` → `flex items-center gap-2` (수직 중앙 정렬로 통일)
+
+### 🔗 변경 파일 목록 (3개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `components/chat/ConversationList.jsx` | 검색 컨테이너 `py-3` 제거 → `h-[60px] flex items-center` 적용 |
+| `components/chat/ChatHeader.jsx` | 루트 div `py-3` 제거 → `h-[60px]` 고정 높이 적용 |
+| `components/chat/MessageInput.jsx` | 입력 행 `items-end` → `items-center` 변경 |
+
+---
+
+#### ⏱ 2026-04-27 | 검색창 X 버튼 + 필터 탭 중앙 정렬 + 이미지 수신 버그 수정
+
+- **피드백 1 — 검색창 X 버튼**: 검색어가 있을 때 오른쪽 끝에 X 버튼을 눌러 한 번에 지우고 전체 목록으로 돌아갈 수 있도록 요청.
+- **반영**: `ConversationList.jsx` 검색 입력 내부에 `{searchQuery && <button onClick={() => setSearch('')}><X size={14}/></button>}` 추가. 검색어 없으면 숨김, 있을 때만 노출. `pr-3` → `pr-8`로 우측 패딩 확보. `X` 아이콘을 `lucide-react`에서 추가 임포트.
+
+- **피드백 2 — 필터 탭 중앙 정렬**: 전체/1:1/그룹/채널 탭이 좌측 정렬되어 있어 중앙으로 변경 요청.
+- **반영**: `ConversationList.jsx` 필터 탭 컨테이너에 `justify-center` 추가.
+
+- **피드백 3 — 이미지 수신 시 파일명만 표시되는 버그**:
+  - **원인 A — 백엔드 WS 채널 차단**: `backend/app/api/websocket.py`의 `VALID_CHANNELS`에 `chat:*`, `user:*`가 없어 채팅 WS 연결이 모두 "defects" 채널로 리다이렉트됨. 채팅 실시간 메시지가 수신자에게 전달되지 않는 근본 버그.
+  - **원인 B — `file_content_type` null 처리 누락**: `file.content_type`이 브라우저에 따라 `null` 또는 빈 문자열로 올 경우 DB에도 `null`로 저장됨. `isImage = message.file_content_type?.startsWith('image/')` → `false`로 평가돼 이미지 대신 파일 다운로드 링크가 렌더링됨.
+  - **반영**:
+    - `backend/app/api/websocket.py`: `VALID_CHANNELS` 고정 집합 검사를 `_is_valid_channel()` 함수로 교체. `chat:` 또는 `user:` 접두어 채널을 명시적으로 허용. 드론 모니터링 기존 채널은 그대로 유지.
+    - `frontend/components/chat/MessageBubble.jsx`: `FileAttachment` 내 `isImage` 판정에 파일 확장자 fallback 추가. `file_content_type`이 null이어도 `IMAGE_EXT` 정규식(`.jpg/.png/.gif/.webp` 등)으로 파일명에서 이미지 여부를 판별.
+
+### 🔗 변경 파일 목록 (4개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/components/chat/ConversationList.jsx` | 검색창 X 버튼 추가 + 필터 탭 `justify-center` |
+| `frontend/components/chat/MessageBubble.jsx` | `isImage` 확장자 fallback 추가 |
+| `backend/app/api/websocket.py` | `chat:*` / `user:*` 채널 WS 허용 (`_is_valid_channel` 함수) |
+
+---
+
+#### ⏱ 2026-04-27 | 채팅 WS 수정 후 메시지 무한 로딩 루프 버그 수정
+
+- **증상**: WS 채널 수정 이후 어떤 대화방을 선택해도 로딩 스피너가 멈추지 않고 계속 돌아감.
+- **원인**: `mark_read` 백엔드가 `chat:{convId}` 채널에도 `chat.read` 이벤트를 브로드캐스트 → 읽음 처리를 요청한 본인도 이벤트를 수신 → `Chat.jsx` 핸들러가 `selectConversation` 호출 → `selectConversation` 내부에서 `markConversationRead` 재호출 → 다시 `chat.read` 이벤트 → 무한반복. WS가 broken이던 동안에는 이 루프가 이벤트를 수신하지 못해 잠복해 있었음.
+- **반영**:
+  - `store/chatStore.js`: `refreshMessages(convId)` 액션 추가. `getMessages`만 호출하고 `markConversationRead`는 호출하지 않음. 다른 대화방으로 이동한 경우 store 오염 방지를 위해 `activeConversationId === convId` 확인 후에만 반영.
+  - `pages/employee/Chat.jsx`: `chat.read` 핸들러에서 `selectConversation` → `refreshMessages` 교체. 루프의 진입점 제거.
+
+### 🔗 변경 파일 목록 (2개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/store/chatStore.js` | `refreshMessages` 액션 추가 |
+| `frontend/src/pages/employee/Chat.jsx` | `chat.read` 핸들러 `selectConversation` → `refreshMessages` |
+
+---
+
+#### ⏱ 2026-04-27 | 메신저 헤더 미읽음 뱃지 + 브라우저 탭 제목 카운트 표시
+
+- **피드백**: 메신저 목록(`ConversationList`) 누군가 메시지를 보냈을 때 메신저 페이지 상단(`Chat.jsx` 헤더의 "메신저" 패널)에도 미읽음 뱃지가 보이게 하고, 브라우저 탭 제목(`AeroInspect`) 옆에도 `(N)` 카운트가 노출되길 원함. 기존에는 좌측 사이드바·FAB·EmployeeLanding 헤더에만 뱃지가 있어 채팅 페이지 진입 직후나 다른 탭에서는 새 메시지 인지가 어려웠음.
+- **반영**:
+  - `pages/employee/Chat.jsx`: `useChatStore`에서 `unreadTotal` 구독. 헤더의 "메신저" 텍스트 옆에 `bg-red-500` 빨간 알약 뱃지 렌더(`unreadTotal > 0`일 때만, 99 초과 시 `99+`). 페이지에 진입한 상태에서도 다른 대화방의 미읽음 합계를 즉시 인지 가능.
+  - `App.jsx`: `DocumentTitleBadge` 컴포넌트 신설. `useChatStore.unreadTotal` 변경 시 `document.title`을 `"(N) AeroInspect"` 또는 `"AeroInspect"`로 갱신. Slack/Gmail 스타일 탭 제목 컨벤션 적용. `BrowserRouter` 직속에 마운트하여 라우트 변경과 무관하게 항상 동작.
+- **참고**: 채팅 WebSocket(`user:{userId}`)이 `/employee/chat` 페이지에서만 연결되므로, 다른 페이지에서는 마지막 fetch 시점의 카운트만 반영됨. 이는 기존 `FloatingChatButton`/사이드바 뱃지와 동일한 한계로, 본 작업 범위 외.
+
+### 🔗 변경 파일 목록 (2개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/pages/employee/Chat.jsx` | 헤더 "메신저" 옆 `unreadTotal` 빨간 알약 뱃지 추가 |
+| `frontend/src/App.jsx` | `DocumentTitleBadge` 추가 — `document.title`에 `(N)` 미읽음 카운트 표시 |
+
+---
+
+#### ⏱ 2026-04-27 | 알림 벨 안에 채팅 실시간 알림 통합 + 전역 user-WS 리스너로 이관
+
+- **피드백**: 메신저에 새 메시지가 도착하면 알림 벨 아이콘에도 "(보낸 사람)님께서 메시지를 보냈습니다." 형태의 알림이 실시간으로 추가되고, 항목 클릭 시 해당 메시지함으로 이동하길 원함. 기존에는 채팅 미읽음이 사이드바·FAB·메신저 헤더에만 표시되었고 알림 벨에는 백엔드 알림만 노출되었음.
+- **설계 결정**:
+  - 채팅 알림은 백엔드에 영속화하지 않고 프론트 인메모리(`notificationStore.chatNotifications`)에만 보관. 새 알림 카테고리/엔드포인트를 추가하지 않고도 즉시 동작 가능. (트레이드오프: 새로고침 시 채팅 알림 휘발 — 백엔드 미읽음 카운트는 그대로 보존되므로 사용자 인지에는 문제 없음.)
+  - 알림 push 트리거를 글로벌하게 만들기 위해 `Chat.jsx`의 `user:{userId}` WS 핸들러를 신규 `ChatRealtimeListener` 컴포넌트로 이관. `App.jsx` `BrowserRouter` 직속에 단 하나의 인스턴스만 마운트(로그인 안 했으면 내부 `if (!userId) return`로 no-op) → 어느 페이지에 있든 동일하게 새 메시지를 수신. Chat.jsx 는 활성 대화방의 `chat:{convId}` 채널만 유지.
+- **반영**:
+  - `constants/notificationCategories.js`: `chat` 카테고리 추가 (cyan 톤, `MessageSquare` 아이콘). 다른 카테고리와 동일하게 light/dark 양 테마 정의.
+  - `store/notificationStore.js`: `chatNotifications: []`, `chatUnreadCount: 0` 상태 추가. 50건 캡(`CHAT_NOTIF_CAP`)으로 FIFO 보존. 액션 추가:
+    - `pushChatNotification(payload)` — 동일 id 중복 방지 후 prepend.
+    - `markChatNotificationRead(id)` — 단건 읽음, 미읽음 카운트 차감.
+    - `markChatNotificationsReadByConversation(convId)` — 대화방 진입 시 일괄 읽음.
+    - 기존 `markAllRead`도 `chatNotifications`/`chatUnreadCount` 함께 초기화하도록 확장.
+  - `store/chatStore.js`: `selectConversation`에서 `useNotificationStore.getState().markChatNotificationsReadByConversation(convId)` 호출 — 메시지 직접 클릭으로 진입한 경우에도 해당 대화의 채팅 알림이 자동 읽음 처리되어 UX 일관성 확보.
+  - `components/chat/ChatRealtimeListener.jsx` (신규): 전역 user-채널 WS. `chat.new_message` 수신 시 `chatStore.receiveMessage` + (활성 대화방이 아닌 경우에 한해) `notificationStore.pushChatNotification` 호출. `chat.read`도 동일하게 핸들링하여 활성 대화의 read receipts 갱신.
+  - `App.jsx`: `ChatRealtimeListener`를 `BrowserRouter` 직속에 직접 마운트(전역). 내부에서 `userId` 없을 때 자동 no-op이라 비로그인 페이지(Landing/Login 등)에서는 WS 연결을 시도하지 않음.
+  - `pages/employee/Chat.jsx`: `userWsRef`/user-채널 effect 제거. 활성 대화방 WS만 유지. 핸들러 주석 업데이트.
+  - `components/notification/NotificationDropdown.jsx`:
+    - `useChatStore.selectConversation` 구독 + `useMemo`로 `mergedNotifications` 계산 (chat 항목을 표준 모양으로 정규화 후 백엔드 알림과 합쳐 `created_at` 내림차순 정렬).
+    - 채팅 항목 title: `"{sender_name}님께서 메시지를 보냈습니다."`, message: 텍스트 40자 미리보기 또는 `📎 파일명` 폴백.
+    - `handleItemClick` 분기: `_isChat` 플래그면 `markChatNotificationRead` → `selectConversation` (activeConversationId 동기 set + 메시지 fetch + 백엔드 read) → `navigate('/employee/chat')`. 일반 알림은 기존 동작 유지.
+    - 헤더 뱃지/「모두 읽음」 버튼은 `totalUnread = unreadCount + chatUnreadCount` 기준으로 노출.
+  - `pages/EmployeeLanding.jsx`, `components/dashboard/DashboardTopBar.jsx`, `components/layout/Header.jsx`: 벨 뱃지가 `unreadCount` 단독 → `totalUnreadCount = unreadCount + chatUnreadCount`로 변경. 채팅 알림 1건만 와도 벨에 1이 즉시 표시됨.
+- **검증 흐름**:
+  1. 다른 사람이 메시지 발송 → user-WS push → `chatStore.receiveMessage`로 좌측 목록/사이드바 뱃지 갱신 + `pushChatNotification`으로 벨 뱃지/알림 리스트 즉시 추가.
+  2. 사용자가 벨 클릭 → 드롭다운 오픈 → `mergedNotifications` 노출 (채팅 + 백엔드 알림 시간순).
+  3. 채팅 알림 클릭 → `selectConversation(convId)` 동기 set → `navigate('/employee/chat')` → Chat.jsx 마운트 시 activeConversationId 이미 세팅되어 해당 대화방 자동 활성화.
+- **알려진 제약**:
+  - 채팅 인메모리 알림은 휘발성이므로 새로고침 시 사라짐(백엔드 미읽음 카운트는 보존되어 사이드바·메신저 헤더 뱃지로 인지 가능).
+  - 청취 리스너는 로그인 직후/페이지 전환 직후 약 1초 미만의 reconnect 윈도우 동안 메시지를 놓칠 수 있음 — 이때는 다음 `fetchConversations`로 chatStore 미읽음 카운트만 갱신되고 알림 항목은 누락. 영속화가 필요하면 백엔드 알림 카테고리로 승격 검토.
+
+### 🔗 변경 파일 목록 (8개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/constants/notificationCategories.js` | `chat` 카테고리 추가 (cyan, `MessageSquare`) |
+| `frontend/src/store/notificationStore.js` | `chatNotifications`/`chatUnreadCount` 상태 + `pushChatNotification`/`markChatNotificationRead`/`markChatNotificationsReadByConversation` 액션 + `markAllRead` 확장 |
+| `frontend/src/store/chatStore.js` | `selectConversation`에서 해당 대화방 채팅 알림 일괄 읽음 처리 |
+| `frontend/src/components/chat/ChatRealtimeListener.jsx` | 신규 — 전역 user-채널 WS 리스너 (chatStore.receiveMessage + pushChatNotification) |
+| `frontend/src/App.jsx` | `ChatRealtimeListener`를 BrowserRouter 직속에 전역 마운트 (userId 없으면 내부에서 no-op) |
+| `frontend/src/pages/employee/Chat.jsx` | user-채널 WS 제거 (전역 리스너로 이관). 활성 대화방 WS만 유지 |
+| `frontend/src/components/notification/NotificationDropdown.jsx` | `mergedNotifications` 계산 + 채팅 항목 클릭 시 `selectConversation`+`navigate` 분기 + 헤더/뱃지를 `totalUnread`로 |
+| `frontend/src/pages/EmployeeLanding.jsx`, `components/dashboard/DashboardTopBar.jsx`, `components/layout/Header.jsx` | 벨 뱃지 카운트를 `unreadCount`+`chatUnreadCount` 합으로 변경 |
+
+---
+
+#### ⏱ 2026-04-27 | 알림 드롭다운/대시보드 알림·공지 — 전체 읽음·전체 삭제 액션 + 채팅 종류 라벨
+
+- **피드백**:
+  1. 알림 벨 드롭다운 헤더 우측에 「전체 읽음」(체크 아이콘)과 「전체 삭제」(쓰레기통 아이콘) 추가. 아이콘은 이모지 대신 Remix Icon CDN(`ri-*` 클래스)을 사용.
+  2. EmployeeLanding 의 「알림 · 공지」 섹션에서 항목 하단의 "N개월 전" 상대 시간 텍스트를 제거하고, 알림 종류로 대체. 채팅: "메시지 발송" / "사진 발송" / "파일 발송".
+  3. 같은 섹션 우측 하단에도 「전체 읽음」/「전체 삭제」 액션 추가 (Remix 아이콘).
+- **반영**:
+  - `backend/app/api/notifications.py`: `DELETE /api/v1/notifications` 엔드포인트 신설. 현재 사용자의 알림을 단일 SQL `DELETE` 한 번으로 일괄 제거 → 프런트 N회 호출 회피.
+  - `frontend/src/api/notificationApi.js`: `deleteAllNotifications()` 래퍼 추가.
+  - `frontend/src/store/notificationStore.js`: `removeAll()` 액션 추가. 백엔드 일괄 삭제 호출 + `chatNotifications`/`chatUnreadCount`도 동시 비움.
+  - `frontend/src/components/notification/NotificationDropdown.jsx`:
+    - `lucide-react`의 `CheckCheck` 제거 → Remix `<i className="ri-check-double-line">` 사용.
+    - 헤더 우측에 「전체 읽음」(`markAllBtn` 테마, totalUnread > 0 일 때만 노출) + 「전체 삭제」(`deleteAllBtn` 테마, 빨간색, 머지된 알림이 1건 이상일 때만 노출) 두 버튼 배치. 「전체 삭제」는 `window.confirm` 으로 안전장치.
+    - light/dark 테마에 `deleteAllBtn` 색상 추가 (light: `red-600`, dark: `red-400`).
+  - `frontend/src/pages/EmployeeLanding.jsx`:
+    - `formatRelativeTime` 함수 제거(섹션 내 유일 사용처였음).
+    - `NotificationsSection` prop 시그니처 폐지 → 내부에서 `useNotificationStore` 직접 구독. 채팅 + 백엔드 알림을 `useMemo`로 머지(시간 내림차순, 최대 6건). 부모 EmployeeLanding 의 dead 변수 `notifications` 제거.
+    - 항목 하단 텍스트: 채팅이면 `getChatKindLabel(n)` ("메시지 발송"/"사진 발송"/"파일 발송"), 비채팅이면 카테고리 라벨로 폴백.
+    - 종류 판별: `CHAT_IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|avif|svg)$/i` (MessageBubble 과 동일 패턴) — `file_name` 없으면 "메시지 발송", 있고 이미지 확장자면 "사진 발송", 그 외 파일이면 "파일 발송".
+    - 섹션 footer 추가: `border-t` + `flex justify-end gap-2`로 우측 정렬, 「전체 읽음」(blue)/「전체 삭제」(red, confirm) 버튼. 액션 가능 상태가 아니면 `disabled:opacity-40` 으로 시각적 잠금.
+- **설계 결정**:
+  - 백엔드 bulk delete 엔드포인트를 추가한 이유: 프런트 루프(N개 DELETE)는 라운드트립이 누적되고 부분 실패 처리가 복잡해짐. `read-all`이 이미 단일 PATCH인 것과 대칭으로 `DELETE /notifications` 를 추가해 일관성 유지.
+  - 「전체 삭제」 confirm: 「모두 읽음」은 비파괴라 무confirm, 삭제는 복구 불가하므로 confirm 한 단계 추가. 메신저 인메모리 알림 + 백엔드 알림 한꺼번에 사라짐을 사용자에게 명확히 알림.
+  - Remix Icon CDN: `index.html` 에서 이미 로드 중(`remixicon@4.5.0`). 추가 설치 없이 `<i className="ri-*">` 사용 가능.
+
+### 🔗 변경 파일 목록 (5개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `backend/app/api/notifications.py` | `DELETE /notifications` 일괄 삭제 엔드포인트 추가 |
+| `frontend/src/api/notificationApi.js` | `deleteAllNotifications()` 래퍼 추가 |
+| `frontend/src/store/notificationStore.js` | `removeAll()` 액션 추가 (백엔드 + 채팅 인메모리 동시 비움) |
+| `frontend/src/components/notification/NotificationDropdown.jsx` | 헤더에 Remix 아이콘 기반 「전체 읽음」/「전체 삭제」 + light/dark 테마 `deleteAllBtn` |
+| `frontend/src/pages/EmployeeLanding.jsx` | `NotificationsSection` 채팅+백엔드 머지, 시간 텍스트 → 종류 라벨, 섹션 우측 하단 「전체 읽음」/「전체 삭제」 |
+
+---
+
+#### ⏱ 2026-04-27 | 「알림 · 공지」 섹션 액션 버튼 회수 + Pretendard 적용 (오늘의 일정 폰트 통일)
+
+- **피드백 (정정)**:
+  1. 직전 라운드에서 「전체 읽음」/「전체 삭제」를 EmployeeLanding 의 「알림 · 공지」 섹션 우측 하단에도 추가했었음. 사용자 의도는 액션 버튼은 상단 알림 벨 드롭다운에만 배치하고 「알림 · 공지」 섹션에서는 제거하는 것. 벨 드롭다운 버튼은 직전 라운드에서 이미 들어가 있으므로 유지.
+  2. 「오늘의 일정」 섹션의 시간(`09:00` 등)과 단위 라벨(`KST`)이 서로 다른 폰트로 렌더링됨 — 시간은 `font-mono`(JetBrains Mono), KST는 기본 `font-sans`(Inter). 한글·영문이 섞이는 화면에서 일관성이 깨져 Pretendard 또는 Noto Sans KR 로 통일 요청.
+- **반영**:
+  - `pages/EmployeeLanding.jsx` `NotificationsSection`:
+    - footer (border-t + flex justify-end + 「전체 읽음」/「전체 삭제」 두 버튼) 제거.
+    - 더 이상 사용하지 않는 store 구독 정리: `unreadCount`/`chatUnreadCount`/`markAllRead`/`removeAll`/`totalUnread` 변수 삭제. `notifications`, `chatNotifications` 만 남김.
+    - `flex flex-col`/`flex-1` 도 footer 와 함께 사라져 원래의 자연 높이 레이아웃으로 복귀(빈 상태 박스도 `py-12 text-center` 단순 구성).
+    - `removeAll`/`markAllRead`는 `notificationStore` 상에 그대로 남아 있어 벨 드롭다운에서 계속 사용 가능.
+  - `index.html`: Pretendard Variable 가변 폰트를 jsDelivr CDN(`pretendardvariable-dynamic-subset.css`)으로 1줄 로드. `dynamic-subset` 변형이라 한글 사용량에 따라 필요한 글리프만 다운로드되어 초기 로드 비용 최소화.
+  - `tailwind.config.js`: `fontFamily.pretendard` 패밀리 추가 — `['Pretendard Variable', 'Pretendard', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'Roboto', '"Helvetica Neue"', '"Apple SD Gothic Neo"', '"Noto Sans KR"', 'sans-serif']`. CDN 로드 실패 시 시스템 폰트로 자연스럽게 폴백.
+  - `pages/EmployeeLanding.jsx` `TodayScheduleSection`: 시간/KST 컨테이너 `<div>`에 `font-pretendard` 적용 → 두 자식 `<span>` 모두 Pretendard 로 통일. 시간 `<span>`에서 `font-mono` 제거하되 숫자 정렬은 `tabular-nums`(고정폭 숫자)로 보존. KST 라벨에는 `tracking-wide` 미세 조정.
+- **설계 결정**:
+  - **글로벌 sans 교체 vs 부분 적용**: `font-sans` 기본값 자체를 Pretendard 로 바꾸면 앱 전반의 톤이 흔들림(다크 HUD 의 Inter 미니멀 느낌이 한 번에 사라짐). 폰트가 섞여 보이는 위치(여기서는 「오늘의 일정」)에 한해 `font-pretendard` 클래스로 명시 적용하는 부분 도입 전략 택. 추후 다른 섞임 지점이 보고되면 같은 클래스로 점진 확장 가능.
+  - **`font-mono` 제거 시 숫자 폭 보호**: Pretendard Variable 은 비등폭이지만 `tabular-nums` 로 숫자 글리프를 등폭 처리해 여러 행의 시간이 세로 정렬됨. 09:00/14:00/16:30 등 자릿수가 다른 시간이 섞여도 어긋나지 않음.
+  - **Variable 폰트 + dynamic-subset**: 기본 `static`(weight 별 분리 파일) 대신 가변 폰트 1개 파일 + 동적 서브셋 → 모든 weight(extrabold 포함) 단일 파일로 처리, 사용된 한글만 내려옴.
+
+### 🔗 변경 파일 목록 (3개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/pages/EmployeeLanding.jsx` | `NotificationsSection` footer(전체 읽음/전체 삭제) 제거 + `TodayScheduleSection` 시간·KST 컨테이너 `font-pretendard` + `tabular-nums` |
+| `frontend/index.html` | Pretendard Variable dynamic-subset CDN `<link>` 추가 |
+| `frontend/tailwind.config.js` | `fontFamily.pretendard` 폴백 체인 추가 (Pretendard → 시스템 → Noto Sans KR) |
+
+---
+
+#### ⏱ 2026-04-27 | HeroSection「서비스 도입 문의」버튼 → ContactModal 연결 + 로그인 시 폼 자동 기입
+
+- **피드백 (요청)**:
+  1. 랜딩 HeroSection의 「서비스 도입 문의」 버튼이 아무 동작 없음 — LandingHeader의 「도입 문의하기」 버튼과 동일하게 ContactModal을 열도록 연결 요청.
+  2. 회원가입 완료 후 로그인 상태라면 ContactModal의 성함/담당자명, 연락처, 사업자등록번호가 자동 기입되도록 요청.
+- **반영**:
+  - `components/landing/HeroSection.jsx`:
+    - `ContactModal` import 추가.
+    - `isContactOpen` state 추가 + 「서비스 도입 문의」 버튼에 `onClick={() => setIsContactOpen(true)}` 바인딩.
+    - `<ContactModal isOpen={isContactOpen} onClose={...} />` 렌더링 추가.
+  - `components/landing/ContactModal.jsx`:
+    - `useAuthStore` import 추가 → `user`, `isAuthenticated` 구독.
+    - 모달 열릴 때(`isOpen` effect) 로그인 상태 분기:
+      - **로그인 O**: `user.name` → 성함/담당자명, `user.phone` → 연락처, `user.account_type === 'business'`이면 고객 유형 사업자 선택 + `user.business.biz_number` → 사업자등록번호 자동 기입. 문의 내용만 빈 칸.
+      - **로그인 X**: 기존 `INITIAL_FORM` 그대로 초기화.
+- **설계 결정**:
+  - **모달 인스턴스 분리**: ContactModal 상태를 Landing 상위로 끌어올리지 않고 HeroSection에 독립 인스턴스를 둠. Header/Hero 각각 독립적으로 모달을 관리하므로 prop drilling 없이 단순하고, 동시에 두 모달이 열리는 시나리오는 UX상 발생하지 않음.
+  - **자동 기입은 초기값만 세팅**: 폼 필드는 여전히 편집 가능. 로그인 사용자가 다른 담당자명/연락처로 문의하고 싶을 수 있으므로 readOnly 처리하지 않음.
+
+### 🔗 변경 파일 목록 (2개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/components/landing/HeroSection.jsx` | `ContactModal` import + `isContactOpen` state + 버튼 onClick 바인딩 + 모달 렌더링 |
+| `frontend/src/components/landing/ContactModal.jsx` | `useAuthStore` import + 모달 오픈 시 로그인 사용자 정보(name, phone, account_type, biz_number) 자동 기입 |
+
+---
+
+#### ⏱ 2026-04-27 | LandingHeader 네비 레이아웃 개편 — 직원 전용 중앙 합류 + focus-visible 전환
+
+- **피드백 (요청)**:
+  1. 「직원 전용」 버튼이 우측 버튼 그룹(로그아웃/도입문의 옆)에 분리되어 있는데, 「도입 사례」 바로 우측으로 옮겨서 네비 링크와 통일해달라.
+  2. 비로그인 시 `서비스 소개 · 핵심 기술 · 도입 사례` 만 중앙 정렬, 로그인 시 `서비스 소개 · 핵심 기술 · 도입 사례 · 직원 전용` 4개가 중앙 정렬되도록 요청.
+  3. 네비 링크(도입 사례 등) 클릭 후 focus ring이 남아 있어 거슬림 → 제거 요청.
+  4. 로고 클릭 후에도 focus ring 잔존 → 마찬가지로 제거 요청.
+- **반영**:
+  - `components/landing/LandingHeader.jsx`:
+    - **레이아웃 변경**: `flex justify-between` → `grid grid-cols-[auto_1fr_auto]`. 3-column 그리드로 변경하여 중앙 `<nav>`가 항상 화면 중앙에 위치.
+    - **직원 전용 위치 이동**: 우측 `<div>` 버튼 그룹에서 빼서 중앙 `<nav>` 안 `NAV_LINKS.map()` 뒤에 배치. `isAuthenticated` 조건부 렌더링 유지.
+    - **직원 전용 스타일 변경**: 기존 bordered 버튼(`border border-yellow-300/60 bg-yellow-300/10 …`) → 다른 네비 링크와 동일한 텍스트 링크 스타일 + 노란 점(`h-1.5 w-1.5 rounded-full`) 인디케이터. 스크롤 상태별 `text-yellow-300`/`text-yellow-600` 색상 분기.
+    - **focus → focus-visible 전환**: 로고 `<Link>`, `NAV_LINKS` `<a>`, 직원 전용 `<Link>` 세 곳의 `focus:outline-none focus:ring-2 focus:ring-*` → `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-*`. 마우스 클릭 시 링 없음, 키보드 Tab 이동 시에만 링 표시(접근성 유지).
+    - 우측 버튼 그룹 `<div>`에 `justify-end` 추가 (그리드 우측 정렬).
+- **설계 결정**:
+  - **3-column grid vs flex justify-between**: `justify-between`은 좌/우 요소 크기 변화(직원 전용 추가/제거)에 따라 중앙 네비가 좌우로 밀림. `grid-cols-[auto_1fr_auto]`는 중앙 열이 나머지 공간 전체를 차지하므로 `justify-center`로 네비가 항상 화면 정중앙에 위치. 로그인/로그아웃에 따라 네비 항목 수가 달라져도 중앙 정렬이 흐트러지지 않음.
+  - **focus vs focus-visible**: `focus`는 마우스 클릭에도 반응하여 사용 후 파란 링이 남음. `focus-visible`은 브라우저가 키보드 내비게이션으로 판단할 때만 활성화되어 마우스 UX와 키보드 접근성을 동시에 충족. Tailwind CSS 3.x 이상에서 `focus-visible:` prefix 기본 지원.
+  - **모바일 메뉴 미변경**: 모바일 햄버거 드롭다운 내 「직원 전용」은 기존 위치·스타일 유지. 모바일에서는 모든 메뉴가 드롭다운에 세로로 나열되므로 중앙 정렬 이슈 없음.
+
+### 🔗 변경 파일 목록 (1개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/components/landing/LandingHeader.jsx` | 헤더 레이아웃 `flex→grid`, 직원 전용 우측→중앙 nav 합류, focus→focus-visible 전환(로고·네비링크·직원전용) |
+
+---
+
+#### ⏱ 2026-04-27 | 3D 리포트 샘플 페이지 — 25평 아파트 드론 점검 시뮬레이션 (18라운드)
+
+- **피드백 (요청)**: 랜딩 HeroSection「3D 리포트 샘플 보기」버튼에 데모 페이지 연결, 아파트 내부 3D 모델링 + 드론 점검 시뮬레이션
+- **18라운드 피드백 반영 요약**:
+  1. 기본 샘플 페이지 생성 + 라우트 연결
+  2. 아파트 내부 모델링 (거실/주방/침실/화장실/현관)
+  3. 가구 복합 메시 구성 (12종)
+  4. 드론 경로 — 문 통과 실내 순회
+  5. 하자 발견 시뮬레이션 (진행률 → 근접 기반으로 전환)
+  6. 수직 지그재그 난방배관식 스캔 패턴
+  7. 격자형 교차 스캔 (Pass1 + Pass2)
+  8. 색상 개선 (조명 강화, 벽/바닥/포인트클라우드 밝기)
+  9. 드론 모델 쿼드콥터 교체 (1.5배, 시안/화이트)
+  10. 경로색 주황(#ff9020), 드론색 시안(#00e5ff) 분리
+  11. 가구 배치 한국 아파트 기준 재설계 (5회 반복)
+  12. 가구 rotation prop 미적용 버그 발견 → 전 컴포넌트 수정
+  13. 그림자 제거
+  14. 스캔 컨트롤 UI (일시정지/재개/중지/시작)
+  15. 가구 장애물 회피 로직 (바운딩 박스 기반 높이 조정)
+- **변경 파일**: `SampleReport.jsx`(신규 ~1200줄), `HeroSection.jsx`, `App.jsx`
+
+### 🔗 변경 파일 목록 (3개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/pages/SampleReport.jsx` | 신규 — 25평 아파트 3D 점검 시뮬레이션 데모 (R3F, 가구 12종, 드론 격자스캔, 근접탐지, 컨트롤UI) |
+| `frontend/src/components/landing/HeroSection.jsx` | `useNavigate` + 「3D 리포트 샘플 보기」→ `/sample-report` 연결 |
+| `frontend/src/App.jsx` | `SampleReport` import + `/sample-report` Route 추가 |
+
+---
+
+#### ⏱ 2026-04-27 | 실시간 채팅 WebSocket 재연결 및 안정성 향상
+
+- **피드백 (요청)**: 기존에는 초기 마운트 시 한 번만 WebSocket이 연결되어 네트워크 끊김 시 재연결이 자동으로 이루어지지 않아 실시간 채팅 알림을 놓칠 수 있음.
+- **반영**:
+  - `components/chat/ChatRealtimeListener.jsx`:
+    - WebSocket 자동 재연결(Exponential Backoff 폴링) 로직 구현 (`connect` 함수).
+    - `useRef`를 도입하여 다중 연결 등 컴포넌트 생명주기와 타이머를 동기화(`mountedRef`).
+  - `hooks/useWebSocket.js`:
+    - 내부 Ping / Pong 타이머 재구축.
+  - 백엔드 Ping 타임아웃 주기가 3초로 감소한 부분에 기민하게 대응함.
+
+### 🔗 변경 파일 목록 (2개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/components/chat/ChatRealtimeListener.jsx` | WebSocket 자동 재연결 백오프 타이머 도입 |
+| `frontend/src/hooks/useWebSocket.js` | Heartbeat 기반 Connection 보강 |

@@ -25,6 +25,16 @@ from app.schemas.defect import (
     DefectSummary,
 )
 from app.core.ws_manager import ConnectionManager
+from app.services.image_storage import image_storage
+
+
+def _build_response(defect: DefectLog) -> DefectLogResponse:
+    """ORM → 응답 스키마. image_crop_path가 있으면 URL까지 채움."""
+    resp = DefectLogResponse.model_validate(defect)
+    if defect.image_crop_path:
+        resp.image_crop_url = image_storage.get_url(defect.image_crop_path)
+    return resp
+
 
 router = APIRouter()
 
@@ -74,7 +84,7 @@ async def get_defect_summary(
         total=total or 0,
         by_severity=by_severity,
         by_area=by_area,
-        latest=DefectLogResponse.model_validate(latest) if latest else None,
+        latest=_build_response(latest) if latest else None,
     )
 
 
@@ -95,7 +105,7 @@ async def list_recent_defects(
     result = await db.execute(query)
     items = result.scalars().all()
     return DefectLogListResponse(
-        items=[DefectLogResponse.model_validate(item) for item in items],
+        items=[_build_response(item) for item in items],
         total=len(items),
         limit=limit,
         offset=0,
@@ -139,7 +149,7 @@ async def list_defects(
     items = result.scalars().all()
 
     return DefectLogListResponse(
-        items=[DefectLogResponse.model_validate(item) for item in items],
+        items=[_build_response(item) for item in items],
         total=total or 0,
         limit=limit,
         offset=offset,
@@ -165,7 +175,7 @@ async def get_defect(
     defect = result.scalar_one_or_none()
     if not defect:
         raise HTTPException(status_code=404, detail="하자 탐지 기록을 찾을 수 없습니다.")
-    return DefectLogResponse.model_validate(defect)
+    return _build_response(defect)
 
 
 @router.post("", response_model=DefectLogResponse, status_code=201)
@@ -178,6 +188,9 @@ async def create_defect(
     새 하자 탐지 결과 저장 후 WebSocket으로 실시간 브로드캐스트.
     AI 파이프라인(defect_processor.py)에서 탐지 시 호출.
     """
+    # Base64 이미지 → 파일 저장 (실패 시 None)
+    image_crop_path = image_storage.save_base64_jpeg(payload.image_crop)
+
     defect = DefectLog(
         area=payload.area.upper() if payload.area else None,
         category_code=payload.category_code,
@@ -195,7 +208,8 @@ async def create_defect(
         lidar_x=payload.lidar_position.x if payload.lidar_position else None,
         lidar_y=payload.lidar_position.y if payload.lidar_position else None,
         lidar_z=payload.lidar_position.z if payload.lidar_position else None,
-        image_crop=payload.image_crop,
+        image_crop=None,  # Base64는 더이상 DB에 저장 안 함
+        image_crop_path=image_crop_path,
         thermal_max=payload.thermal_data.max if payload.thermal_data else None,
         thermal_min=payload.thermal_data.min if payload.thermal_data else None,
         thermal_avg=payload.thermal_data.avg if payload.thermal_data else None,
@@ -206,7 +220,7 @@ async def create_defect(
     db.add(defect)
     await db.flush()  # ID 생성을 위해 flush (commit은 get_db에서)
 
-    response = DefectLogResponse.model_validate(defect)
+    response = _build_response(defect)
 
     # WS "defects" 채널에 실시간 브로드캐스트
     await manager.broadcast("defects", {
@@ -218,12 +232,33 @@ async def create_defect(
 
 
 @router.delete("/{defect_id}", status_code=204)
-async def delete_defect(defect_id: UUID, db: AsyncSession = Depends(get_db)):
-    """하자 탐지 기록 삭제"""
+async def delete_defect(
+    defect_id: UUID,
+    org_tuple=Depends(get_current_org_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    하자 탐지 기록 삭제 (연결된 크롭 파일도 함께 제거).
+    소속 조직의 site에 연결된 레코드만 삭제 가능.
+    """
+    user, member, org = org_tuple
+
+    # 내 조직 site에 연결된 것만 조회 — 다른 조직 데이터 노출·파일 삭제 방지
     result = await db.execute(
-        select(DefectLog).where(DefectLog.id == defect_id)
+        select(DefectLog).where(
+            DefectLog.id == defect_id,
+            DefectLog.site_id.in_(
+                select(Site.id).where(Site.organization_id == org.id)
+            ),
+        )
     )
     defect = result.scalar_one_or_none()
     if not defect:
         raise HTTPException(status_code=404, detail="하자 탐지 기록을 찾을 수 없습니다.")
+
+    # DB 레코드 먼저 제거 → 파일 정리. 파일 삭제 실패해도 트랜잭션 영향 없음.
+    crop_path = defect.image_crop_path
     await db.delete(defect)
+
+    if crop_path:
+        image_storage.delete(crop_path)

@@ -40,9 +40,20 @@ class CameraService:
 
     async def open(self) -> None:
         """카메라 장치 열기 및 캡처 루프 시작"""
-        self._cap = await asyncio.to_thread(cv2.VideoCapture, self._index)
-        if not self._cap.isOpened():
+        cap = await asyncio.to_thread(cv2.VideoCapture, self._index)
+        if not cap.isOpened():
             print(f"[Camera:{self._name}] 경고: 카메라 index={self._index} 열기 실패. 더미 프레임 사용.")
+            await asyncio.to_thread(cap.release)
+            self._cap = None
+        else:
+            # 실제로 프레임을 읽을 수 있는지 확인 (Windows에서 isOpened=True지만 grab 실패하는 경우 방지)
+            ret = await asyncio.to_thread(cap.grab)
+            if not ret:
+                print(f"[Camera:{self._name}] 경고: 카메라 열렸으나 프레임 획득 불가. 더미 프레임 사용.")
+                await asyncio.to_thread(cap.release)
+                self._cap = None
+            else:
+                self._cap = cap
         self._running = True
         # 백그라운드 캡처 태스크 시작
         self._capture_task = asyncio.create_task(self._capture_loop())

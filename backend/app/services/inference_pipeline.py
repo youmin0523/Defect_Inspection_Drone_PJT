@@ -74,7 +74,8 @@ class InferencePipeline:
         self._yolo_delam = None         # delamination 모델
         self._device: Optional[str] = None
         self._conf_threshold: float = 0.25
-        self._wallpaper_conf_threshold: float = 0.4
+        self._wallpaper_conf_threshold: float = 0.35
+        self._wallpaper_margin_threshold: float = 0.15
         self._loaded = False
 
     # ── 상태 조회 ────────────────────────────────
@@ -146,11 +147,14 @@ class InferencePipeline:
 
         self._conf_threshold = float(settings.YOLO_CONF_THRESHOLD)
         self._wallpaper_conf_threshold = float(settings.WALLPAPER_CONF_THRESHOLD)
+        self._wallpaper_margin_threshold = float(settings.WALLPAPER_MARGIN_THRESHOLD)
         self._loaded = True
 
         print(
             f"[Pipeline] 3-모델 로드 완료: device={self._device}, "
-            f"yolo_conf={self._conf_threshold}, wallpaper_conf={self._wallpaper_conf_threshold}"
+            f"yolo_conf={self._conf_threshold}, "
+            f"wallpaper_conf={self._wallpaper_conf_threshold}, "
+            f"wallpaper_margin={self._wallpaper_margin_threshold}"
         )
 
     # ── 입력 정규화 ───────────────────────────────
@@ -311,7 +315,13 @@ class InferencePipeline:
 
     # ── 벽지 분류 ───────────────────────────────
     def _run_wallpaper(self, image_rgb: np.ndarray) -> WallpaperPrediction:
-        """ResNet50 분류 → WallpaperPrediction (top1 + top3 + is_confident)."""
+        """ResNet50 분류 → WallpaperPrediction (top1 + top3 + is_confident).
+
+        is_confident 규칙 (val_acc 54% 대응):
+          - top1_conf >= WALLPAPER_CONF_THRESHOLD (top1 절대 신뢰도)
+          - AND (top1_conf - top2_conf) >= WALLPAPER_MARGIN_THRESHOLD (top2와 분리도)
+          두 조건 모두 만족해야 confident. 근소차 예측은 모호로 처리.
+        """
         top1_class, top1_conf, top3_raw = wallpaper_classifier.classify(image_rgb)
         top1_en, top1_ko = get_display_names(top1_class)
 
@@ -322,7 +332,12 @@ class InferencePipeline:
                 **{"class": cname, "class_display_en": en, "class_display_ko": ko, "conf": conf}
             ))
 
-        is_confident = top1_conf >= self._wallpaper_conf_threshold
+        top2_conf = top3_raw[1][1] if len(top3_raw) >= 2 else 0.0
+        margin = top1_conf - top2_conf
+        is_confident = (
+            top1_conf >= self._wallpaper_conf_threshold
+            and margin >= self._wallpaper_margin_threshold
+        )
 
         return WallpaperPrediction(
             top1_class=top1_class,
