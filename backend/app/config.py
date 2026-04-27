@@ -137,6 +137,11 @@ class Settings(BaseSettings):
     # Refresh token: 장기 유효 (기본 14일). /auth/refresh 엔드포인트로 access token 재발급용.
     JWT_REFRESH_EXPIRE_DAYS: int = 14
 
+    # ── AI Webhook 인증 ──────────────────────
+    # AI 추론 서버 → 백엔드 콜백(/api/v1/ai/*) 보호용 사전 공유 시크릿.
+    # 빈 값이면 모든 요청이 401로 거부됨 (운영 안전 기본값).
+    AI_WEBHOOK_SECRET: str = ""
+
     # 푸시 알림 프로바이더: "noop" | "fcm" | "apns"
     # 운영 배포 시 firebase-admin 설치 후 "fcm" 으로 전환.
     PUSH_PROVIDER: str = "noop"

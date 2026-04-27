@@ -36,6 +36,7 @@ from app.schemas.organization import (
     UnaffiliatedUserResponse,
     UpdateMemberRequest,
 )
+from app.services.notification_service import notification_service
 
 router = APIRouter()
 
@@ -384,6 +385,16 @@ async def assign_member(
     db.add(new_member)
     await db.flush()
 
+    # 배정된 본인에게 알림
+    await notification_service.create(
+        db=db,
+        user_id=target_user.id,
+        category="team",
+        title=f"{org.name} 조직에 배정되었습니다",
+        message=f"역할: {new_member.role}" + (f" / 부서: {new_member.department}" if new_member.department else ""),
+        metadata={"organization_id": str(org.id), "role": new_member.role},
+    )
+
     return OrgMemberResponse(
         user_id=target_user.id,
         name=target_user.name,
@@ -429,6 +440,27 @@ async def join_by_invite_code(
         status="active",
     ))
     await db.flush()
+
+    # 그 조직의 owner/admin들에게 신규 가입 알림
+    admin_rows = await db.execute(
+        select(OrganizationMember.user_id)
+        .where(OrganizationMember.organization_id == org.id)
+        .where(OrganizationMember.role.in_(("owner", "admin")))
+        .where(OrganizationMember.status == "active")
+    )
+    admin_user_ids = [uid for (uid,) in admin_rows.all() if uid != current_user.id]
+    if admin_user_ids:
+        await notification_service.create_for_many(
+            db=db,
+            user_ids=admin_user_ids,
+            category="team",
+            title=f"{current_user.name or '신규 멤버'}님이 가입했습니다",
+            message=f"{org.name} 조직에 초대 코드로 합류했습니다.",
+            metadata={
+                "organization_id": str(org.id),
+                "new_member_id": str(current_user.id),
+            },
+        )
 
     count = await db.scalar(
         select(func.count(OrganizationMember.id))
