@@ -1423,3 +1423,91 @@ API 시그니처 변경에 따른 Store 수정:
 - **라우트 매핑 우선순위**: 구체적 키워드(멤버관리, 회원가입) > 중간(테스트모드, 슈퍼어드민) > 넓은(대시보드). 제목 매칭이 본문 매칭보다 우선
 - **UI 로그인 채택 이유**: localStorage 직접 주입은 React 상태와 불일치 → 빈 화면. 실제 폼 로그인이 안정적 (`update_screenshots.py` 검증 완료)
 - **커서 갱신 시점**: 모든 세션 처리 완료 후 한 번에 갱신 (중간 실패 시 전체 재시도)
+
+---
+
+## 🔄 2026-04-25 ~ 04-27 — 조직 초대 버그 수정 + 초대코드 만료 + 실시간 채팅 + 첨부파일·읽음 표시
+
+> **착수 시각**: 2026-04-25 14:00
+> **작업자**: @youminsu0523
+> **목표**: 멤버 초대 플로우 버그 수정, 초대코드 보안 강화(30일 만료), 실시간 채팅 WebSocket 연결, 채팅 첨부파일 전송 및 읽음 표시 기능 구현
+> **배경**: 관리자가 멤버를 초대해도 로그인 시 온보딩 페이지가 뜨고, 초대코드 입력 시 401 에러 발생. 퇴사자 보안 우려로 초대코드 주기적 변경 필요. 채팅이 새로고침 없이는 갱신되지 않는 문제. 채팅에 파일 첨부/이모지/읽음 표시 기능 부재.
+
+### ⏱ 04-25 14:00 | 멤버 초대 버그 진단 및 수정
+
+**문제 1**: `invite_member` 엔드포인트가 `status="invited"`로 생성하지만, `_get_user_orgs`는 `active`만 반환 → 초대받은 사용자가 로그인 시 조직 미소속으로 인식
+
+**문제 2**: `join_by_invite_code`가 `invited` 상태 멤버도 "이미 소속" (409)으로 차단 → 교착 상태
+
+**수정**:
+- `invite_member`: `status="invited"` → `"active"`로 변경 (즉시 활성화)
+- `join_by_invite_code`: invited 상태 멤버가 초대코드 입력 시 active로 전환, deactivated는 403 반환
+
+### ⏱ 04-25 15:00 | 초대코드 30일 만료 기능
+
+**모델 변경** (`models/organization.py`):
+- `invite_code_expires_at` 컬럼 추가 (DateTime, nullable, default=30일 후)
+- `regenerate_invite_code()` / `is_invite_code_expired()` 메서드 추가
+
+**API 변경** (`api/organization.py`):
+- `join_by_invite_code`: 만료 여부 확인 → 410 "초대 코드가 만료되었습니다"
+- `POST /invite-code/regenerate`: 새 코드 발급 + 30일 연장 (admin/owner 전용)
+- 모든 조직 응답에 `invite_code_expires_at` 포함
+
+**마이그레이션**: `g1a2b3c4d5e6` — `invite_code_expires_at` 컬럼 추가 + 기존 조직에 30일 기본값
+
+### ⏱ 04-26 10:00 | 실시간 채팅 WebSocket 연결
+
+**문제**: 프론트엔드 WebSocket이 `defects` 채널에만 연결 → 백엔드의 `chat:{id}` 브로드캐스트를 수신 불가 → 새로고침 없이 메시지 미표시
+
+**수정** (`api/chat.py`):
+- 메시지 전송 시 `chat:{conversation_id}` + 각 참여자 `user:{user_id}` 채널로 이중 브로드캐스트
+
+### ⏱ 04-27 09:00 | 채팅 첨부파일 전송 기능
+
+**모델 변경** (`models/message.py`):
+- `file_url` (String 500), `file_name` (String 300), `file_content_type` (String 100) 컬럼 추가
+- `text` → `nullable=True` (파일만 보내는 경우)
+
+**API 변경** (`api/chat.py`):
+- `POST /conversations/{id}/messages/file` 신규 엔드포인트 (multipart/form-data)
+- 저장 경로: `./uploads/chat/{uuid}.ext`, 제한: 200MB/파일
+- `aiofiles` 비동기 파일 저장 (기존 프로필 이미지 패턴 재사용)
+
+**스키마 변경** (`schemas/chat.py`):
+- `MessageResponse`: `file_url`, `file_name`, `file_content_type`, `read_by_count`, `sender_profile_image_url` 필드 추가
+- `LastMessageBrief`: `file_name` 필드 추가
+
+**마이그레이션**: `h1b2c3d4e5f6` — messages 테이블에 파일 컬럼 + text nullable 변경
+
+### ⏱ 04-27 10:00 | 읽음 표시 기능
+
+**API 변경** (`api/chat.py`):
+- `get_messages`: 다른 멤버들의 `last_read_at`을 조회하여 각 메시지별 `read_by_count` 계산 (내 메시지에만 표시)
+- `mark_read`: 읽음 처리 후 `chat.read` WebSocket 이벤트를 대화방 + 참여자 개인 채널로 브로드캐스트
+
+### 🛠 변경 파일 목록
+
+**수정 (5개)**:
+| 파일 | 변경 내용 |
+|------|----------|
+| `models/organization.py` | `invite_code_expires_at` 컬럼 + 재생성/만료확인 메서드 |
+| `models/message.py` | `file_url`, `file_name`, `file_content_type` 컬럼 + text nullable |
+| `schemas/organization.py` | `OrganizationResponse`에 `invite_code_expires_at` |
+| `schemas/chat.py` | `MessageResponse`에 파일+읽음+프로필 필드, `LastMessageBrief`에 `file_name` |
+| `api/organization.py` | invite_member active 전환, join 만료검증, regenerate 엔드포인트 |
+| `api/chat.py` | 파일 업로드 엔드포인트, 읽음상태 응답, mark_read WS broadcast, user 채널 broadcast |
+| `main.py` | `./uploads/chat` 디렉토리 생성 |
+
+**신규 (2개)**:
+| 파일 | 내용 |
+|------|------|
+| `alembic/versions/g1a2b3c4d5e6_*.py` | invite_code_expires_at 마이그레이션 |
+| `alembic/versions/h1b2c3d4e5f6_*.py` | messages 파일 컬럼 마이그레이션 |
+
+### 📐 설계 결정 사항
+- **초대코드 만료**: 30일 기본값. 퇴사자가 기존 코드를 알아도 만료 후 사용 불가. 관리자가 수동으로 즉시 재생성 가능
+- **파일 업로드 분리**: 텍스트 전용 `POST /messages` (JSON)와 파일 포함 `POST /messages/file` (multipart) 분리 → backward compatibility 유지
+- **200MB 제한**: 업무용 CAD 도면, 점검 보고서, 드론 영상 등 대용량 파일 대응
+- **읽음 계산 방식**: 기존 `ConversationMember.last_read_at` 인프라 활용. 메시지별 개별 읽음 테이블 없이 timestamp 비교로 효율적 계산
+- **이중 WS 채널 브로드캐스트**: `chat:{conversation_id}` (활성 대화방) + `user:{user_id}` (다른 대화방/페이지 밖 알림)

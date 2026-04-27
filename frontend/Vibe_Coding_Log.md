@@ -1281,3 +1281,82 @@ localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT �
 - **getCurrentUserId 헬퍼 패턴**: 각 컴포넌트에 인라인 정의 (store 순환 import 방지). authStore를 직접 import하지 않고 localStorage에서 직접 읽음
 - **participants 구조 변경 대응**: 백엔드가 `{user_id, name, initials}` 객체 배열을 반환하도록 변경됨에 따라, 프론트 전체 채팅 컴포넌트를 일괄 수정
 - **조직 배정 UX**: 슈퍼어드민은 조직 선택이 첫 단계이며, 선택 전에는 하위 필드를 시각적으로 비활성화하여 순서를 유도
+
+---
+
+## 세션 8 — 온보딩 인증 수정 + 초대코드 만료 UI + 실시간 채팅 + 첨부파일·이모지·읽음 표시
+
+- 작성자 (Who): @youminsu0523
+- 작성 일자 (When): 2026-04-25 ~ 2026-04-27
+- 작업 브랜치: `MS`
+
+### 1️⃣ 프롬프트 / 목표
+> 1. 온보딩 페이지 401 에러 수정 (토큰 갱신 미지원)
+> 2. 초대코드 만료일 표시 + 재생성 버튼 추가
+> 3. 실시간 채팅 WebSocket 연결 (새로고침 없이 메시지 수신)
+> 4. 채팅 첨부파일 전송 (이미지/문서, 최대 10개·200MB/개)
+> 5. 이모지 피커 구현
+> 6. 카카오톡 스타일 읽음 표시
+
+### 2️⃣ 수행된 작업 요약
+
+#### 온보딩 페이지 인증 수정 (`Onboarding.jsx`)
+- raw `axios` → 401 자동 토큰 갱신 인터셉터 포함 axios 인스턴스로 교체
+- `token` 없으면 `/login`으로 리다이렉트하는 인증 가드 추가
+- `getMe()` 호출 시 `authApi`의 API 인스턴스 재사용
+
+#### 초대코드 만료 UI (`AdminMembers.jsx`)
+- 초대코드 옆에 만료일 표시: 7일 이하 주황색, 만료 시 빨간색
+- "코드 재생성" 버튼 → `POST /invite-code/regenerate` → 즉시 새 코드 발급 + 30일 연장
+- `confirm()` 확인 다이얼로그
+
+#### 실시간 채팅 WebSocket (`Chat.jsx`)
+- **대화방 채널** (`chat:{conversationId}`): 현재 보고 있는 대화의 실시간 메시지
+- **개인 채널** (`user:{userId}`): 다른 대화방/페이지 밖에서의 새 메시지 알림
+- **백업 폴링**: 30초 간격 미읽음 갱신 (WS 끊김 대비)
+- `chatStore.receiveMessage()` 액션: 중복 방지 + 읽음 처리 + 대화 목록 갱신
+
+#### 채팅 첨부파일 전송 (`MessageInput.jsx`)
+- Paperclip 버튼 활성화 → `<input type="file" multiple>` → 최대 10개 선택
+- 200MB 초과 파일 자동 필터 + 경고 메시지
+- 선택 파일 미리보기 리스트 (이미지: 썸네일, 문서: 파일명 뱃지) + 개별 X 제거
+- `sendMessage({ text, files })` → 각 파일 순차 `sendFileMessage()` 호출 (첫 파일에만 텍스트 포함)
+
+#### 이모지 피커 (`MessageInput.jsx`)
+- `emoji-picker-react` 패키지 설치 (`npm install emoji-picker-react`)
+- Smile 버튼 클릭 → 피커 팝업 토글 → 이모지 선택 시 textarea 커서 위치에 삽입
+- 외부 클릭 시 자동 닫기 (`mousedown` 이벤트 리스너)
+- 백엔드 변경 없음 (유니코드 그대로 저장)
+
+#### 첨부파일 렌더링 (`MessageBubble.jsx`)
+- 이미지 파일: 말풍선 내 인라인 미리보기 (max-w-240px, 클릭 시 원본 새 탭)
+- 비이미지 파일: FileText 아이콘 + 파일명 + Download 아이콘 (클릭 시 다운로드)
+- 텍스트 + 파일 동시: 파일 위, 텍스트 아래 배치
+
+#### 읽음 표시 (`MessageBubble.jsx`)
+- 내 메시지 시간 위에 "읽음" 텍스트 (노란색, 카카오톡 스타일)
+- DM: `read_by_count >= 1`이면 "읽음"
+- 그룹: `read_by_count >= 1`이면 "읽음 N" (읽은 사람 수 표시)
+- `chat.read` WebSocket 이벤트 수신 시 실시간 갱신 (`selectConversation` 재호출)
+
+#### 대화 목록 파일 메시지 미리보기 (`ConversationItem.jsx`)
+- `last_message.text`가 null이고 `file_name`이 있으면 `📎 파일명`으로 표시
+
+### 🔗 변경 파일 목록 (8개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `pages/employee/Onboarding.jsx` | raw axios → 토큰 갱신 인터셉터 + 인증 가드 |
+| `pages/employee/AdminMembers.jsx` | 초대코드 만료일 표시 + 재생성 버튼 |
+| `pages/employee/Chat.jsx` | 2채널 WebSocket + 읽음 이벤트 + 30초 폴링 |
+| `store/chatStore.js` | receiveMessage 액션 + sendMessage 파일 지원 |
+| `api/chatApi.js` | sendFileMessage 추가 |
+| `components/chat/MessageInput.jsx` | 파일 첨부(10개/200MB) + 이모지 피커 전면 재작성 |
+| `components/chat/MessageBubble.jsx` | 파일 렌더링 + 읽음 표시 전면 재작성 |
+| `components/chat/ConversationItem.jsx` | 📎 파일 미리보기 텍스트 |
+
+### 📐 설계 결정 사항
+- **이모지 피커 라이브러리**: `emoji-picker-react` 선택 (React 18 호환, 설정 간단, lazy load 지원)
+- **파일 전송 전략**: 10개 파일 동시 선택 → 각각 별도 API 호출로 순차 전송 (첫 파일에만 텍스트 포함). 서버 메모리 부담 분산
+- **읽음 표시 방식**: 개별 메시지 읽음 테이블 없이 `ConversationMember.last_read_at` timestamp 비교로 계산 → DB 스키마 추가 없이 효율적 구현
+- **이중 WebSocket 채널**: 활성 대화방 채널 + 개인 채널. 페이지 밖에서도 알림 수신 가능. 30초 폴링은 WS 끊김 대비 백업

@@ -9,13 +9,21 @@
 #       - GET    /chat/unread-counts                    → 미읽음 카운트
 # =============================================
 
+import os
+import uuid as uuid_mod
+from pathlib import Path
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import aiofiles
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db, get_current_user, get_current_org_member, get_ws_manager
+
+CHAT_UPLOAD_DIR = "./uploads/chat"
+MAX_CHAT_FILE_SIZE = 200 * 1024 * 1024  # 200MB
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.conversation_member import ConversationMember
@@ -62,6 +70,7 @@ async def _build_conv_response(db: AsyncSession, conv: Conversation) -> Conversa
     if last_row:
         last_message = LastMessageBrief(
             text=last_row[0].text,
+            file_name=last_row[0].file_name,
             sender_name=last_row[1],
             created_at=last_row[0].created_at,
         )
@@ -82,17 +91,19 @@ async def list_conversations(
     org_tuple=Depends(get_current_org_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """현재 사용자의 대화방 목록 조회 (소속 조직 한정)"""
+    """현재 사용자의 대화방 목록 조회 (소속 조직 한정) — 배치 쿼리 최적화"""
     user, member, org = org_tuple
+
+    # 1) 내가 참여한 대화방 ID 목록
     conv_ids_q = await db.execute(
         select(ConversationMember.conversation_id)
         .where(ConversationMember.user_id == user.id)
     )
     conv_ids = [row[0] for row in conv_ids_q]
-
     if not conv_ids:
         return ConversationListResponse(items=[], total=0)
 
+    # 2) 대화방 정보 조회 (1회 쿼리)
     convs_q = await db.execute(
         select(Conversation)
         .where(Conversation.id.in_(conv_ids))
@@ -100,11 +111,50 @@ async def list_conversations(
         .order_by(desc(Conversation.updated_at))
     )
     convs = convs_q.scalars().all()
+    if not convs:
+        return ConversationListResponse(items=[], total=0)
 
-    items = []
-    for conv in convs:
-        items.append(await _build_conv_response(db, conv))
+    active_ids = [c.id for c in convs]
 
+    # 3) 전체 참여자 배치 조회 (1회 쿼리)
+    all_members_q = await db.execute(
+        select(ConversationMember.conversation_id, ConversationMember.user_id, User.name, User.profile_image_url)
+        .join(User, User.id == ConversationMember.user_id)
+        .where(ConversationMember.conversation_id.in_(active_ids))
+    )
+    participants_map = {}
+    for conv_id, uid, uname, profile_img in all_members_q:
+        participants_map.setdefault(conv_id, []).append(
+            MemberBrief(user_id=uid, name=uname, initials=uname[:2].upper() if uname else "??")
+        )
+
+    # 4) 각 대화방의 마지막 메시지 배치 조회 (1회 쿼리 — LATERAL 대용)
+    from sqlalchemy.orm import aliased
+    sub = (
+        select(Message.conversation_id, Message.text, Message.file_name, Message.created_at, User.name.label("sender_name"))
+        .join(User, User.id == Message.sender_id)
+        .where(Message.conversation_id.in_(active_ids))
+        .order_by(Message.conversation_id, desc(Message.created_at))
+    )
+    last_msgs_q = await db.execute(sub)
+    last_msg_map = {}
+    for row in last_msgs_q:
+        cid = row[0]
+        if cid not in last_msg_map:  # 첫 번째 = 최신 메시지
+            last_msg_map[cid] = LastMessageBrief(
+                text=row[1], file_name=row[2], sender_name=row[4], created_at=row[3],
+            )
+
+    # 5) 응답 조립
+    items = [
+        ConversationResponse(
+            id=c.id, type=c.type, name=c.name,
+            participants=participants_map.get(c.id, []),
+            created_at=c.created_at, updated_at=c.updated_at,
+            last_message=last_msg_map.get(c.id),
+        )
+        for c in convs
+    ]
     return ConversationListResponse(items=items, total=len(items))
 
 
@@ -193,7 +243,7 @@ async def get_messages(
     )
 
     msgs_q = await db.execute(
-        select(Message, User.name)
+        select(Message, User.name, User.profile_image_url)
         .join(User, User.id == Message.sender_id)
         .where(Message.conversation_id == conversation_id)
         .order_by(Message.created_at)
@@ -201,18 +251,31 @@ async def get_messages(
         .offset(offset)
     )
 
-    items = [
-        MessageResponse(
-            id=row[0].id,
-            conversation_id=row[0].conversation_id,
-            sender_id=row[0].sender_id,
-            sender_name=row[1],
-            sender_initials=row[1][:2].upper() if row[1] else "??",
-            text=row[0].text,
-            created_at=row[0].created_at,
-        )
-        for row in msgs_q
-    ]
+    # 읽음 상태 계산: 다른 멤버들의 last_read_at 조회
+    other_members_q = await db.execute(
+        select(ConversationMember.last_read_at)
+        .where(ConversationMember.conversation_id == conversation_id)
+        .where(ConversationMember.user_id != current_user.id)
+    )
+    read_times = [r[0] for r in other_members_q if r[0] is not None]
+
+    items = []
+    for msg, sender_name, profile_img in msgs_q:
+        read_count = sum(1 for t in read_times if t >= msg.created_at) if msg.sender_id == current_user.id else 0
+        items.append(MessageResponse(
+            id=msg.id,
+            conversation_id=msg.conversation_id,
+            sender_id=msg.sender_id,
+            sender_name=sender_name,
+            sender_initials=sender_name[:2].upper() if sender_name else "??",
+            sender_profile_image_url=profile_img,
+            text=msg.text,
+            file_url=msg.file_url,
+            file_name=msg.file_name,
+            file_content_type=msg.file_content_type,
+            read_by_count=read_count,
+            created_at=msg.created_at,
+        ))
 
     return MessageListResponse(items=items, total=total, has_more=(offset + limit) < total)
 
@@ -255,15 +318,108 @@ async def send_message(
         sender_id=msg.sender_id,
         sender_name=current_user.name,
         sender_initials=current_user.name[:2].upper() if current_user.name else "??",
+        sender_profile_image_url=current_user.profile_image_url,
         text=msg.text,
         created_at=msg.created_at,
     )
 
-    # WebSocket 브로드캐스트
-    await ws_manager.broadcast(f"chat:{conversation_id}", {
+    # WebSocket 브로드캐스트 — 대화방 채널 + 각 참여자 개인 채널
+    msg_payload = {
         "type": "chat.new_message",
         "data": response.model_dump(mode="json"),
-    })
+    }
+    await ws_manager.broadcast(f"chat:{conversation_id}", msg_payload)
+
+    # 참여자별 개인 채널에도 전송 (다른 대화방에 있거나 채팅 페이지 밖일 때도 알림)
+    participants = await db.execute(
+        select(ConversationMember.user_id)
+        .where(ConversationMember.conversation_id == conversation_id)
+        .where(ConversationMember.user_id != current_user.id)
+    )
+    for (uid,) in participants:
+        await ws_manager.broadcast(f"user:{uid}", msg_payload)
+
+    return response
+
+
+@router.post("/conversations/{conversation_id}/messages/file", response_model=MessageResponse, status_code=201)
+async def send_file_message(
+    conversation_id: UUID,
+    file: UploadFile = File(...),
+    text: Optional[str] = Form(None),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    ws_manager: ConnectionManager = Depends(get_ws_manager),
+):
+    """첨부파일 메시지 전송 (multipart/form-data, 최대 200MB)"""
+    # 참여자 확인
+    member = await db.scalar(
+        select(ConversationMember.id)
+        .where(ConversationMember.conversation_id == conversation_id)
+        .where(ConversationMember.user_id == current_user.id)
+    )
+    if member is None:
+        raise HTTPException(status_code=403, detail="이 대화방에 참여하고 있지 않습니다.")
+
+    # 파일 크기 확인 (200MB)
+    contents = await file.read()
+    if len(contents) > MAX_CHAT_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="파일 크기는 200MB 이하여야 합니다.")
+
+    # 파일 저장
+    ext = os.path.splitext(file.filename or "")[1] or ".bin"
+    saved_name = f"{uuid_mod.uuid4()}{ext}"
+    save_path = os.path.join(CHAT_UPLOAD_DIR, saved_name)
+    os.makedirs(CHAT_UPLOAD_DIR, exist_ok=True)
+
+    async with aiofiles.open(save_path, "wb") as f:
+        await f.write(contents)
+
+    file_url = f"/uploads/chat/{saved_name}"
+
+    msg = Message(
+        conversation_id=conversation_id,
+        sender_id=current_user.id,
+        text=text.strip() if text and text.strip() else None,
+        file_url=file_url,
+        file_name=file.filename,
+        file_content_type=file.content_type,
+    )
+    db.add(msg)
+
+    conv = await db.get(Conversation, conversation_id)
+    if conv:
+        conv.updated_at = func.now()
+
+    await db.flush()
+
+    response = MessageResponse(
+        id=msg.id,
+        conversation_id=msg.conversation_id,
+        sender_id=msg.sender_id,
+        sender_name=current_user.name,
+        sender_initials=current_user.name[:2].upper() if current_user.name else "??",
+        sender_profile_image_url=current_user.profile_image_url,
+        text=msg.text,
+        file_url=msg.file_url,
+        file_name=msg.file_name,
+        file_content_type=msg.file_content_type,
+        created_at=msg.created_at,
+    )
+
+    msg_payload = {
+        "type": "chat.new_message",
+        "data": response.model_dump(mode="json"),
+    }
+    await ws_manager.broadcast(f"chat:{conversation_id}", msg_payload)
+
+    participants = await db.execute(
+        select(ConversationMember.user_id)
+        .where(ConversationMember.conversation_id == conversation_id)
+        .where(ConversationMember.user_id != current_user.id)
+    )
+    for (uid,) in participants:
+        await ws_manager.broadcast(f"user:{uid}", msg_payload)
 
     return response
 
@@ -273,8 +429,9 @@ async def mark_read(
     conversation_id: UUID,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    ws_manager: ConnectionManager = Depends(get_ws_manager),
 ):
-    """대화방 읽음 처리 (last_read_at 갱신)"""
+    """대화방 읽음 처리 (last_read_at 갱신 + WS broadcast)"""
     result = await db.execute(
         select(ConversationMember)
         .where(ConversationMember.conversation_id == conversation_id)
@@ -286,6 +443,22 @@ async def mark_read(
 
     member.last_read_at = func.now()
     await db.flush()
+
+    # 읽음 이벤트 브로드캐스트 → 상대방 화면의 "읽음" 표시 실시간 갱신
+    read_payload = {
+        "type": "chat.read",
+        "data": {"conversation_id": str(conversation_id), "user_id": str(current_user.id)},
+    }
+    await ws_manager.broadcast(f"chat:{conversation_id}", read_payload)
+    # 참여자 개인 채널에도 전송
+    others = await db.execute(
+        select(ConversationMember.user_id)
+        .where(ConversationMember.conversation_id == conversation_id)
+        .where(ConversationMember.user_id != current_user.id)
+    )
+    for (uid,) in others:
+        await ws_manager.broadcast(f"user:{uid}", read_payload)
+
     return {"ok": True}
 
 

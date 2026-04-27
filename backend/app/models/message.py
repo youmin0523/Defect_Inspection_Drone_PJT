@@ -8,7 +8,7 @@
 
 import uuid
 from sqlalchemy import (
-    Column, Text, DateTime, Index, func, ForeignKey,
+    Column, String, Text, DateTime, Index, func, ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -18,7 +18,7 @@ from app.db.base import Base
 class Message(Base):
     """
     메시지 테이블.
-    대화방 내 텍스트 메시지 1건.
+    대화방 내 텍스트/파일 메시지 1건.
     """
     __tablename__ = "messages"
 
@@ -38,7 +38,12 @@ class Message(Base):
         comment="발신자 ID",
     )
 
-    text = Column(Text, nullable=False, comment="메시지 본문")
+    text = Column(Text, nullable=True, comment="메시지 본문 (파일만 보낼 경우 null)")
+
+    # 첨부파일
+    file_url = Column(String(500), nullable=True, comment="첨부파일 URL 경로 (/uploads/chat/uuid.ext)")
+    file_name = Column(String(300), nullable=True, comment="원본 파일명")
+    file_content_type = Column(String(100), nullable=True, comment="MIME 타입 (image/png, application/pdf 등)")
 
     created_at = Column(
         DateTime(timezone=True),

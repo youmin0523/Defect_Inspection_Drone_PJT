@@ -166,6 +166,7 @@ app.include_router(api_router, prefix="/api/v1")
 # ── 정적 파일 서빙 (업로드된 프로필 이미지 등) ──
 import os
 os.makedirs("./uploads/profiles", exist_ok=True)
+os.makedirs("./uploads/chat", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
 
 
