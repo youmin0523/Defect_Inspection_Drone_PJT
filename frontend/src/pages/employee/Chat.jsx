@@ -6,7 +6,7 @@
  *       - 우측: ParticipantPanel (참여자 정보, 접기 가능)
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, MessageSquare, Plus } from 'lucide-react'
 import useChatStore from '../../store/chatStore.js'
@@ -15,17 +15,71 @@ import MessageThread from '../../components/chat/MessageThread.jsx'
 import ParticipantPanel from '../../components/chat/ParticipantPanel.jsx'
 import NewChatModal from '../../components/chat/NewChatModal.jsx'
 
+const WS_BASE = (import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/v1/ws').replace('/ws', '')
+
 export default function Chat() {
   const fetchConversations = useChatStore((s) => s.fetchConversations)
+  const refreshUnreadCounts = useChatStore((s) => s.refreshUnreadCounts)
+  const activeConversationId = useChatStore((s) => s.activeConversationId)
   const isParticipantPanelOpen = useChatStore((s) => s.isParticipantPanelOpen)
   const isNewChatModalOpen = useChatStore((s) => s.isNewChatModalOpen)
   const openNewChatModal = useChatStore((s) => s.openNewChatModal)
+  const unreadTotal = useChatStore((s) => s.unreadTotal)
+  const chatWsRef = useRef(null)
 
-  // 초기 로드 — 대화방 목록만 가져오고, 자동 선택은 하지 않음
-  // (사용자가 직접 좌측 패널에서 대화방을 선택해야 읽음 처리됨)
+  // 활성 대화방 채널 전용 핸들러 — 개인(user:) 채널은 ChatRealtimeListener(전역)에서 처리
+  const handleWsMessage = (event) => {
+    try {
+      const { type, data } = JSON.parse(event.data)
+      if (type === 'chat.new_message' && data) {
+        useChatStore.getState().receiveMessage(data)
+      }
+      if (type === 'chat.read' && data) {
+        // 상대방이 읽음 → 읽음 카운트만 갱신 (selectConversation 금지 — markRead 재호출로 무한루프)
+        const activeId = useChatStore.getState().activeConversationId
+        if (data.conversation_id === activeId) {
+          useChatStore.getState().refreshMessages(activeId)
+        }
+      }
+      if (type === 'ping') {
+        event.target.send(JSON.stringify({ type: 'pong' }))
+      }
+    } catch {}
+  }
+
+  // 초기 로드
   useEffect(() => {
     fetchConversations()
   }, [fetchConversations])
+
+  // 활성 대화방 WebSocket — 현재 보고 있는 대화의 실시간 메시지
+  useEffect(() => {
+    if (chatWsRef.current) {
+      chatWsRef.current.close()
+      chatWsRef.current = null
+    }
+    if (!activeConversationId) return
+
+    const ws = new WebSocket(`${WS_BASE}/ws?channel=chat:${activeConversationId}`)
+    chatWsRef.current = ws
+    ws.onmessage = handleWsMessage
+    ws.onerror = () => {}
+    ws.onclose = () => {}
+
+    return () => {
+      ws.close()
+      chatWsRef.current = null
+    }
+  }, [activeConversationId])
+
+  // 주기적 미읽음 카운트 갱신 (백업 — WS 끊겼을 때 대비, 30초 간격)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshUnreadCounts()
+      fetchConversations()
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [refreshUnreadCounts, fetchConversations])
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 text-slate-800 font-sans antialiased">
@@ -37,7 +91,7 @@ export default function Chat() {
               to="/employee"
               className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-blue-600 transition"
             >
-              <ArrowLeft size={16} /> 직원 허브
+              <ArrowLeft size={16} />
             </Link>
             <div className="h-5 w-px bg-gray-200" />
             <div className="flex items-center gap-2">
@@ -45,6 +99,14 @@ export default function Chat() {
               <span className="font-extrabold tracking-tight text-slate-800 text-base">
                 메신저
               </span>
+              {unreadTotal > 0 && (
+                <span
+                  className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-[11px] font-bold rounded-full shadow-sm"
+                  title={`읽지 않은 메시지 ${unreadTotal}건`}
+                >
+                  {unreadTotal > 99 ? '99+' : unreadTotal}
+                </span>
+              )}
             </div>
           </div>
           <button

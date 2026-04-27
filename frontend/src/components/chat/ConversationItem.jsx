@@ -46,7 +46,7 @@ export default function ConversationItem({ conv }) {
     <button
       type="button"
       onClick={() => selectConversation(conv.id)}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition rounded-lg mx-1 ${
+      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition rounded-lg ${
         isActive
           ? 'bg-blue-50 border-l-2 border-blue-600 pl-2.5'
           : 'hover:bg-gray-50 border-l-2 border-transparent'
@@ -95,7 +95,7 @@ export default function ConversationItem({ conv }) {
         {conv.last_message && (
           <p className={`text-xs truncate mt-0.5 ${unread > 0 ? 'text-slate-600 font-medium' : 'text-gray-400'}`}>
             {conv.type !== 'dm' && `${conv.last_message.sender_name}: `}
-            {conv.last_message.text}
+            {conv.last_message.text || (conv.last_message.file_name ? `\ud83d\udcce ${conv.last_message.file_name}` : '')}
           </p>
         )}
       </div>

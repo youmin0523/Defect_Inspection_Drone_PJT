@@ -21,7 +21,8 @@ class MemberBrief(BaseModel):
 
 # ── 마지막 메시지 요약 ───────────────────────
 class LastMessageBrief(BaseModel):
-    text: str
+    text: Optional[str] = None
+    file_name: Optional[str] = None
     sender_name: str
     created_at: datetime
 
@@ -67,7 +68,12 @@ class MessageResponse(BaseModel):
     sender_id: UUID
     sender_name: str
     sender_initials: str
-    text: str
+    sender_profile_image_url: Optional[str] = None
+    text: Optional[str] = None
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    file_content_type: Optional[str] = None
+    read_by_count: int = 0
     created_at: datetime
 
     class Config:

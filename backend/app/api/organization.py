@@ -74,7 +74,8 @@ async def get_my_organization(
 
     return OrganizationResponse(
         id=org.id, name=org.name, biz_number=org.biz_number,
-        invite_code=org.invite_code, member_count=count, created_at=org.created_at,
+        invite_code=org.invite_code, invite_code_expires_at=org.invite_code_expires_at,
+        member_count=count, created_at=org.created_at,
     )
 
 
@@ -120,7 +121,7 @@ async def list_organization_members(
     return OrgMemberListResponse(
         organization=OrganizationResponse(
             id=org.id, name=org.name, biz_number=org.biz_number,
-            invite_code=org.invite_code,
+            invite_code=org.invite_code, invite_code_expires_at=org.invite_code_expires_at,
             member_count=active_count, created_at=org.created_at,
         ),
         members=members,
@@ -165,6 +166,7 @@ async def create_organization(
 
     return OrganizationResponse(
         id=org.id, name=org.name, biz_number=org.biz_number,
+        invite_code=org.invite_code, invite_code_expires_at=org.invite_code_expires_at,
         member_count=1, created_at=org.created_at,
     )
 
@@ -206,7 +208,7 @@ async def invite_member(
         role=payload.role,
         department=payload.department,
         position=payload.position,
-        status="invited",
+        status="active",
     )
     db.add(new_member)
     await db.flush()
@@ -424,21 +426,62 @@ async def join_by_invite_code(
     if not org:
         raise HTTPException(status_code=404, detail="유효하지 않은 초대 코드입니다.")
 
+    # 초대코드 만료 여부 확인
+    if org.is_invite_code_expired():
+        raise HTTPException(status_code=410, detail="초대 코드가 만료되었습니다. 관리자에게 새 코드를 요청하세요.")
+
     # 이미 소속 여부 확인
     existing = await db.scalar(
-        select(OrganizationMember.id)
+        select(OrganizationMember)
         .where(OrganizationMember.organization_id == org.id)
         .where(OrganizationMember.user_id == current_user.id)
     )
     if existing:
-        raise HTTPException(status_code=409, detail="이미 해당 조직에 소속되어 있습니다.")
+        if existing.status == "invited":
+            # invited 상태 → 초대코드로 가입 시 active로 전환
+            existing.status = "active"
+            await db.flush()
+        elif existing.status == "active":
+            raise HTTPException(status_code=409, detail="이미 해당 조직에 소속되어 있습니다.")
+        else:
+            # deactivated 등 → 관리자에게 문의
+            raise HTTPException(status_code=403, detail="비활성 상태입니다. 관리자에게 문의하세요.")
+    else:
+        db.add(OrganizationMember(
+            organization_id=org.id,
+            user_id=current_user.id,
+            role="member",
+            status="active",
+        ))
+        await db.flush()
 
-    db.add(OrganizationMember(
-        organization_id=org.id,
-        user_id=current_user.id,
-        role="member",
-        status="active",
-    ))
+    count = await db.scalar(
+        select(func.count(OrganizationMember.id))
+        .where(OrganizationMember.organization_id == org.id)
+        .where(OrganizationMember.status == "active")
+    )
+
+    return OrganizationResponse(
+        id=org.id, name=org.name, biz_number=org.biz_number,
+        invite_code=org.invite_code, invite_code_expires_at=org.invite_code_expires_at,
+        member_count=count, created_at=org.created_at,
+    )
+
+
+# ── 초대코드 재생성 (관리자/소유자 전용) ──────────
+@router.post("/invite-code/regenerate", response_model=OrganizationResponse)
+async def regenerate_invite_code(
+    org_tuple=Depends(require_role("owner", "admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    초대 코드 재생성 (admin/owner 전용).
+    퇴사자 보안, 만료 시 갱신 등의 용도.
+    새 코드 발급 + 만료일 30일 연장.
+    """
+    user, member, org = org_tuple
+
+    org.regenerate_invite_code()
     await db.flush()
 
     # 그 조직의 owner/admin들에게 신규 가입 알림
@@ -470,7 +513,8 @@ async def join_by_invite_code(
 
     return OrganizationResponse(
         id=org.id, name=org.name, biz_number=org.biz_number,
-        invite_code=org.invite_code, member_count=count, created_at=org.created_at,
+        invite_code=org.invite_code, invite_code_expires_at=org.invite_code_expires_at,
+        member_count=count, created_at=org.created_at,
     )
 
 

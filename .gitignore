@@ -31,6 +31,7 @@ update_screenshots.py
 new_urls.json
 output.txt
 run.bat
+_capture_rounds_*.py
 
 tasks/
 
@@ -52,6 +53,17 @@ datasets/defect_videos/
 
 # YOLO 학습 결과 (프로젝트 루트)
 runs/
+
+# 로그 파일
+*.log
+
+# 로컬 SQLite DB
+*.db
+*.sqlite3
+
+# 임시 / 백업 파일
+*.tmp
+*.bak
 
 # Claude Code lock
 .claude/scheduled_tasks.lock

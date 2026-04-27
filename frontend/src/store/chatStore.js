@@ -10,13 +10,15 @@ import { create } from 'zustand'
 import {
   listConversations,
   getMessages,
-  sendMessage,
+  sendMessage as sendTextMessage,
+  sendFileMessage,
   createConversation,
   markConversationRead,
   getUnreadCounts,
   findDMConversation,
   leaveConversation as leaveConvApi,
 } from '../api/chatApi.js'
+import useNotificationStore from './notificationStore.js'
 
 /** authStore에서 현재 사용자 가져오기 (store 순환 import 방지) */
 function getCurrentUser() {
@@ -43,43 +45,74 @@ const useChatStore = create((set, get) => ({
   fetchConversations: async () => {
     set({ loading: true, error: null })
     try {
-      const convs = await listConversations()
-      const { total, per_conversation } = await getUnreadCounts()
+      const [convs, { total, per_conversation }] = await Promise.all([
+        listConversations(),
+        getUnreadCounts(),
+      ])
       set({ conversations: convs, unreadTotal: total, unreadPerConv: per_conversation || {}, loading: false })
     } catch (err) {
       set({ error: err.message, loading: false })
     }
   },
 
-  /** 대화방 선택 → 메시지 로드 + 읽음 처리 */
+  /** 대화방 선택 → 메시지 로드 + 읽음 처리 + 해당 대화의 채팅 알림 일괄 읽음 */
   selectConversation: async (convId) => {
     set({ activeConversationId: convId, messagesLoading: true })
+    // 알림 벨 안의 해당 대화방 채팅 알림도 같이 읽음 처리 (UX 일관성)
+    useNotificationStore.getState().markChatNotificationsReadByConversation(convId)
     try {
-      const msgs = await getMessages(convId)
-      await markConversationRead(convId)
-      const { total, per_conversation } = await getUnreadCounts()
-      set({ messages: msgs, messagesLoading: false, unreadTotal: total, unreadPerConv: per_conversation || {} })
+      const [msgs] = await Promise.all([
+        getMessages(convId),
+        markConversationRead(convId),
+      ])
+      set({ messages: msgs, messagesLoading: false })
+      // 읽음 처리 후 미읽음 카운트만 갱신 (비동기, UI 블로킹 안 함)
+      getUnreadCounts().then(({ total, per_conversation }) =>
+        set({ unreadTotal: total, unreadPerConv: per_conversation || {} })
+      ).catch(() => {})
     } catch (err) {
       set({ error: err.message, messagesLoading: false })
     }
   },
 
-  /** 메시지 전송 */
-  sendMessage: async ({ text }) => {
-    const { activeConversationId } = get()
-    if (!activeConversationId || !text.trim()) return
+  /** 메시지 전송 (텍스트 / 파일 / 텍스트+파일) */
+  sendMessage: async ({ text, files }) => {
+    const { activeConversationId, conversations } = get()
+    if (!activeConversationId) return
+    if (!text?.trim() && (!files || files.length === 0)) return
 
-    const msg = await sendMessage({
-      conversation_id: activeConversationId,
-      text: text.trim(),
-    })
+    let lastMsg
+    if (files && files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        lastMsg = await sendFileMessage({
+          conversation_id: activeConversationId,
+          file: files[i],
+          text: i === 0 && text?.trim() ? text.trim() : null,
+        })
+        set((s) => ({ messages: [...s.messages, lastMsg] }))
+      }
+    } else {
+      lastMsg = await sendTextMessage({
+        conversation_id: activeConversationId,
+        text: text.trim(),
+      })
+      set((s) => ({ messages: [...s.messages, lastMsg] }))
+    }
 
-    // 메시지 목록에 추가
-    set((s) => ({ messages: [...s.messages, msg] }))
-
-    // 대화방 목록 갱신 (순서 변경 + last_message)
-    const convs = await listConversations()
-    set({ conversations: convs })
+    // 대화방 목록 로컬 업데이트 (API 호출 없이 즉시 반영)
+    if (lastMsg) {
+      const updatedConvs = conversations.map((c) => {
+        if (c.id === activeConversationId) {
+          return {
+            ...c,
+            updated_at: lastMsg.created_at,
+            last_message: { text: lastMsg.text, file_name: lastMsg.file_name, sender_name: lastMsg.sender_name, created_at: lastMsg.created_at },
+          }
+        }
+        return c
+      }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+      set({ conversations: updatedConvs })
+    }
   },
 
   /** 새 대화방 생성 */
@@ -130,6 +163,16 @@ const useChatStore = create((set, get) => ({
     }
   },
 
+  /** 읽음 카운트 갱신용 메시지 재로드 — markConversationRead 없이 messages 만 갱신 */
+  refreshMessages: async (convId) => {
+    try {
+      const msgs = await getMessages(convId)
+      if (get().activeConversationId === convId) {
+        set({ messages: msgs })
+      }
+    } catch {}
+  },
+
   // 필터 / 검색
   setFilter: (type) => set({ filterType: type }),
   setSearch: (query) => set({ searchQuery: query }),
@@ -145,6 +188,42 @@ const useChatStore = create((set, get) => ({
       const { total, per_conversation } = await getUnreadCounts()
       set({ unreadTotal: total, unreadPerConv: per_conversation || {} })
     } catch {}
+  },
+
+  /** WebSocket으로 수신된 실시간 메시지 처리 — API 호출 최소화 */
+  receiveMessage: (msg) => {
+    const { activeConversationId, messages, conversations, unreadPerConv, unreadTotal } = get()
+    const currentUser = getCurrentUser()
+
+    // 내가 보낸 메시지는 sendMessage에서 이미 추가했으므로 중복 방지
+    if (msg.sender_id === currentUser?.id) return
+
+    // 현재 보고 있는 대화방이면 메시지 목록에 즉시 추가 + 읽음 처리
+    if (msg.conversation_id === activeConversationId) {
+      const isDuplicate = messages.some((m) => m.id === msg.id)
+      if (!isDuplicate) {
+        set((s) => ({ messages: [...s.messages, msg] }))
+        markConversationRead(activeConversationId).catch(() => {})
+      }
+    } else {
+      // 다른 대화방 → 미읽음 카운트 로컬 증가 (API 호출 없이 즉시 반영)
+      const convId = msg.conversation_id
+      const newPerConv = { ...unreadPerConv, [convId]: (unreadPerConv[convId] || 0) + 1 }
+      set({ unreadPerConv: newPerConv, unreadTotal: unreadTotal + 1 })
+    }
+
+    // 대화방 목록 로컬 업데이트 (순서 변경 + 마지막 메시지 — API 호출 없음)
+    const updatedConvs = conversations.map((c) => {
+      if (c.id === msg.conversation_id) {
+        return {
+          ...c,
+          updated_at: msg.created_at,
+          last_message: { text: msg.text, file_name: msg.file_name, sender_name: msg.sender_name, created_at: msg.created_at },
+        }
+      }
+      return c
+    }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+    set({ conversations: updatedConvs })
   },
 }))
 

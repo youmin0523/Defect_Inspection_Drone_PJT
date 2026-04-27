@@ -24,7 +24,8 @@ const STATUS_CONFIG = {
 
 export default function Header() {
   const connectionStatus = useDroneStore((s) => s.connectionStatus)
-  const { unreadCount, toggleDropdown, isDropdownOpen } = useNotificationStore()
+  const { unreadCount, chatUnreadCount, toggleDropdown, isDropdownOpen } = useNotificationStore()
+  const totalUnreadCount = unreadCount + chatUnreadCount
   const fetchUnreadCount = useNotificationStore((s) => s.fetchUnreadCount)
 
   useEffect(() => { fetchUnreadCount() }, [fetchUnreadCount])
@@ -90,9 +91,9 @@ export default function Header() {
             onClick={toggleDropdown}
           >
             <Bell size={18} />
-            {unreadCount > 0 && (
+            {totalUnreadCount > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1 border-2 border-dashboard-surface">
-                {unreadCount > 99 ? '99+' : unreadCount}
+                {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
               </span>
             )}
           </button>

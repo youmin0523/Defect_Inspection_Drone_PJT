@@ -56,3 +56,9 @@ export async function deleteNotification(id) {
   await API.delete(`/api/v1/notifications/${id}`)
   return { ok: true }
 }
+
+/** DELETE /api/v1/notifications — 현재 사용자 알림 전체 삭제 */
+export async function deleteAllNotifications() {
+  const { data } = await API.delete('/api/v1/notifications')
+  return data
+}

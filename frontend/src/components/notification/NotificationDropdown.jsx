@@ -6,10 +6,11 @@
  *       - 드롭다운 열릴 때 fetchAll + fetchUnreadCount 호출
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CheckCheck, BellOff } from 'lucide-react'
+import { BellOff } from 'lucide-react'
 import useNotificationStore from '../../store/notificationStore.js'
+import useChatStore from '../../store/chatStore.js'
 import NOTIFICATION_CATEGORIES from '../../constants/notificationCategories.js'
 
 /* ── 상대 시간 포맷 ───────────────────────────────────── */
@@ -38,6 +39,7 @@ const THEME = {
     headerTitle: 'text-slate-800',
     badge: 'bg-blue-600 text-white',
     markAllBtn: 'text-blue-600 hover:text-blue-800 hover:bg-blue-50',
+    deleteAllBtn: 'text-red-600 hover:text-red-800 hover:bg-red-50',
     item: 'hover:bg-gray-50',
     itemTitle: 'text-slate-800',
     itemTitleRead: 'text-slate-500',
@@ -55,6 +57,7 @@ const THEME = {
     headerTitle: 'text-white',
     badge: 'bg-accent-500 text-white',
     markAllBtn: 'text-accent-400 hover:text-accent-300 hover:bg-neutral-800',
+    deleteAllBtn: 'text-red-400 hover:text-red-300 hover:bg-neutral-800',
     item: 'hover:bg-neutral-800/60',
     itemTitle: 'text-slate-200',
     itemTitleRead: 'text-slate-500',
@@ -78,16 +81,45 @@ export default function NotificationDropdown({ theme = 'light' }) {
   const {
     notifications,
     unreadCount,
+    chatNotifications,
+    chatUnreadCount,
     loading,
     isDropdownOpen,
     fetchAll,
     fetchUnreadCount,
     markRead,
+    markChatNotificationRead,
     markAllRead,
+    removeAll,
     closeDropdown,
   } = useNotificationStore()
 
-  // 열릴 때 데이터 새로 가져오기
+  const selectConversation = useChatStore((s) => s.selectConversation)
+
+  // 백엔드 알림 + 채팅 인메모리 알림 → 단일 리스트로 머지 (created_at 내림차순)
+  const mergedNotifications = useMemo(() => {
+    const chatItems = chatNotifications.map((n) => {
+      const previewLen = 40
+      const preview = n.text
+        ? (n.text.length > previewLen ? `${n.text.slice(0, previewLen)}...` : n.text)
+        : (n.file_name ? `📎 ${n.file_name}` : '')
+      return {
+        id: n.id,
+        category: 'chat',
+        title: `${n.sender_name || '알 수 없음'}님께서 메시지를 보냈습니다.`,
+        message: preview,
+        created_at: typeof n.created_at === 'string' ? new Date(n.created_at).getTime() : n.created_at,
+        is_read: n.is_read,
+        _isChat: true,
+        _conversationId: n.conversation_id,
+      }
+    })
+    return [...chatItems, ...notifications].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
+  }, [notifications, chatNotifications])
+
+  const totalUnread = unreadCount + chatUnreadCount
+
+  // 열릴 때 데이터 새로 가져오기 (백엔드 알림만 — 채팅 알림은 WS push 로 실시간 갱신)
   useEffect(() => {
     if (isDropdownOpen) {
       fetchAll()
@@ -120,6 +152,16 @@ export default function NotificationDropdown({ theme = 'light' }) {
   if (!isDropdownOpen) return null
 
   const handleItemClick = async (notif) => {
+    // 채팅 알림: 인메모리 읽음 처리 + 해당 대화방으로 이동
+    if (notif._isChat) {
+      markChatNotificationRead(notif.id)
+      closeDropdown()
+      // selectConversation이 activeConversationId 동기 set + 메시지 fetch + 백엔드 read 처리
+      selectConversation(notif._conversationId)
+      navigate('/employee/chat')
+      return
+    }
+    // 일반(백엔드) 알림: 기존 동작 유지
     if (!notif.is_read) await markRead(notif.id)
     if (notif.metadata?.link) {
       closeDropdown()
@@ -133,41 +175,58 @@ export default function NotificationDropdown({ theme = 'light' }) {
       className={`absolute right-0 top-full mt-2 w-96 rounded-xl border z-50 overflow-hidden ${t.container}`}
     >
       {/* 헤더 */}
-      <div className={`px-4 py-3 flex items-center justify-between ${t.header}`}>
-        <div className="flex items-center gap-2">
+      <div className={`px-4 py-3 flex items-center justify-between gap-2 ${t.header}`}>
+        <div className="flex items-center gap-2 min-w-0">
           <h3 className={`font-bold text-sm ${t.headerTitle}`}>알림</h3>
-          {unreadCount > 0 && (
+          {totalUnread > 0 && (
             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center ${t.badge}`}>
-              {unreadCount > 99 ? '99+' : unreadCount}
+              {totalUnread > 99 ? '99+' : totalUnread}
             </span>
           )}
         </div>
-        {unreadCount > 0 && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); markAllRead() }}
-            className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-md transition ${t.markAllBtn}`}
-          >
-            <CheckCheck size={14} />
-            모두 읽음
-          </button>
-        )}
+        <div className="flex items-center gap-1 shrink-0">
+          {totalUnread > 0 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); markAllRead() }}
+              className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-md transition ${t.markAllBtn}`}
+              title="전체 읽음"
+            >
+              <i className="ri-check-double-line text-base leading-none" aria-hidden="true" />
+              전체 읽음
+            </button>
+          )}
+          {mergedNotifications.length > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (window.confirm('모든 알림을 삭제하시겠습니까?')) removeAll()
+              }}
+              className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-md transition ${t.deleteAllBtn}`}
+              title="전체 삭제"
+            >
+              <i className="ri-delete-bin-line text-base leading-none" aria-hidden="true" />
+              전체 삭제
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 알림 리스트 */}
       <div className="max-h-[400px] overflow-y-auto">
-        {loading && notifications.length === 0 ? (
+        {loading && mergedNotifications.length === 0 ? (
           <div className={`py-12 text-center text-sm ${t.empty}`}>
             불러오는 중...
           </div>
-        ) : notifications.length === 0 ? (
+        ) : mergedNotifications.length === 0 ? (
           <div className={`py-12 text-center ${t.empty}`}>
             <BellOff size={32} className="mx-auto mb-2 opacity-40" />
             <p className="text-sm">새로운 알림이 없습니다</p>
           </div>
         ) : (
           <ul>
-            {notifications.map((notif) => {
+            {mergedNotifications.map((notif) => {
               const cat = NOTIFICATION_CATEGORIES[notif.category] || NOTIFICATION_CATEGORIES.system
               const Icon = cat.icon
               return (

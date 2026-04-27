@@ -29,12 +29,30 @@ import AdminMembers from './pages/employee/AdminMembers.jsx'
 import Onboarding from './pages/employee/Onboarding.jsx'
 import OrgRequired from './components/auth/OrgRequired.jsx'
 import FloatingChatButton from './components/chat/FloatingChatButton.jsx'
+import ChatRealtimeListener from './components/chat/ChatRealtimeListener.jsx'
+import useChatStore from './store/chatStore.js'
 
 /** employee 경로에서만 Floating Chat Button 표시 */
 function GlobalFloatingChat() {
   const { pathname } = useLocation()
   if (!pathname.startsWith('/employee')) return null
   return <FloatingChatButton />
+}
+
+/**
+ * 브라우저 탭 제목에 미읽음 채팅 카운트 표시 (Slack/Gmail 스타일)
+ *   - 미읽음 0: "AeroInspect"
+ *   - 미읽음 N: "(N) AeroInspect"
+ */
+function DocumentTitleBadge() {
+  const chatUnread = useChatStore((s) => s.unreadTotal)
+  useEffect(() => {
+    const base = 'AeroInspect'
+    document.title = chatUnread > 0
+      ? `(${chatUnread > 99 ? '99+' : chatUnread}) ${base}`
+      : base
+  }, [chatUnread])
+  return null
 }
 import SessionLayout from './components/session/SessionLayout.jsx'
 import ProtectedSessionLayout from './components/session/ProtectedSessionLayout.jsx'
@@ -105,6 +123,8 @@ function DashboardLayout() {
 export default function App() {
   return (
     <BrowserRouter>
+      <DocumentTitleBadge />
+      <ChatRealtimeListener />
       <GlobalFloatingChat />
       <Routes>
         {/* 공개 라우트 */}
