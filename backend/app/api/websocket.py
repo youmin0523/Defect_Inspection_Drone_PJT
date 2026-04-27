@@ -3,6 +3,7 @@
 # 역할: WebSocket 실시간 이벤트 엔드포인트
 #       - WS /ws?channel={channel} → 채널 구독
 #       - 채널: defects / telemetry / thermal / camera
+#                / chat:{uuid} / user:{uuid} / notifications:{uuid}
 #       - 연결 시 현재 카메라 모드 즉시 전송
 #       - WS_HEARTBEAT_INTERVAL 초마다 ping 전송으로 죽은 연결 감지
 # =============================================
@@ -19,14 +20,17 @@ router = APIRouter()
 
 STATIC_CHANNELS = {"defects", "telemetry", "thermal", "camera"}
 
+# 동적 채널 prefix — 사용자/대화방/알림별 개인 채널
+# notifications: → notification_service 가 사용 (멤버 배정/보고서 알림 등)
+# TODO: JWT 토큰으로 본인 채널만 구독 가능하게 인증 추가 필요
+_DYNAMIC_CHANNEL_PREFIXES = ("chat:", "user:", "notifications:")
+
 
 def _is_valid_channel(channel: str) -> bool:
-    """드론 모니터링 고정 채널 또는 채팅 동적 채널(chat:uuid, user:uuid) 허용"""
+    """드론 모니터링 고정 채널 또는 동적 채널(chat/user/notifications) 허용."""
     if channel in STATIC_CHANNELS:
         return True
-    if channel.startswith("chat:") or channel.startswith("user:"):
-        return True
-    return False
+    return any(channel.startswith(p) for p in _DYNAMIC_CHANNEL_PREFIXES)
 
 
 @router.websocket("/ws")
@@ -44,12 +48,13 @@ async def websocket_endpoint(
         ws://localhost:8000/api/v1/ws?channel=user:{user_id}
 
     수신 이벤트 타입:
-        defects    채널: {"type": "defect.new", "data": {...}}
-        telemetry  채널: {"type": "telemetry.update", "data": {...}}
-        thermal    채널: {"type": "thermal.frame", "data": {...}}
-        camera     채널: {"type": "camera.mode_changed", "data": {"mode": "..."}}
-        chat:uuid  채널: {"type": "chat.new_message", "data": {...}}
-        user:uuid  채널: {"type": "chat.new_message", "data": {...}}
+        defects           채널: {"type": "defect.new", "data": {...}}
+        telemetry         채널: {"type": "telemetry.update", "data": {...}}
+        thermal           채널: {"type": "thermal.frame", "data": {...}}
+        camera            채널: {"type": "camera.mode_changed", "data": {"mode": "..."}}
+        chat:uuid         채널: {"type": "chat.new_message", "data": {...}}
+        user:uuid         채널: {"type": "chat.new_message", "data": {...}}
+        notifications:uuid 채널: {"type": "notification.new", "data": {...}}
     """
     if not _is_valid_channel(channel):
         channel = "defects"
