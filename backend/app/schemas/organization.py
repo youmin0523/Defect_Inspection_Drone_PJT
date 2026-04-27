@@ -27,6 +27,7 @@ class OrganizationResponse(BaseModel):
     name: str
     biz_number: Optional[str]
     invite_code: Optional[str] = None
+    invite_code_expires_at: Optional[datetime] = None
     member_count: int = 0
     created_at: datetime
 
