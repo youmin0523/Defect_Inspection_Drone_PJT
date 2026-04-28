@@ -17,6 +17,7 @@ from uuid import UUID
 
 import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -422,6 +423,54 @@ async def send_file_message(
         await ws_manager.broadcast(f"user:{uid}", msg_payload)
 
     return response
+
+
+@router.get("/messages/{message_id}/download")
+async def download_message_file(
+    message_id: UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """첨부파일 다운로드 — 원본 파일명을 Content-Disposition 으로 보존 (RFC 5987).
+
+    프런트엔드는 이 엔드포인트로 fetch → blob → object URL → <a download> 클릭 패턴을 사용한다.
+    StaticFiles 가 헤더를 못 붙이고, cross-origin 환경에서 <a download> 속성이 무시되는 문제를
+    한꺼번에 우회한다.
+    """
+    msg = await db.get(Message, message_id)
+    if msg is None or not msg.file_url:
+        raise HTTPException(status_code=404, detail="첨부파일이 없습니다.")
+
+    # 참여자 확인 (해당 대화방 멤버만 다운로드 가능)
+    member = await db.scalar(
+        select(ConversationMember.id)
+        .where(ConversationMember.conversation_id == msg.conversation_id)
+        .where(ConversationMember.user_id == current_user.id)
+    )
+    if member is None:
+        raise HTTPException(status_code=403, detail="이 대화방에 참여하고 있지 않습니다.")
+
+    # file_url 은 "/uploads/chat/uuid.ext" 형식. CHAT_UPLOAD_DIR 하위로만 허용 (path traversal 방어)
+    file_url = msg.file_url or ""
+    prefix = "/uploads/chat/"
+    if not file_url.startswith(prefix):
+        raise HTTPException(status_code=400, detail="잘못된 파일 경로입니다.")
+    saved_name = file_url[len(prefix):]
+    if "/" in saved_name or "\\" in saved_name or ".." in saved_name:
+        raise HTTPException(status_code=400, detail="잘못된 파일 경로입니다.")
+
+    abs_path = os.path.abspath(os.path.join(CHAT_UPLOAD_DIR, saved_name))
+    upload_root = os.path.abspath(CHAT_UPLOAD_DIR)
+    if not abs_path.startswith(upload_root + os.sep) and abs_path != upload_root:
+        raise HTTPException(status_code=400, detail="잘못된 파일 경로입니다.")
+    if not os.path.isfile(abs_path):
+        raise HTTPException(status_code=404, detail="파일이 디스크에 없습니다.")
+
+    return FileResponse(
+        path=abs_path,
+        filename=msg.file_name or saved_name,
+        media_type=msg.file_content_type or "application/octet-stream",
+    )
 
 
 @router.patch("/conversations/{conversation_id}/read")

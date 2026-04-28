@@ -87,6 +87,38 @@ export async function getUnreadCounts() {
   return data
 }
 
+/**
+ * 첨부파일 다운로드 — blob 으로 받아 same-origin object URL 로 트리거.
+ * StaticFiles 의 Content-Disposition 누락 + cross-origin <a download> 무시 문제를 한꺼번에 우회.
+ * 백엔드는 RFC 5987 로 한글 파일명까지 헤더에 인코딩해 준다.
+ */
+export async function downloadMessageFile(messageId, fallbackName) {
+  const res = await API.get(`/api/v1/chat/messages/${messageId}/download`, {
+    responseType: 'blob',
+  })
+
+  // Content-Disposition 헤더에서 파일명 추출 (RFC 5987 우선, fallback 으로 plain filename)
+  const cd = res.headers['content-disposition'] || ''
+  let filename = fallbackName || 'download'
+  const star = cd.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+  if (star) {
+    try { filename = decodeURIComponent(star[1].trim()) } catch { /* keep fallback */ }
+  } else {
+    const plain = cd.match(/filename\s*=\s*"?([^";]+)"?/i)
+    if (plain) filename = plain[1].trim()
+  }
+
+  const url = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // 다음 마이크로태스크에서 해제 (즉시 revoke 시 일부 브라우저에서 다운로드 취소되는 케이스 방지)
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
 /** 기존 DM 대화방 검색 (대화방 목록에서 필터링) — 두 사용자 모두 참여해야 매칭 */
 export async function findDMConversation(userId1, userId2) {
   const convs = await listConversations()

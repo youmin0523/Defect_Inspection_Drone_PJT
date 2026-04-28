@@ -1588,3 +1588,64 @@ API 시그니처 변경에 따른 Store 수정:
 | `backend/training/download_thermal_building.py` | Roboflow 기반 열화상 데이터 스크래핑 및 클래스 맵핑 모듈 |
 | `backend/training/retrain_m1_v4s_run.py` | YOLOv8s 리트레이닝 스크립트 및 ONNX 최적화 |
 | `backend/app/config.py` | WebSocket Heartbeat 변수 최적화 |
+
+---
+
+## 📅 2026-04-28 — 채팅 첨부 mock 파일 placeholder 생성 스크립트
+
+- 작성자 (Who): @unknownName-15
+- 작성 일자 (When): 2026-04-28
+- 작업 브랜치: `SH`
+> **목표**: 채팅 메시지에 첨부된 이미지가 화면에 안 뜨고 다운로드 시 "not found" 가 뜨던 문제 1차 해결 — 시드 데이터의 file_url 이 가리키는 실제 파일을 디스크에 만들어 준다.
+
+### ⏱ 증상 진단
+
+- **현상**: DM 의 "A동_외벽_균열탐지_결과.jpg" 등 첨부 이미지가 채팅 말풍선에 깨진 형태로 뜨고, 다운로드 버튼 클릭 시 404 ("not found") 발생.
+- **원인**: `backend/scripts/seed_mock_chats.py` 가 DB 의 `messages.file_url` 에 `/uploads/chat/mock_*.jpg` `mock_*.pdf` `mock_*.xlsx` 9 개 경로를 시드하지만 실제 파일은 만들지 않음 → `app.mount("/uploads", StaticFiles(...))` 가 파일을 못 찾고 404 반환 → `<img>` 깨지고 다운로드도 실패.
+- **추가 잠재 이슈** (다음 작업 단계 B·C 로 분리): cross-origin 환경에서 `<a download>` 속성 무시, `StaticFiles` 가 `Content-Disposition` 미설정으로 한글 파일명 손실. 이번 커밋에서는 시드 mock 파일 placeholder 만 우선 채워 화면 렌더 확인이 목표.
+
+### ⏱ 해결: placeholder 생성 스크립트 신규
+
+- **신규 파일**: `backend/scripts/generate_mock_chat_files.py`
+  - 이미지 5종 (`mock_crack_detection.jpg` 외): PIL 로 라벨 텍스트 + 격자 패턴 placeholder JPG (800x560) 생성. Windows 한글 폰트(`malgun.ttf`) 자동 탐색.
+  - PDF 3종 (`mock_report_march.pdf` 외): handcrafted 최소 유효 PDF 1.4 (Catalog/Pages/Page/Font/Contents 5 오브젝트 + xref). 외부 라이브러리 없이 ASCII 라벨 한 줄 표시.
+  - XLSX 1종 (`mock_defect_data.xlsx`): `openpyxl` 미설치 환경 대응으로 `zipfile` stdlib 만 사용해 최소 유효 워크북([Content_Types].xml + rels + workbook.xml + sheet1.xml + sharedStrings.xml) 직접 작성.
+- **실행**: `cd backend && python -m scripts.generate_mock_chat_files` → `backend/uploads/chat/` 에 9 개 파일 생성.
+
+### 🔗 변경 파일 목록 (1개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `backend/scripts/generate_mock_chat_files.py` | 신규 — 시드 mock 첨부파일을 placeholder JPG/PDF/XLSX 로 생성하는 일회용 스크립트 |
+
+### 📐 설계 결정 사항
+
+- **시드 스크립트(`seed_mock_chats.py`) 직접 수정 vs 별도 스크립트**: 별도 스크립트로 분리. 시드는 DB 만 다루고 파일 생성은 독립적으로 재실행 가능해야 디버깅 편함. 기존 시드 데이터를 건드리지 않고 placeholder 만 보충 가능.
+- **PDF/XLSX 라이브러리 미사용**: reportlab/openpyxl 추가 의존성 도입을 피하기 위해 stdlib + 핸드크래프트 접근. PDF 는 한글 폰트 임베드가 복잡해 라벨은 ASCII 로만 표기 (placeholder 목적이라 충분).
+- **다음 단계 (B·C)**: 이번 작업으로 화면 렌더가 정상화되면 (1) 백엔드에 `GET /api/v1/chat/messages/{id}/download` 추가하여 `FileResponse(filename=...)` 로 RFC 5987 한글 파일명 보존, (2) 프런트 `MessageBubble.jsx` 의 다운로드를 axios blob + `URL.createObjectURL` 방식으로 전환하여 cross-origin `download` 무시 문제 우회 — 두 단계로 나눠 진행 예정.
+
+---
+
+## 📅 2026-04-28 — 채팅 첨부 다운로드 엔드포인트 추가 (Content-Disposition + 권한 체크)
+
+> **작업자**: @codelabprovide1 (Claude Opus 4.7 바이브코딩)
+> **목표**: A 단계 placeholder 로 이미지는 정상 렌더되지만, 다운로드 버튼 클릭 시 cross-origin `<a download>` 무시로 새 탭에 이미지만 뜨던 문제 해결. 프런트가 blob 으로 받아 즉시 저장하도록 인증된 다운로드 엔드포인트 신설.
+
+### ⏱ `GET /api/v1/chat/messages/{message_id}/download` 신규
+
+- **동작**: `FileResponse(path, filename=msg.file_name, media_type=msg.file_content_type)` 로 응답. FastAPI 가 RFC 5987 형식(`filename*=UTF-8''<percent-encoded>`) 으로 한글 파일명을 자동 인코딩 → 다운로드 시 원본 한글/영문 파일명 그대로 저장됨.
+- **권한**: 메시지 → `conversation_id` → `ConversationMember` 조회로 현재 사용자가 해당 대화방 참여자인지 확인. 미참여자에게는 403.
+- **path traversal 방어**: `msg.file_url` 이 `/uploads/chat/` prefix 로 시작하는지, saved_name 에 `/` `\` `..` 가 없는지, 절대경로 정규화 후 `CHAT_UPLOAD_DIR` 하위인지 3중 검증. DB 값을 신뢰하지 않고 디스크 경로 합성을 엄격하게 제한.
+- **404 케이스**: 메시지에 `file_url` 이 없거나 디스크에 실제 파일이 없으면 404. (StaticFiles 와 분리해 명시적 에러 메시지 노출.)
+
+### 🔗 변경 파일 목록 (1개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `backend/app/api/chat.py` | `FileResponse` import + `download_message_file` 핸들러 신규 (권한 체크 + path traversal 방어 + RFC 5987 파일명 헤더) |
+
+### 📐 설계 결정 사항
+
+- **별도 엔드포인트 vs StaticFiles 응답 가공**: StaticFiles 는 응답 헤더를 커스터마이징하기 까다롭고 인증 미들웨어를 끼우기 어려움. 별도 엔드포인트로 분리하면 (a) JWT 권한 체크, (b) Content-Disposition 헤더, (c) 향후 audit log/추적까지 한 자리에서 처리 가능.
+- **이미지 인라인 표시는 기존 `/uploads/...` 유지**: `<img src>` 인증을 강제하면 마운트마다 토큰 헤더를 못 실어서 깨짐. 다운로드만 인증 경로로 분리하는 게 비용 대비 효과 큼. 추후 비공개 첨부가 필요해지면 `/uploads/chat` 마운트를 닫고 같은 다운로드 라우트로 일원화하면 됨.
+- **path traversal 검증 3중**: prefix 검사 + 구분자 거부 + 절대경로 정규화 후 root 비교. DB 변조 시나리오까지 가정해 보안 깊이 확보 (`os.path.abspath` 만으로는 심볼릭 링크 우회 가능성이 있어 prefix/문자 검사 병행).
