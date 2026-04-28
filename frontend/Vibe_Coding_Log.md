@@ -1730,3 +1730,40 @@ localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT �
 |------|----------|
 | `frontend/src/store/chatStore.js` | `messageCache` 구현 및 비동기 조회 로직 백그라운드 호출로 개선 |
 | `frontend/src/components/chat/MessageThread.jsx` | Skeleton UI 구현, 잘못 렌더링되던 JSX 주석 제거, `setTimeout`으로 최하단 스크롤 동기화 해결 |
+
+---
+
+#### ⏱ 2026-04-28 | 채팅 첨부파일 다운로드 — blob 방식으로 즉시 로컬 저장
+
+- 작성자 (Who): @unknownName-15
+- 작성 일자 (When): 2026-04-28
+- 작업 브랜치: `SH`
+
+- **피드백 (요청)**:
+  1. 이미지 모달의 다운로드 버튼을 누르면 다운로드가 바로 되는 게 아니라 새 탭에 이미지 주소만 떠서 사용자가 수동 저장해야 하는 문제. 클릭 즉시 로컬 Downloads 폴더에 자동 저장되도록.
+  2. X 버튼은 그대로 모달 닫기 동작 유지.
+- **원인 분석**:
+  - 기존 코드 `<a href={src} download={alt}>` 방식은 cross-origin 환경(`http://localhost:5173` ↔ `http://localhost:8000`)에서 브라우저가 `download` 속성을 무시함. 그래서 단순 페이지 이동(이미지를 새 탭에 표시)이 발생.
+  - 추가로 백엔드 `app.mount("/uploads", StaticFiles(...))` 가 `Content-Disposition` 헤더를 안 붙여서, 다운로드가 됐더라도 파일명이 디스크 저장명(UUID)으로 떨어졌을 것.
+- **반영**:
+  - `api/chatApi.js`:
+    - `downloadMessageFile(messageId, fallbackName)` 신규 — 백엔드 `GET /api/v1/chat/messages/{id}/download` 를 axios `responseType: 'blob'` 로 호출, `Content-Disposition` 헤더에서 RFC 5987(`filename*=UTF-8''…`) 우선 + plain `filename=` fallback 으로 파일명 추출, `URL.createObjectURL` + 임시 `<a download>` 클릭으로 트리거. blob URL 은 same-origin 이므로 `download` 속성 정상 동작 → 한글 파일명 그대로 즉시 로컬 저장.
+    - `URL.revokeObjectURL` 은 `setTimeout(_, 0)` 으로 다음 마이크로태스크에 해제 (즉시 revoke 시 일부 브라우저에서 다운로드가 취소되는 케이스 회피).
+  - `components/chat/MessageBubble.jsx`:
+    - `triggerDownload(messageId, fallbackName)` 헬퍼 도입 — 실패 시 console.error + alert 만 하고 UI 차단 안 함.
+    - `ImageModal` 의 다운로드 `<a href download>` → `<button onClick>` 으로 교체. `messageId` prop 추가 받아서 헬퍼 호출. X 닫기 버튼은 그대로.
+    - 비이미지 첨부 `<a href download>` → `<button onClick>` 으로 교체. 같은 헬퍼 사용.
+    - `handleImageClick(src, name, id)` 시그니처 확장, `setModalImage({ src, name, id })` 로 모달 state 에 messageId 보관.
+
+### 🔗 변경 파일 목록 (2개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `frontend/src/api/chatApi.js` | `downloadMessageFile` 신규 — blob 다운로드 + `Content-Disposition` 파일명 파싱 |
+| `frontend/src/components/chat/MessageBubble.jsx` | 이미지 모달/비이미지 첨부 다운로드를 `<a download>` → `<button onClick>` blob 방식으로 전환 + `messageId` prop 전달 |
+
+### 📐 설계 결정 사항
+
+- **blob URL 우회 vs 백엔드 redirect 헤더만 수정**: blob 방식 채택. (a) cross-origin `download` 무시는 브라우저 정책이라 헤더만 고쳐선 우회 불가, (b) blob 방식이 JWT 토큰을 헤더에 실어 보낼 수 있어서 향후 `/uploads` 직접 노출을 닫고 권한 체크된 다운로드로 전환할 때도 그대로 사용 가능.
+- **alert 으로 실패 통지**: 토스트 시스템이 따로 있긴 하지만 다운로드 실패는 드물고 명확하게 사용자가 인지해야 하므로 단순 `alert`. 추후 토스트로 교체 시 헬퍼 한 곳만 수정.
+- **이미지 인라인 표시는 기존 `/uploads/...` 직접 URL 유지**: `<img src>` 는 cross-origin 이미지 표시에 제약이 없고, 인증이 필요없는 이미지는 StaticFiles 경로로 충분. 다운로드만 인증된 API 경로로 분리.
