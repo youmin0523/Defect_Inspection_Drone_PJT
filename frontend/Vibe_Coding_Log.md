@@ -1997,3 +1997,7 @@ localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT �
 - **비용 가시화**: 단순 ON/OFF 만 노출하지 않고 마지막 시작 이후 경과 시간 + 누적 추정 비용을 항상 표시 → 운영자가 끄는 걸 깜빡하지 않도록 압박. 비용 가이드 카드도 페이지 하단에 상시 노출.
 - **확인 모달 필수**: 시작/정지 모두 확인 모달을 통과해야 실제 호출. 실수 클릭으로 추론 세션 끊기는 사고 방지.
 
+
+### R13.1 Vercel SPA rewrites main 반영 (2026-05-04)
+
+- `vercel.json`: `{ "rewrites": [{ "source": "/(.*)", "destination": "/" }] }` — `/login` 등 직접 진입 시 Vercel 404 방지.
