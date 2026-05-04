@@ -235,6 +235,12 @@ frontend/src/
 
 ## Revision History
 
+### v5.0_260503 (작성자: @youminsu0523 / branch: MS)
+- **R10 (4/29)** OAuth 콜백 + AdminMembers UX 보강 — 3개 provider(Google/Kakao/Naver) 단일 OAuthCallback로 수렴, AdminMembers의 슈퍼어드민/조직 admin 분기 + 부서 관리 + 초대 코드 만료 표시.
+- **R11 (5/2)** Signup.jsx — 약관 동의 분리, 사업자 회원 분기, 사업자등록번호 검증 흐름.
+- **R12 (5/3 본 세션, 1단계)** Mockup 팀원명 정리 — mockTrendData / chatConstants / SiteFormModal / EmployeeLanding 4파일에서 가짜 팀원명(김다연/이준혁/박지훈/이서현/박서연) → 실제 팀(백승희/오희진/유민수)로 통일.
+- **R12 (5/3 본 세션, 2단계)** EmployeeLanding.jsx의 `MOCK_TODAY_SCHEDULE` / `MOCK_TEAM_MEMBERS` / `MOCK_MONTHLY_KPI` / `MOCK_RECENT_ACTIVITIES` 4개 const 삭제 + axios useEffect로 백엔드 API 4개(`/api/v1/employee/schedule/today`, `/employee/kpi/monthly`, `/employee/activities`, `/organizations/members`) 병렬 fetch. KPI snake_case → camelCase 변환. 빈 응답 fallback 처리.
+
 ### v4.1_260427 (작성자: @youminsu0523 / branch: MS)
 - 3D 리포트 샘플 페이지 추가: `SampleReport.jsx` (신규), `HeroSection.jsx`, `App.jsx`
 - 25평 아파트 내부 3D 모델링 + 드론 격자스캔 시뮬레이션 + 근접 기반 하자 탐지

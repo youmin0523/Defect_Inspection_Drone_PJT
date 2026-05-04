@@ -16,15 +16,14 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
 
-NUM_CLASSES = 4
+NUM_CLASSES = 3   # 실제 crop 데이터 클래스 수
 CLASS_NAMES = [
-    "floor_stain",          # D-03
-    "grout_defect",         # D-04
-    "glass_scratch",        # E-01
-    "frame_paint_defect",   # E-02
+    "floor_defect",     # D-02~D-04
+    "glass_defect",     # E-01
+    "frame_defect",     # E-02
 ]
 INPUT_SIZE = 224
-BATCH_SIZE = 32
+BATCH_SIZE = 16  # M5 YOLO과 GPU 공유
 EPOCHS = 60
 LR = 1e-4
 
@@ -63,10 +62,10 @@ def train():
 
     train_loader = DataLoader(
         datasets.ImageFolder(DATA_DIR / "train", train_transforms),
-        batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
+        batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=(device.type == "cuda"))
     val_loader = DataLoader(
         datasets.ImageFolder(DATA_DIR / "val", val_transforms),
-        batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
+        batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=(device.type == "cuda"))
 
     model = build_model().to(device)
     criterion = nn.CrossEntropyLoss()

@@ -192,9 +192,56 @@ core/stream_inference.py ──→ services/inference_pipeline.py
 - [ ] Docker 컨테이너화
 - [ ] CI/CD 파이프라인
 
+### Phase 18. ML 후처리 파이프라인 (2026-04-28 ~ 2026-05-03)
+- [x] TemporalFilter Noisy-OR (시간 일관성 검증)
+- [x] ByteTrack ObjectTracker (track_id 부여, IoU 매칭)
+- [x] SAHI TiledInference (작은 객체 탐지)
+- [x] ActiveLearning Hard Example Mining (저신뢰 자동 수집)
+- [x] DefectPersistence (track 기반 중복 제거)
+- [x] TTA (Test-Time Augmentation) + furniture_gate / geometric_gate
+- [x] Ensemble (PatchCore boost) + postprocess_config.yaml 단일 소스
+- [x] 통합 평가: dry_run_full_pipeline / postprocess_ablation / evaluate_integrated / evaluate_ultralytics_val / evaluate_max_boost
+- [x] 단위 테스트 7종 (test_{temporal_filter, object_tracker, tiled_inference, ensemble, furniture_gate, geometric_gate, tta}.py)
+
+### Phase 19. Swagger / 운영 보안 가드 (2026-05-03)
+- [x] OpenAPI custom function — HTTPBearer(bearerFormat=JWT) + AIWebhookSecret(apiKey header) 보안 스키마 명시 등록
+- [x] 17개 tags_metadata + servers + contact + persistAuthorization
+- [x] 공통 에러 응답 (PROTECTED_RESPONSES = 401/403, WEBHOOK_RESPONSES = 401)
+- [x] schemas/common.py (ErrorResponse, *_RESPONSES)
+- [x] 핵심 schema 4종 example (LoginRequest / TokenResponse / SiteCreate / DefectLogCreate)
+- [x] config.py — `APP_ENV=production` 시 placeholder secret 차단 (RuntimeError)
+- [x] init_db.py — `APP_ENV=production` 시 `Base.metadata.create_all` 자동 스킵 (alembic 책임 분리)
+- [x] `.env.example` 보강 (APP_ENV, AI_WEBHOOK_SECRET, JWT_REFRESH_EXPIRE_DAYS, PUSH_PROVIDER, WS_BACKEND, OAUTH_REDIRECT_BASE, SMTP_*)
+- [x] 보안 점검: .env git 추적 0건 / 소스 하드코딩 시크릿 0건 검증
+
+### Phase 20. Mockup → DB 전환 + 시연 시드 (2026-05-03)
+- [x] InspectionSchedule 모델 신규 (id/site_id/operator_user_id/organization_id/scheduled_at/status/note + 2 인덱스)
+- [x] alembic migration `i2c3d4e5f6a7_add_inspection_schedules.py` 신규 — 총 12 리비전
+- [x] `/api/v1/employee` 라우터 신규 — schedule/today + kpi/monthly + activities (조직 단위 격리)
+- [x] router.py + main.py tags_metadata에 Employee 등록
+- [x] `scripts/seed_demo_data.py` 신설 — 조직(DRONE INSPECT 데모) + 부서 3 + 사용자(백승희/오희진) + 현장 8 + 하자 25~60건/현장 + 보고서 3~5건/완료현장 + 오늘 일정 3건 + 알림 8종/사용자
+- [x] idempotent (사전 SELECT) + `--reset`/`--force-prod` 옵션 + APP_ENV 가드
+- [x] **alembic 분기 head 병합** — `0003` + `i2c3d4e5f6a7` → `alembic merge` → `89b53c16de85` mergepoint, `upgrade head` 성공
+- [x] **DB DDL 보정** — `defect_logs` 의 `image_crop_path`, `track_id`, `accumulated_conf`, `tier_executed`, `deviation_*`, `delta_temperature`, `ensemble_boosted`, `defect_class_display_*` 10개 컬럼 `ADD COLUMN IF NOT EXISTS` (alembic_version 적용 완료지만 실제 DDL 미반영 상태였음)
+- [x] **시드 실 적용** — `python -m scripts.seed_demo_data --reset` 실행: org=1, depts=3, users=2(백승희/오희진), sites=8, defects=**315 (HIGH 77)**, reports=12, today_schedules=3 (잠실 리센츠 14:00 KST 백승희 시드 검증 완료)
+
+### Phase 21. tasks 문서 양식 정정 + 변경 목록 (2026-05-03 R26)
+- [x] API 명세서 `v1.1.md` → `v1.2.md` 파일 rename + 부록을 4.17 Employee API · 2.1.5 Swagger securityScheme · 8.5 운영 보안 가드 인라인 위치로 분산
+- [x] ERD `v1.0.md` → `v1.1.md` 파일 rename + 4.19 inspection_schedules · 5장 관계 · 6.1 인덱스 · 8.3/12.1 Enum · 13장 결론 카운트(19/12/11/32) 인라인 갱신, 문서 이력 위치 마지막 → 목차 이전 이동
+- [x] 가이드 3종(AI 추론 파이프라인 / Frontend Guide / Backend Guide) 문서 이력 위치 정정
+- [x] tasks 8개 문서 팀명 `다마코더 → AeroInspect` 일괄 교체
+- [x] `CHANGES_2026-05-03.md` 신설 — 내일 Claude 웹 문서 변환용 산출물 목록 + 변환 프롬프트 템플릿 + DB 시드 결과 요약
+
 ---
 
 ## Revision History
+
+### v5.1_260503 (작성자: @youminsu0523 / branch: MS)
+- Phase 20 추가 완료(alembic 분기 head 병합 `89b53c16de85` + 누락 컬럼 10건 ALTER 보정 + seed_demo_data 실 적용 sites=8/defects=315/reports=12/schedules=3) + Phase 21 신설(tasks 문서 양식 정정 — 부록 → 인라인, 파일 rename, 팀명 일괄, 가이드 3종 문서이력 위치, CHANGES md 신설)
+
+### v5.0_260503 (작성자: @youminsu0523 / branch: MS)
+- Phase 18~20 신설: ML 후처리 파이프라인 (R19~R23) / Swagger·운영 가드 (R24) / Mockup→DB 시드 (R25)
+- 18 모델 → 19 모델, 11 alembic 리비전 → 12 리비전, 60+ 엔드포인트 → 63+ (employee 3 추가)
 
 ### v4.0_260427 (작성자: @youminsu0523 / branch: MS)
 - 전면 재작성: git log 기반 12 Phase 상세 기록

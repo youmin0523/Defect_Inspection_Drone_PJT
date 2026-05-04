@@ -68,6 +68,26 @@ class DefectLogCreate(BaseModel):
     frame_id: Optional[int] = None
     raw_payload: Optional[dict] = None
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "area": "A",
+                "category_code": "A-01",
+                "defect_type": "벽체 균열",
+                "severity": "HIGH",
+                "confidence": 0.87,
+                "defect_source": "yolo_thermal",
+                "defect_class": "Crack",
+                "defect_class_display_en": "Crack",
+                "defect_class_display_ko": "균열",
+                "bbox": {"x": 0.32, "y": 0.45, "w": 0.18, "h": 0.12},
+                "lidar_position": {"x": 2.4, "y": 1.1, "z": 1.5},
+                "thermal_data": {"max": 28.4, "min": 22.1, "avg": 25.0},
+                "frame_id": 1024,
+            },
+        },
+    }
+
 
 # ── 응답 스키마 ──────────────────────────────
 class DefectLogResponse(BaseModel):

@@ -24,6 +24,7 @@ from app.models.floorplan import Floorplan  # noqa: F401
 
 # ── 현장 관리 ────────────────────────────────
 from app.models.site import Site  # noqa: F401
+from app.models.inspection_schedule import InspectionSchedule  # noqa: F401
 
 # ── 보고서 ───────────────────────────────────
 from app.models.report import Report  # noqa: F401
@@ -56,6 +57,7 @@ __all__ = [
     "Floorplan",
     # 현장 관리
     "Site",
+    "InspectionSchedule",
     # 보고서
     "Report",
     # 알림

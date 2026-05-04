@@ -31,6 +31,7 @@ torchvision
 ultralytics>=8.3.0
 anomalib
 onnxruntime
+ensemble-boxes  # multi-checkpoint WBF (M3/M2 0.85 mAP 도달 핵심)
 
 # ── Hardware ───────────────────────────────
 pyserial

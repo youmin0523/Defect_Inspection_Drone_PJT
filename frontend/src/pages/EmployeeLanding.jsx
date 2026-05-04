@@ -19,6 +19,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import axios from 'axios'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -53,42 +54,22 @@ import NotificationDropdown from '../components/notification/NotificationDropdow
 import NOTIFICATION_CATEGORIES from '../constants/notificationCategories.js'
 
 /* ──────────────────────────────────────────────────────────────
-   상수: 목업 데이터 (DB 연결 시 API 훅으로 교체)
+   상수
    ────────────────────────────────────────────────────────────── */
-
-// 이번 달 누적 통계 (목업) — `/api/v1/employee/kpi/monthly` 같은 엔드포인트로 교체 예정
-const MOCK_MONTHLY_KPI = {
-  inspectionsCompleted: 42,
-  reportsPublished: 38,
-  averageFlightMinutes: 23,
-}
-
-// 오늘 일정 — `/api/v1/employee/schedule/today` 로 교체 예정
-const MOCK_TODAY_SCHEDULE = [
-  { id: 's1', time: '09:00', site: '송파 헬리오시티 102동 1501호', status: 'upcoming', operator: '유민수' },
-  { id: 's2', time: '14:00', site: '잠실 리센츠 303동 503호',      status: 'upcoming', operator: '김다연' },
-  { id: 's3', time: '16:30', site: '잠실 엘스 208동 2102호',       status: 'upcoming', operator: '박지훈' },
-]
-
-// 팀원 현황 및 담당 현장 — `/api/v1/teams/assignments` 로 교체 예정
-const MOCK_TEAM_MEMBERS = [
-  { id: 't1', name: '유민수', role: '과장',  team: '안전진단 1팀', assignedSite: '송파 헬리오시티 1501호', status: 'office',  initials: 'YS' },
-  { id: 't2', name: '김다연', role: '대리',  team: '안전진단 1팀', assignedSite: '잠실 리센츠 503호',      status: 'field',   initials: 'KD' },
-  { id: 't3', name: '박지훈', role: '선임',  team: '안전진단 2팀', assignedSite: '잠실 엘스 2102호',       status: 'field',   initials: 'PJ' },
-  { id: 't4', name: '이서현', role: '사원',  team: '안전진단 2팀', assignedSite: '미배정',                 status: 'standby', initials: 'LS' },
-]
-
-// 최근 활동 — `/api/v1/employee/activities?limit=5` 로 교체 예정
-const MOCK_RECENT_ACTIVITIES = [
-  { id: 'a1', date: '2026-04-15', kind: 'report',    label: '헬리오시티 1402호 점검 보고서 발행',   actor: '유민수' },
-  { id: 'a2', date: '2026-04-15', kind: 'inspection',label: '헬리오시티 1402호 현장 점검 완료',     actor: '유민수' },
-  { id: 'a3', date: '2026-04-14', kind: 'upload',    label: '리센츠 503호 평면도 업로드',           actor: '김다연' },
-  { id: 'a4', date: '2026-04-13', kind: 'schedule',  label: '엘스 2102호 점검 일정 등록',           actor: '박지훈' },
-  { id: 'a5', date: '2026-04-12', kind: 'report',    label: '엘스 1805호 점검 보고서 발행',         actor: '이서현' },
-]
 
 // 요일 한국어 매핑
 const KR_WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
+
+// API 기본 URL (Vite env)
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+
+// KPI 비어있을 때 (API 실패/조직 미배정 등) 0 으로 떨어지지 않게 안전한 fallback.
+// 운영 환경에서는 시드된 데이터가 채워주므로 거의 사용되지 않음.
+const EMPTY_MONTHLY_KPI = {
+  inspectionsCompleted: 0,
+  reportsPublished: 0,
+  averageFlightMinutes: 0,
+}
 
 /* ──────────────────────────────────────────────────────────────
    메인 컴포넌트
@@ -142,6 +123,47 @@ export default function EmployeeLanding() {
 
   useEffect(() => { fetchAll(); fetchUnreadCount() }, [fetchAll, fetchUnreadCount])
 
+  // ── 백엔드 데이터: 오늘 일정 / 월간 KPI / 팀원 / 최근 활동 ──
+  const token = useAuthStore((s) => s.token)
+  const [todaySchedule, setTodaySchedule] = useState([])
+  const [monthlyKpi, setMonthlyKpi] = useState(EMPTY_MONTHLY_KPI)
+  const [teamMembers, setTeamMembers] = useState([])
+  const [recentActivities, setRecentActivities] = useState([])
+
+  useEffect(() => {
+    if (!token) return
+    const headers = { Authorization: `Bearer ${token}` }
+
+    // 4개 API 병렬 호출. 하나가 실패해도 나머지는 표시.
+    axios.get(`${API_BASE}/api/v1/employee/schedule/today`, { headers })
+      .then((r) => setTodaySchedule(r.data || []))
+      .catch(() => setTodaySchedule([]))
+
+    axios.get(`${API_BASE}/api/v1/employee/kpi/monthly`, { headers })
+      .then((r) => setMonthlyKpi({
+        inspectionsCompleted: r.data?.inspections_completed ?? 0,
+        reportsPublished: r.data?.reports_published ?? 0,
+        averageFlightMinutes: r.data?.average_flight_minutes ?? 0,
+      }))
+      .catch(() => setMonthlyKpi(EMPTY_MONTHLY_KPI))
+
+    axios.get(`${API_BASE}/api/v1/employee/activities`, { headers, params: { limit: 5 } })
+      .then((r) => setRecentActivities(r.data || []))
+      .catch(() => setRecentActivities([]))
+
+    axios.get(`${API_BASE}/api/v1/organizations/members`, { headers })
+      .then((r) => setTeamMembers((r.data?.members || []).map((m) => ({
+        id: m.user_id,
+        name: m.name,
+        role: m.position || m.role,
+        team: m.department || '미배정',
+        assignedSite: '—',  // 별도 endpoint 신설 시 보강
+        status: m.status === 'active' ? 'office' : 'standby',
+        initials: (m.initials || m.name?.slice(0, 2) || '??').toUpperCase(),
+      }))))
+      .catch(() => setTeamMembers([]))
+  }, [token])
+
   // 현재 세션 컨텍스트 요약 문구 ("진행 중 세션 없음" / "송파 헬리오시티 · Level 3 · 비행 중")
   const sessionContextLabel = useMemo(() => {
     if (!siteName) return '진행 중인 세션이 없습니다.'
@@ -160,7 +182,7 @@ export default function EmployeeLanding() {
         operatorName={operatorName}
         dateStr={dateStr}
         weekdayLabel={weekdayLabel}
-        todayCount={MOCK_TODAY_SCHEDULE.length}
+        todayCount={todaySchedule.length}
         pendingReports={unreadCount}
         sessionContextLabel={sessionContextLabel}
       />
@@ -169,20 +191,20 @@ export default function EmployeeLanding() {
         <QuickActionsSection />
 
         <KPISection
-          monthlyKpi={MOCK_MONTHLY_KPI}
+          monthlyKpi={monthlyKpi}
           currentDefectCount={defects.length}
           currentHighSeverity={severityCounts.HIGH}
           currentFlightMinutes={currentFlightMinutes}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <TodayScheduleSection schedules={MOCK_TODAY_SCHEDULE} />
+          <TodayScheduleSection schedules={todaySchedule} />
           <NotificationsSection />
         </div>
 
-        <TeamAssignmentsSection members={MOCK_TEAM_MEMBERS} />
+        <TeamAssignmentsSection members={teamMembers} />
 
-        <RecentActivitySection activities={MOCK_RECENT_ACTIVITIES} />
+        <RecentActivitySection activities={recentActivities} />
       </main>
 
     </div>

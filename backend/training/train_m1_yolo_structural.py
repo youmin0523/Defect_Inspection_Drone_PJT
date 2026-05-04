@@ -35,6 +35,17 @@ WEIGHTS_DIR = Path("../models_weights")
 OUTPUT_NAME = "m1_yolo_structural"
 
 
+def find_weights(project: str, name: str, prefer: str = "last.pt") -> str:
+    """ultralytics가 저장한 weights 경로를 절대경로로 찾기."""
+    import glob
+    root = Path(__file__).resolve().parent.parent.parent
+    pattern = f"**/{name}/weights/{prefer}"
+    for search_root in [Path("."), Path(".."), root]:
+        for g in glob.glob(str(search_root / pattern), recursive=True):
+            return str(Path(g).resolve())
+    raise FileNotFoundError(f"weights not found: {pattern}")
+
+
 def train():
     """2-Phase 학습: backbone freeze → full unfreeze."""
     print("=" * 60)
@@ -59,7 +70,9 @@ def train():
     print("[M1-YOLO] Phase 2: Full Unfreeze (190 epochs)")
     print("=" * 60)
 
-    model = YOLO(f"{PROJECT}/phase1_freeze/weights/last.pt")
+    phase1_weights = find_weights(PROJECT, "phase1_freeze", "last.pt")
+    print(f"[M1-YOLO] Phase 2 시작: {phase1_weights}")
+    model = YOLO(phase1_weights)
     model.train(
         data=DATA_YAML,
         epochs=EPOCHS_PHASE2,
@@ -71,7 +84,6 @@ def train():
         patience=PATIENCE,
         warmup_epochs=WARMUP_EPOCHS,
         close_mosaic=CLOSE_MOSAIC,
-        # 증강
         hsv_h=0.015,
         hsv_s=0.5,
         hsv_v=0.4,
@@ -84,7 +96,7 @@ def train():
         fliplr=0.5,
         mosaic=1.0,
         mixup=0.1,
-        erasing=0.3,
+        erasing=0.0,  # seg 라벨 혼합 데이터 호환
         project=PROJECT,
         name="phase2_full",
         exist_ok=True,
@@ -94,8 +106,8 @@ def train():
     print("[M1-YOLO] ONNX 변환")
     print("=" * 60)
 
-    best_path = f"{PROJECT}/phase2_full/weights/best.pt"
-    export_to_onnx(best_path)
+    phase2_best = find_weights(PROJECT, "phase2_full", "best.pt")
+    export_to_onnx(phase2_best)
 
 
 def export_to_onnx(pt_path: str):
@@ -106,7 +118,7 @@ def export_to_onnx(pt_path: str):
         opset=17,
         dynamic=True,
         simplify=True,
-        half=False,      # FP32 (FP16은 배포 시 별도 양자화)
+        half=False,
     )
 
     onnx_src = pt_path.replace(".pt", ".onnx")

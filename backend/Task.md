@@ -200,6 +200,19 @@
 
 ## Revision History
 
+### v5.1_260503 (작성자: @youminsu0523 / branch: MS)
+- **R26 후속 정정**: tasks 문서(API 명세서 v1.1→v1.2, ERD v1.0→v1.1) 부록을 본문 인라인 위치(4.17 Employee API / 2.1.5 Swagger securityScheme / 8.5 운영 가드 / 4.19 inspection_schedules / 5장 관계 / 6.1 인덱스 / 13장 결론)로 분산 + 파일명 rename + 팀명 `다마코더 → AeroInspect`. 가이드 3종 문서이력 위치 정정.
+- **DB 시드 실 적용**: `alembic merge` 로 분기 head 2개(`0003`, `i2c3d4e5f6a7`) → `89b53c16de85` 병합 → `upgrade head` 성공. `defect_logs` 의 alembic_version 과 실제 컬럼 inconsistent (image_crop_path/track_id/accumulated_conf/tier_executed/deviation_*/delta_temperature/ensemble_boosted/defect_class_display_*/) 10건 `ADD COLUMN IF NOT EXISTS` 일괄 보정. `seed_demo_data --reset` 결과: 1 org / 3 depts / 2 users(백승희·오희진) / 8 sites / **315 defects (HIGH 77)** / 12 reports / 3 today schedules (잠실 리센츠 14:00 KST 백승희 시드 검증).
+
+### v5.0_260503 (작성자: @youminsu0523 / branch: MS)
+- **R19 (4/28)** Recall 후처리 파이프라인 신설 — TemporalFilter Noisy-OR / ByteTrack ObjectTracker / SAHI TiledInference / ActiveLearning Hard Example Mining / DefectPersistence + 단위 테스트 4종. `app/models/defect.py`에 track_id/accumulated_conf/tier_executed 컬럼 추가.
+- **R20 (4/28~4/30)** M1~M5 학습 스크립트 일괄 보강 + 데이터셋 빌더 6종 (compress_m1, build_m4_context, convert_ade20k, build_m5v2, auto_run_m4v2, build_furniture_aware).
+- **R21 (5/2)** ONNX inference + TTA 후처리, furniture_gate / geometric_gate 신설 (가구 위 false positive 차단, 수직수평 편차 검증) + 단위 테스트.
+- **R22 (5/3 새벽)** 통합 평가 파이프라인 정착 — dry_run_full_pipeline / postprocess_ablation / evaluate_integrated. detection schema 확장.
+- **R23 (5/3 오후)** 후처리 강도 정책 정착 — postprocess_config.yaml 단일 소스, ensemble + furniture_gate, evaluate_ultralytics_val + evaluate_max_boost 측정. DEPLOYMENT_GUIDE 작성.
+- **R24 (5/3 본 세션)** Swagger Phase 1~3 — main.py에 HTTPBearer(bearerFormat=JWT)/AIWebhookSecret 보안 스키마 명시 등록, 17개 tags_metadata, persistAuthorization. PROTECTED/PUBLIC/WEBHOOK 공통 responses(401/403). schemas/common.py 신규. user/site/defect schema에 example 추가. config.py/init_db.py에 `APP_ENV=production` 가드 (placeholder secret 차단 + create_all 자동 스킵, alembic 책임 분리). `.env.example` APP_ENV·AI_WEBHOOK_SECRET·PUSH_PROVIDER·OAUTH_REDIRECT_BASE 보강.
+- **R25 (5/3 본 세션)** InspectionSchedule 모델 + alembic migration `i2c3d4e5f6a7` 신규. `/api/v1/employee` 라우터(schedule/today + kpi/monthly + activities) 신규 — 조직 단위 격리. `scripts/seed_demo_data.py` 신설: 조직(DRONE INSPECT 데모) + 부서 3 + 사용자(백승희/오희진) + 현장 8 + 하자 25~60건/현장 + 보고서 3~5건/완료현장 + 오늘 일정 3건(09:00 헬리오시티/14:00 잠실 리센츠 백승희/16:30 잠실 엘스 오희진) + 알림 8종. idempotent + APP_ENV 가드 + `--reset`/`--force-prod` 옵션. router.py에 employee 등록.
+
 ### v4.0_260427 (작성자: @youminsu0523 / branch: MS)
 - 전면 재작성: git log 기반 @youminsu0523 + @Hijin554 10일간 백엔드 작업 상세 기록
 - 각 버전별 변경 파일 수, 함수명/클래스명/API 엔드포인트/DB 컬럼/스키마/테스트 상세
