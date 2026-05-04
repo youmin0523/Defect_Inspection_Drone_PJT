@@ -8,8 +8,19 @@
 
 import { useState } from 'react'
 import { FileText, Download, X } from 'lucide-react'
+import { downloadMessageFile } from '../../api/chatApi.js'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+
+/** blob 다운로드 헬퍼 호출 — 실패 시 alert 으로만 통지 (UI 차단 방지) */
+async function triggerDownload(messageId, fallbackName) {
+  try {
+    await downloadMessageFile(messageId, fallbackName)
+  } catch (err) {
+    console.error('파일 다운로드 실패', err)
+    alert('파일 다운로드에 실패했습니다.')
+  }
+}
 
 function getCurrentUserId() {
   const stored = JSON.parse(localStorage.getItem('user') || 'null')
@@ -22,7 +33,12 @@ function formatTime(ts) {
 }
 
 /** 이미지 모달 뷰어 */
-function ImageModal({ src, alt, onClose }) {
+function ImageModal({ src, alt, messageId, onClose }) {
+  const handleDownload = (e) => {
+    e.stopPropagation()
+    triggerDownload(messageId, alt)
+  }
+
   return (
     <div
       className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center"
@@ -32,20 +48,20 @@ function ImageModal({ src, alt, onClose }) {
       <button
         onClick={onClose}
         className="absolute top-4 right-4 p-2 bg-black/50 hover:bg-black/70 text-white rounded-full transition z-10"
+        title="닫기"
       >
         <X size={24} />
       </button>
 
-      {/* 다운로드 버튼 */}
-      <a
-        href={src}
-        download={alt}
-        onClick={(e) => e.stopPropagation()}
+      {/* 다운로드 버튼 — same-origin blob 으로 받아 즉시 로컬 저장 */}
+      <button
+        type="button"
+        onClick={handleDownload}
         className="absolute top-4 right-16 p-2 bg-black/50 hover:bg-black/70 text-white rounded-full transition z-10"
         title="다운로드"
       >
         <Download size={24} />
-      </a>
+      </button>
 
       {/* 이미지 */}
       <img
@@ -74,7 +90,7 @@ function FileAttachment({ message, isMine, onImageClick }) {
     return (
       <button
         type="button"
-        onClick={() => onImageClick(fullUrl, message.file_name)}
+        onClick={() => onImageClick(fullUrl, message.file_name, message.id)}
         className="block mb-1 cursor-pointer"
       >
         <img
@@ -87,17 +103,18 @@ function FileAttachment({ message, isMine, onImageClick }) {
   }
 
   return (
-    <a
-      href={fullUrl}
-      download={message.file_name}
-      className={`flex items-center gap-2 px-3 py-2 rounded-lg mb-1 transition ${
+    <button
+      type="button"
+      onClick={() => triggerDownload(message.id, message.file_name)}
+      className={`flex items-center gap-2 px-3 py-2 rounded-lg mb-1 transition w-full text-left ${
         isMine ? 'bg-yellow-400/30 hover:bg-yellow-400/50' : 'bg-gray-100 hover:bg-gray-200'
       }`}
+      title="다운로드"
     >
       <FileText size={18} className="text-gray-500 shrink-0" />
       <span className="text-sm text-blue-600 truncate max-w-[180px]">{message.file_name}</span>
       <Download size={14} className="text-gray-400 shrink-0 ml-auto" />
-    </a>
+    </button>
   )
 }
 
@@ -133,14 +150,19 @@ export default function MessageBubble({ message, showAvatar }) {
   const isMine = message.sender_id === getCurrentUserId()
   const [modalImage, setModalImage] = useState(null)
 
-  const handleImageClick = (src, name) => setModalImage({ src, name })
+  const handleImageClick = (src, name, id) => setModalImage({ src, name, id })
   const closeModal = () => setModalImage(null)
 
   return (
     <>
       {/* 이미지 모달 */}
       {modalImage && (
-        <ImageModal src={modalImage.src} alt={modalImage.name} onClose={closeModal} />
+        <ImageModal
+          src={modalImage.src}
+          alt={modalImage.name}
+          messageId={modalImage.id}
+          onClose={closeModal}
+        />
       )}
 
       {isMine ? (

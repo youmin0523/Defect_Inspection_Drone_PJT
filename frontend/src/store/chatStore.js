@@ -27,10 +27,12 @@ function getCurrentUser() {
 }
 
 const useChatStore = create((set, get) => ({
+// //* [Modified Code] 대화방 전환 시 로딩 지연(깜빡임) 완전 제거를 위한 메모리 캐싱 변수 추가
   // State
   conversations: [],
   activeConversationId: null,
   messages: [],
+  messageCache: {}, // 캐시 메모리
   unreadTotal: 0,
   unreadPerConv: {},
   loading: false,
@@ -55,24 +57,60 @@ const useChatStore = create((set, get) => ({
     }
   },
 
-  /** 대화방 선택 → 메시지 로드 + 읽음 처리 + 해당 대화의 채팅 알림 일괄 읽음 */
+  // //! [Original Code] 메시지 조회와 읽음 처리를 병렬 대기(Promise.all)하여 로딩시간 증가
+  // selectConversation: async (convId) => {
+  //   set({ activeConversationId: convId, messagesLoading: true })
+  //   // 알림 벨 안의 해당 대화방 채팅 알림도 같이 읽음 처리 (UX 일관성)
+  //   useNotificationStore.getState().markChatNotificationsReadByConversation(convId)
+  //   try {
+  //     const [msgs] = await Promise.all([
+  //       getMessages(convId),
+  //       markConversationRead(convId),
+  //     ])
+  //     set({ messages: msgs, messagesLoading: false })
+  //     // 읽음 처리 후 미읽음 카운트만 갱신 (비동기, UI 블로킹 안 함)
+  //     getUnreadCounts().then(({ total, per_conversation }) =>
+  //       set({ unreadTotal: total, unreadPerConv: per_conversation || {} })
+  //     ).catch(() => {})
+  //   } catch (err) {
+  //     set({ error: err.message, messagesLoading: false })
+  //   }
+  // },
+
+  // //* [Modified Code] 캐시를 사전 조회하여 빈틈없이 메시지를 그리고(Zero-Delay), 새 데이터는 Background Fetch로 교체
   selectConversation: async (convId) => {
-    set({ activeConversationId: convId, messagesLoading: true })
-    // 알림 벨 안의 해당 대화방 채팅 알림도 같이 읽음 처리 (UX 일관성)
+    const cachedMsgs = get().messageCache[convId] || []
+    
+    // 캐시가 있으면 로딩 없이 즉시 렌더링, 없으면 초반 로딩만 표출 (깜빡임 최소화)
+    set({ 
+      activeConversationId: convId, 
+      messages: cachedMsgs, 
+      messagesLoading: cachedMsgs.length === 0 
+    })
+    
     useNotificationStore.getState().markChatNotificationsReadByConversation(convId)
-    try {
-      const [msgs] = await Promise.all([
-        getMessages(convId),
-        markConversationRead(convId),
-      ])
-      set({ messages: msgs, messagesLoading: false })
-      // 읽음 처리 후 미읽음 카운트만 갱신 (비동기, UI 블로킹 안 함)
-      getUnreadCounts().then(({ total, per_conversation }) =>
+    
+    // 1. 메시지 백그라운드 갱신 및 캐시 최신화
+    getMessages(convId)
+      .then((msgs) => {
+        set((s) => ({ messageCache: { ...s.messageCache, [convId]: msgs } }))
+        if (get().activeConversationId === convId) {
+          set({ messages: msgs, messagesLoading: false })
+        }
+      })
+      .catch((err) => {
+        if (get().activeConversationId === convId) {
+          set({ error: err.message, messagesLoading: false })
+        }
+      })
+
+    // 2. 서버 측 읽음 처리 및 카운트 갱신 (UI 블로킹 없음)
+    markConversationRead(convId)
+      .then(() => getUnreadCounts())
+      .then(({ total, per_conversation }) => {
         set({ unreadTotal: total, unreadPerConv: per_conversation || {} })
-      ).catch(() => {})
-    } catch (err) {
-      set({ error: err.message, messagesLoading: false })
-    }
+      })
+      .catch(() => {})
   },
 
   /** 메시지 전송 (텍스트 / 파일 / 텍스트+파일) */

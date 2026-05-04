@@ -27,20 +27,17 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
 
-NUM_CLASSES = 5
+NUM_CLASSES = 2   # 26K crop: surface_defect, baseboard_damage
 CLASS_NAMES = [
-    "wallpaper_seam",       # C-01
-    "wallpaper_bubble",     # C-02
-    "paint_stain",          # C-03
-    "scratch",              # C-04
-    "baseboard_damage",     # C-05
+    "baseboard_damage",     # C-05 (ImageFolder 알파벳순)
+    "surface_defect",       # C-01~C-04 통합
 ]
 INPUT_SIZE = 224
-BATCH_SIZE = 32
+BATCH_SIZE = 8   # M1-YOLO와 GPU 공유 (여유 1.4GB)
 EPOCHS = 80
 LR = 1e-4
 
-DATA_DIR = Path("datasets/surface_crops")
+DATA_DIR = Path("datasets/surface_crops_v2")  # 26K crop
 WEIGHTS_DIR = Path("../models_weights")
 OUTPUT_NAME = "m2_resnet_surface_classifier"
 
@@ -82,14 +79,14 @@ def train():
     val_dataset = datasets.ImageFolder(DATA_DIR / "val", val_transforms)
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True,
-                              num_workers=4, pin_memory=True)
+                              num_workers=0, pin_memory=(device.type == "cuda"))
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False,
-                            num_workers=4, pin_memory=True)
+                            num_workers=0, pin_memory=(device.type == "cuda"))
 
     model = build_model().to(device)
 
-    # 도배 이음매/들뜸에 가중치 높임 (MED severity, 놓치면 안 됨)
-    class_weights = torch.tensor([1.2, 1.3, 1.0, 1.0, 1.0], dtype=torch.float32).to(device)
+    # baseboard(소수)에 높은 가중치
+    class_weights = torch.tensor([2.0, 1.0], dtype=torch.float32).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-6)

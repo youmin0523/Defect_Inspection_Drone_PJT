@@ -29,10 +29,9 @@ export const CHAT_FILTER_TABS = [
 ]
 
 export const CHAT_TEAM_MEMBERS = [
-  { id: 't1', name: '유민수', role: '과장', team: '안전진단 1팀', status: 'online',  initials: 'YS' },
-  { id: 't2', name: '김다연', role: '대리', team: '안전진단 1팀', status: 'online',  initials: 'KD' },
-  { id: 't3', name: '박지훈', role: '선임', team: '안전진단 2팀', status: 'away',    initials: 'PJ' },
-  { id: 't4', name: '이서현', role: '사원', team: '안전진단 2팀', status: 'offline', initials: 'LS' },
+  { id: 't1', name: '유민수', role: '과장', team: '안전진단 1팀', status: 'online', initials: 'YS' },
+  { id: 't2', name: '백승희', role: '대리', team: '안전진단 1팀', status: 'online', initials: 'BS' },
+  { id: 't3', name: '오희진', role: '대리', team: '안전진단 1팀', status: 'away',   initials: 'OH' },
 ]
 
 /** Phase 1 mock 로그인 사용자 — 백엔드 연결 시 authStore.user 로 교체 */

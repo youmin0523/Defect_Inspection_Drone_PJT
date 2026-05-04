@@ -11,9 +11,8 @@ import { BUILDING_TYPES, SITE_STATUS, CLIENT_TYPES, CLIENT_TYPE_MAP, INSPECTION_
 
 const MOCK_TEAM = [
   { id: 't1', name: '유민수', role: '과장' },
-  { id: 't2', name: '김다연', role: '대리' },
-  { id: 't3', name: '이준혁', role: '차장' },
-  { id: 't4', name: '박서연', role: '사원' },
+  { id: 't2', name: '백승희', role: '대리' },
+  { id: 't3', name: '오희진', role: '대리' },
 ]
 
 const INITIAL = {

@@ -239,6 +239,11 @@ class ONNXResNetClassifier:
     ) -> Tuple[str, float, List[Tuple[str, float]]]:
         """
         ROI 크롭 분류 → (top1_class, top1_conf, top3_list).
+
+        모델의 output class 수가 self.class_names보다 많은 경우
+        (예: 모델은 3 클래스 출력인데 매핑은 1 클래스만 제공) 안전 처리:
+        - 매핑된 인덱스만 추려서 top3 구성
+        - class_names 범위 밖 인덱스는 'unknown_<idx>' 폴백
         """
         blob = self.preprocess(roi_bgr)
         logits = self.session.run([self.output_name], {self.input_name: blob})[0][0]
@@ -247,10 +252,17 @@ class ONNXResNetClassifier:
         exp_logits = np.exp(logits - logits.max())
         probs = exp_logits / exp_logits.sum()
 
-        top3_idx = probs.argsort()[::-1][:3]
-        top3 = [(self.class_names[i], float(probs[i])) for i in top3_idx]
+        n_classes_available = len(self.class_names)
+        n_top = min(3, len(probs))
+        top_idx = probs.argsort()[::-1][:n_top]
+        top: List[Tuple[str, float]] = []
+        for i in top_idx:
+            if i < n_classes_available:
+                top.append((self.class_names[int(i)], float(probs[i])))
+            else:
+                top.append((f"unknown_class_{int(i)}", float(probs[i])))
 
-        return top3[0][0], top3[0][1], top3
+        return top[0][0], top[0][1], top
 
 
 # ═══════════════════════════════════════════════

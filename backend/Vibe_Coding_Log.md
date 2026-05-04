@@ -1588,3 +1588,559 @@ API 시그니처 변경에 따른 Store 수정:
 | `backend/training/download_thermal_building.py` | Roboflow 기반 열화상 데이터 스크래핑 및 클래스 맵핑 모듈 |
 | `backend/training/retrain_m1_v4s_run.py` | YOLOv8s 리트레이닝 스크립트 및 ONNX 최적화 |
 | `backend/app/config.py` | WebSocket Heartbeat 변수 최적화 |
+
+---
+
+## 📅 2026-04-28 — 채팅 첨부 mock 파일 placeholder 생성 스크립트
+
+- 작성자 (Who): @unknownName-15
+- 작성 일자 (When): 2026-04-28
+- 작업 브랜치: `SH`
+> **목표**: 채팅 메시지에 첨부된 이미지가 화면에 안 뜨고 다운로드 시 "not found" 가 뜨던 문제 1차 해결 — 시드 데이터의 file_url 이 가리키는 실제 파일을 디스크에 만들어 준다.
+
+### ⏱ 증상 진단
+
+- **현상**: DM 의 "A동_외벽_균열탐지_결과.jpg" 등 첨부 이미지가 채팅 말풍선에 깨진 형태로 뜨고, 다운로드 버튼 클릭 시 404 ("not found") 발생.
+- **원인**: `backend/scripts/seed_mock_chats.py` 가 DB 의 `messages.file_url` 에 `/uploads/chat/mock_*.jpg` `mock_*.pdf` `mock_*.xlsx` 9 개 경로를 시드하지만 실제 파일은 만들지 않음 → `app.mount("/uploads", StaticFiles(...))` 가 파일을 못 찾고 404 반환 → `<img>` 깨지고 다운로드도 실패.
+- **추가 잠재 이슈** (다음 작업 단계 B·C 로 분리): cross-origin 환경에서 `<a download>` 속성 무시, `StaticFiles` 가 `Content-Disposition` 미설정으로 한글 파일명 손실. 이번 커밋에서는 시드 mock 파일 placeholder 만 우선 채워 화면 렌더 확인이 목표.
+
+### ⏱ 해결: placeholder 생성 스크립트 신규
+
+- **신규 파일**: `backend/scripts/generate_mock_chat_files.py`
+  - 이미지 5종 (`mock_crack_detection.jpg` 외): PIL 로 라벨 텍스트 + 격자 패턴 placeholder JPG (800x560) 생성. Windows 한글 폰트(`malgun.ttf`) 자동 탐색.
+  - PDF 3종 (`mock_report_march.pdf` 외): handcrafted 최소 유효 PDF 1.4 (Catalog/Pages/Page/Font/Contents 5 오브젝트 + xref). 외부 라이브러리 없이 ASCII 라벨 한 줄 표시.
+  - XLSX 1종 (`mock_defect_data.xlsx`): `openpyxl` 미설치 환경 대응으로 `zipfile` stdlib 만 사용해 최소 유효 워크북([Content_Types].xml + rels + workbook.xml + sheet1.xml + sharedStrings.xml) 직접 작성.
+- **실행**: `cd backend && python -m scripts.generate_mock_chat_files` → `backend/uploads/chat/` 에 9 개 파일 생성.
+
+### 🔗 변경 파일 목록 (1개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `backend/scripts/generate_mock_chat_files.py` | 신규 — 시드 mock 첨부파일을 placeholder JPG/PDF/XLSX 로 생성하는 일회용 스크립트 |
+
+### 📐 설계 결정 사항
+
+- **시드 스크립트(`seed_mock_chats.py`) 직접 수정 vs 별도 스크립트**: 별도 스크립트로 분리. 시드는 DB 만 다루고 파일 생성은 독립적으로 재실행 가능해야 디버깅 편함. 기존 시드 데이터를 건드리지 않고 placeholder 만 보충 가능.
+- **PDF/XLSX 라이브러리 미사용**: reportlab/openpyxl 추가 의존성 도입을 피하기 위해 stdlib + 핸드크래프트 접근. PDF 는 한글 폰트 임베드가 복잡해 라벨은 ASCII 로만 표기 (placeholder 목적이라 충분).
+- **다음 단계 (B·C)**: 이번 작업으로 화면 렌더가 정상화되면 (1) 백엔드에 `GET /api/v1/chat/messages/{id}/download` 추가하여 `FileResponse(filename=...)` 로 RFC 5987 한글 파일명 보존, (2) 프런트 `MessageBubble.jsx` 의 다운로드를 axios blob + `URL.createObjectURL` 방식으로 전환하여 cross-origin `download` 무시 문제 우회 — 두 단계로 나눠 진행 예정.
+
+---
+
+## 📅 2026-04-28 — 채팅 첨부 다운로드 엔드포인트 추가 (Content-Disposition + 권한 체크)
+
+> **작업자**: @codelabprovide1 (Claude Opus 4.7 바이브코딩)
+> **목표**: A 단계 placeholder 로 이미지는 정상 렌더되지만, 다운로드 버튼 클릭 시 cross-origin `<a download>` 무시로 새 탭에 이미지만 뜨던 문제 해결. 프런트가 blob 으로 받아 즉시 저장하도록 인증된 다운로드 엔드포인트 신설.
+
+### ⏱ `GET /api/v1/chat/messages/{message_id}/download` 신규
+
+- **동작**: `FileResponse(path, filename=msg.file_name, media_type=msg.file_content_type)` 로 응답. FastAPI 가 RFC 5987 형식(`filename*=UTF-8''<percent-encoded>`) 으로 한글 파일명을 자동 인코딩 → 다운로드 시 원본 한글/영문 파일명 그대로 저장됨.
+- **권한**: 메시지 → `conversation_id` → `ConversationMember` 조회로 현재 사용자가 해당 대화방 참여자인지 확인. 미참여자에게는 403.
+- **path traversal 방어**: `msg.file_url` 이 `/uploads/chat/` prefix 로 시작하는지, saved_name 에 `/` `\` `..` 가 없는지, 절대경로 정규화 후 `CHAT_UPLOAD_DIR` 하위인지 3중 검증. DB 값을 신뢰하지 않고 디스크 경로 합성을 엄격하게 제한.
+- **404 케이스**: 메시지에 `file_url` 이 없거나 디스크에 실제 파일이 없으면 404. (StaticFiles 와 분리해 명시적 에러 메시지 노출.)
+
+### 🔗 변경 파일 목록 (1개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `backend/app/api/chat.py` | `FileResponse` import + `download_message_file` 핸들러 신규 (권한 체크 + path traversal 방어 + RFC 5987 파일명 헤더) |
+
+### 📐 설계 결정 사항
+
+- **별도 엔드포인트 vs StaticFiles 응답 가공**: StaticFiles 는 응답 헤더를 커스터마이징하기 까다롭고 인증 미들웨어를 끼우기 어려움. 별도 엔드포인트로 분리하면 (a) JWT 권한 체크, (b) Content-Disposition 헤더, (c) 향후 audit log/추적까지 한 자리에서 처리 가능.
+- **이미지 인라인 표시는 기존 `/uploads/...` 유지**: `<img src>` 인증을 강제하면 마운트마다 토큰 헤더를 못 실어서 깨짐. 다운로드만 인증 경로로 분리하는 게 비용 대비 효과 큼. 추후 비공개 첨부가 필요해지면 `/uploads/chat` 마운트를 닫고 같은 다운로드 라우트로 일원화하면 됨.
+- **path traversal 검증 3중**: prefix 검사 + 구분자 거부 + 절대경로 정규화 후 root 비교. DB 변조 시나리오까지 가정해 보안 깊이 확보 (`os.path.abspath` 만으로는 심볼릭 링크 우회 가능성이 있어 prefix/문자 검사 병행).
+
+---
+
+## 🔬 2026-04-28~29 — Recall 극대화 추론 파이프라인 + 학습 인프라 고도화 (@youminsu0523)
+
+> **작업자**: @youminsu0523 (Claude Opus 바이브코딩)
+> **작업 일자**: 2026-04-28 ~ 2026-04-29
+> **작업 브랜치**: `MS`
+
+### 1️⃣ 프롬프트 / 목표
+> Recall 극대화를 위해 추론 파이프라인에 ByteTrack 객체 추적, IoU 기반 TemporalFilter 고도화, SAHI 타일링 추론, Cross-Model Spatial Boost, Active Learning(Hard Example Mining), 실시간 DB 저장을 추가. 학습 스크립트 전체를 실전 GPU 환경(RTX 5070)에 맞게 보강하고, 자동 순차 학습·야간 학습 파이프라인 구축.
+
+### 2️⃣ 수행된 작업 요약
+
+#### A. 추론 파이프라인 — 신규 서비스 모듈 (4개)
+
+**`app/services/object_tracker.py` (신규)**
+- IoU 기반 프레임 간 하자 추적기 (드론 환경 특화)
+- Kalman filter 대신 순수 IoU 매칭 — 드론 풍압/틸트/접근 비선형 환경에서 더 강건
+- `track_id` 부여 → 프레임 간 동일 물리 하자 식별
+- `min_hits` 이상 탐지된 트랙만 확정(confirmed)으로 보고
+- `max_age` 프레임까지 미탐지 허용 (블러·흔들림 대응)
+- `reconfigure(camera_fps, frame_skip)`로 실제 추론 FPS 기반 동적 max_age 조정
+
+**`app/services/tiled_inference.py` (신규)**
+- SAHI 방식 타일 분할 추론 — 4K 드론 영상에서 소형 하자(크랙, 핀홀) Recall 극대화
+- `generate_tiles()`: overlap_ratio 기반 타일 좌표 생성, 저해상도 1-타일 fallback
+- `tiled_predict()`: 타일별 YOLO 추론 → 좌표 원본 이미지 기준 복원 → cross-tile NMS
+- Tier 3 프레임에서만 선택적 적용 (실시간 예산 보호)
+
+**`app/services/active_learning.py` (신규)**
+- Hard Example Mining — 모델이 불확실해한 프레임 자동 수집
+- 수집 기준: 저신뢰 검출(conf 0.15~0.40), PatchCore high + YOLO miss, Temporal reject
+- `./training/hard_examples/{date}/{model}/` 경로에 YOLO 학습 포맷으로 저장
+- 메모리 버퍼 + 주기적 디스크 flush (save_interval=30초)
+- 기본 비활성화(`HARD_EXAMPLE_ENABLED=False`), 명시적 활성화 필요
+
+**`app/services/defect_persistence.py` (신규)**
+- 실시간 추론 결과 → DefectLog DB 비동기 저장
+- DB 쓰기 실패 시 메모리 버퍼에 보관(최대 1000건) → 주기적 재시도
+- 세션 종료 시 `flush_retry_buffer()`로 잔여 버퍼 소진
+
+#### B. 기존 서비스 고도화
+
+**`app/services/temporal_filter.py` (대규모 리팩토링)**
+- 기존 class 단순 카운트 → IoU 기반 `SpatialBucket` 매칭으로 전면 교체
+- `BufferedDetection` / `SpatialBucket` dataclass 도입
+- Noisy-OR 신뢰도 누적: `1 - Π(1 - conf_i)` — 반복 탐지 시 conf 상승
+- 시간 기반 윈도우 만료(`window_time_sec`) 추가
+- `accumulated_conf` 필드를 보고 결과에 부여
+
+**`app/services/ensemble.py` — Cross-Model Spatial Boost 추가**
+- `cross_model_spatial_boost()`: 서로 다른 모델이 동일 위치를 탐지했을 때 conf 승격 (+0.15)
+- 교차 증거(다른 source의 겹침)로 실제 하자 확률이 높다는 판단 근거
+
+**`app/services/inference_pipeline_20.py` (대규모 확장)**
+- M1/M2/M3 `_run_m*()`: SAHI 타일링 추론 옵션 추가 (`use_tiling` 파라미터)
+- Tier 3에서만 `tiled_predict()` 적용 (소형 하자 Recall↑, 실시간 예산 보호)
+- 2-Stage conf 결합: 곱셈 → `compute_combined_confidence()` (Noisy-OR)로 변경
+- Cross-Model Spatial Boost → Cross-Model NMS 순서로 파이프라인 구성
+- M1-ResNet 클래스 목록 갱신: `["caulking_indicator", "crack_indicator", "moisture_indicator", "structural_damage", "waterproof_defect"]`
+- M3-ResNet 클래스 목록 갱신: `["frame_defect"]`
+- 모델 로드 시 더미 추론(640x640)으로 shape 검증 + 실패 시 graceful skip
+- 필수 모델(M1-YOLO, M2-YOLO) 미로드 시 파이프라인 비활성 + 경고 메시지
+
+**`app/core/stream_inference.py` (대규모 확장)**
+- ByteTrack 추적 → Temporal Filter 오탐 제거 → 브로드캐스트 3단계 파이프라인
+- 3-model 파이프라인과 20종 파이프라인 모두에 추적+필터 적용
+- Hard Example Mining: 추론 루프 내에서 `check_and_collect()` 호출
+- 에러 카운터: 연속 10회 추론 실패 시 경고 출력
+- 세션 시작/종료 시 추적기·필터·마이너 상태 초기화/flush
+- `/health` 응답에 tracker stats, hard_example stats, db_persistence stats 추가
+
+#### C. 모델·DB 확장
+
+**`app/config.py` — 신규 설정값 13개 추가**
+- ByteTrack: `TRACKER_MIN_HITS`, `TRACKER_MAX_AGE`, `TRACKER_IOU_THRESHOLD`
+- TemporalFilter: `TEMPORAL_FILTER_IOU`
+- Hard Example Mining: `HARD_EXAMPLE_ENABLED`, `HARD_EXAMPLE_DIR`, `HARD_EXAMPLE_LOW_CONF_MIN/MAX`, `HARD_EXAMPLE_SAVE_INTERVAL`
+
+**`app/models/defect.py` — DefectLog 확장 컬럼 3개**
+- `track_id` (BigInteger): ByteTrack 추적 ID
+- `accumulated_conf` (Float): 시간 누적 신뢰도 (Noisy-OR)
+- `tier_executed` (BigInteger): 실행 Tier (1/2/3)
+
+**`app/main.py` — `/health` 엔드포인트 고도화**
+- 20종 파이프라인 상태 포함 (로드 여부 + 개별 모델 상태)
+- 활성 파이프라인(`3model` / `20defect`) 표시
+- 필수 모델 미로드 시 HTTP 503 반환 (degraded 상태)
+- stream_worker_stats (tracker, hard_examples, db_persistence) 포함
+
+#### D. 학습 스크립트 보강
+
+**`training/train_m1~m5_*.py` (전체 7개 수정)**
+- `find_weights()` 헬퍼: ultralytics 저장 경로를 절대경로로 동적 탐색 (Phase2 시작 시 Phase1 weights 자동 연결)
+- `erasing=0.0`: seg 라벨 혼합 데이터 호환 (erasing augmentation이 seg 마스크를 깨뜨리는 문제 방지)
+- Windows cp949 stdout 인코딩 문제 방지 (`sys.stdout` UTF-8 래핑)
+
+**`training/eval/evaluate_all.py` (대규모 확장)**
+- IoU 기반 TP/FP 판정으로 정확한 mAP@0.5 계산
+- Per-class Precision/Recall/F1 리포트 생성
+- `_imread_unicode()`: 한글 경로 이미지 로드 지원
+- Windows 인코딩 호환
+
+**`training/augment_missing_classes.py` (신규)**
+- 부족 클래스 데이터 추출/변환: M1 caulking_defect (6.5%→15%+), M2 baseboard_defect (0%→추가)
+- gdrive_raw 폴더에서 원시 데이터 필터링하여 학습 데이터에 추가
+
+**`training/extract_resnet_crops.py` (신규)**
+- YOLO 라벨(bbox)에서 ROI crop → ResNet 학습용 클래스별 폴더 저장
+- M1/M3 ResNet 학습 데이터 자동 생성
+
+**`training/train_all_sequential.py` (신규)**
+- 전체 모델 순차 학습 자동화 (M5→M1~M3 YOLO→M1/M3 ResNet→M4)
+- 모든 로그 `training_log.txt`에 append
+
+**`training/overnight_train.py` (신규)**
+- 밤새 자동 학습 파이프라인
+- 진행 중 모델 완료 대기 → GPU 여유 확보 → 다음 모델 자동 시작
+- 전체 완료 후 `evaluate_all.py` 자동 실행
+
+**`training/monitor.py` + `training/monitor_live.py` (신규)**
+- 학습 상태 실시간 모니터링 유틸리티
+- `monitor.py`: 10분 간격 학습 현황 체크
+- `monitor_live.py`: 학습 출력 파일 실시간 감시 → `training_log.txt`에 타임스탬프 기록
+
+#### E. 단위 테스트 (4개 신규)
+
+| 테스트 파일 | 대상 | 주요 검증 |
+|------------|------|----------|
+| `tests/test_ensemble.py` | Noisy-OR, cross_model_nms, spatial_boost | 결합 신뢰도 계산, NMS 중복 제거, 교차 모델 부스팅 |
+| `tests/test_object_tracker.py` | DefectTracker | track_id 부여, 확정 로직, 미탐지 후 재매칭 |
+| `tests/test_temporal_filter.py` | TemporalFilter | IoU 매칭, Noisy-OR 누적, 투표 로직, 즉시 보고, LiDAR 중복 억제 |
+| `tests/test_tiled_inference.py` | SAHI 타일링 | 타일 좌표 생성, 저해상도 fallback, cross-tile NMS |
+
+### 🔗 변경 파일 목록 (27개)
+
+| 파일 | 변경 유형 |
+|------|----------|
+| `app/config.py` | ByteTrack·TemporalFilter·HardExample 설정값 13개 추가 |
+| `app/core/stream_inference.py` | ByteTrack 추적 + Temporal Filter + HEM + 에러 카운터 통합 |
+| `app/main.py` | `/health` 20종 파이프라인 상태 + 503 반환 + worker stats |
+| `app/models/defect.py` | DefectLog: track_id, accumulated_conf, tier_executed 컬럼 추가 |
+| `app/services/ensemble.py` | `cross_model_spatial_boost()` 신규 |
+| `app/services/inference_pipeline_20.py` | SAHI 타일링 + Noisy-OR conf 결합 + spatial boost + 모델 검증 |
+| `app/services/temporal_filter.py` | IoU SpatialBucket + Noisy-OR 누적 전면 리팩토링 |
+| `app/services/object_tracker.py` | **신규** — IoU 기반 하자 추적기 |
+| `app/services/tiled_inference.py` | **신규** — SAHI 타일 분할 추론 |
+| `app/services/active_learning.py` | **신규** — Hard Example Mining |
+| `app/services/defect_persistence.py` | **신규** — 실시간 DB 비동기 저장 |
+| `training/eval/evaluate_all.py` | IoU 기반 mAP@0.5 + Per-class F1 리포트 |
+| `training/train_m1_yolo_structural.py` | find_weights + erasing=0.0 |
+| `training/train_m1_resnet_crack.py` | find_weights + 인코딩 호환 |
+| `training/train_m2_yolo_surface.py` | find_weights + erasing=0.0 |
+| `training/train_m3_yolo_floor_window.py` | find_weights + erasing=0.0 |
+| `training/train_m3_resnet_floor_window.py` | find_weights + 인코딩 호환 |
+| `training/train_m4_thermal_unet.py` | 인코딩 호환 |
+| `training/train_m5_frame_seg.py` | 인코딩 호환 |
+| `training/augment_missing_classes.py` | **신규** — 부족 클래스 데이터 증강 |
+| `training/extract_resnet_crops.py` | **신규** — YOLO bbox → ResNet crop 추출 |
+| `training/train_all_sequential.py` | **신규** — 전체 모델 순차 학습 자동화 |
+| `training/overnight_train.py` | **신규** — 야간 자동 학습 파이프라인 |
+| `training/monitor.py` | **신규** — 학습 현황 주기적 체크 |
+| `training/monitor_live.py` | **신규** — 학습 출력 실시간 감시 |
+| `tests/test_ensemble.py` | **신규** — 앙상블 함수 단위 테스트 |
+| `tests/test_object_tracker.py` | **신규** — DefectTracker 단위 테스트 |
+| `tests/test_temporal_filter.py` | **신규** — TemporalFilter 단위 테스트 |
+| `tests/test_tiled_inference.py` | **신규** — SAHI 타일링 단위 테스트 |
+
+### 📐 설계 결정 사항
+
+- **IoU 매칭 vs Kalman Filter (ObjectTracker)**: 드론 환경에서 하자는 이미지 좌표 상 비선형 움직임을 보임(풍압, 틸트, 접근/후퇴). Kalman의 등속 가정이 부적합하여 단순 IoU 매칭이 더 강건. supervision ByteTrack은 정적 객체 매칭이 불안정한 것으로 확인되어 자체 구현.
+- **Noisy-OR 신뢰도 누적 (TemporalFilter)**: 단순 max/mean 대신 `1 - Π(1-conf_i)` 사용. 독립 관측을 가정하여 반복 탐지 시 신뢰도가 자연스럽게 1에 수렴하며, 저신뢰 반복 검출도 누적 시 보고 대상이 될 수 있음.
+- **SAHI 타일링 Tier 3 한정**: 타일링은 소형 하자 Recall을 크게 높이지만 추론 비용이 N타일 배로 증가. Tier 3(정밀 검사)에서만 적용하여 실시간 예산을 보호.
+- **conf 결합 방식 변경 (곱셈 → Noisy-OR)**: YOLO conf × ResNet conf는 두 모델 모두 높아야 최종 conf가 유지되어 Recall을 떨어뜨림. Noisy-OR는 한쪽만 높아도 최종 conf가 유지되어 Recall 친화적.
+- **Hard Example Mining 기본 비활성**: 디스크 I/O + 메모리 사용량이 추론 성능에 영향을 줄 수 있으므로 명시적 활성화(`HARD_EXAMPLE_ENABLED=True`)가 필요. 수집 데이터는 YOLO 학습 포맷이라 바로 재학습에 사용 가능.
+- **필수 모델 미로드 시 503**: M1-YOLO + M2-YOLO가 없으면 구조+마감 하자 탐지가 불가능하므로 파이프라인 자체를 비활성화. `/health`에서 503을 반환하여 모니터링 시스템이 즉시 감지.
+
+---
+
+## 🚀 2026-04-29 ~ 05-02 — 학습 v2/v3 Refine·Retrain + Colab/Kaggle 원격 학습 + 가구 인식 데이터셋 + M4 Context 로컬 학습 (@youminsu0523)
+
+> **작업자**: @youminsu0523 (Claude Opus 바이브코딩)
+> **작업 일자**: 2026-04-29 17:52 ~ 2026-05-02 02:14
+> **작업 브랜치**: `MS`
+
+### 1️⃣ 프롬프트 / 목표
+
+> 1. 단일 학습 mAP 자체를 끌어올리는 데 집중. 후처리(TTA/SAHI/앙상블)는 첨가제 — "원재료(모델)가 신선해야". 0.9 솔루션 1순위는 학습 차원.
+> 2. 베이스라인 학습 결과(M1 0.842 / M2 0.794 / M3 0.804 / M5 0.626)를 v2/v3로 끌어올리는 데이터 정제 + 재학습 파이프라인을 만들어줘.
+> 3. RTX 5070 Laptop은 한 모델만 학습 가능 → 동시에 여러 계정 Colab + Kaggle로 분산 학습. 핸드폰으로 야간에 진행 가능하게 만들어줘.
+> 4. M3가 침대/소파 같은 빌트인 가구를 floor/window로 오탐(False Positive)하는 문제 해결 — 가구를 "검사 대상이 아닌 클래스"로 학습시켜라.
+> 5. M4 Thermal U-Net이 데이터셋 라벨 오류로 막혔으니, M4를 "Context 부위 분류(wall/ceiling/floor/window/door)" 모델로 재정의하고 ADE20K 외부 데이터 + 우리 frames/floor_window 통합으로 새로 학습.
+> 6. `M4 학습 끝나면 자동으로 다음 단계 시작`되도록 자동화. "재실행해줘" 한 마디면 last.pt 자동 감지하고 이어서 돌리도록.
+
+### 2️⃣ 진행 라운드 (시각 / 산출물 / 결정 사항)
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R1 | 2026-04-29 17:52 | M2-ResNet crop 추출 — YOLO 2클래스(surface/baseboard) bbox에서 ROI crop, 학습 폴더 자동 분류 | `extract_m2_resnet_crops.py` |
+| R2 | 2026-04-30 07:29 | 전 YOLO 모델 imgsz=960 fine-tune 자동화 (`copy_paste`+`multi_scale`+50ep), 기존 best.pt 자동 탐색 | `finetune_960.py` |
+| R3 | 2026-04-30 07:35~38 | 베이스라인 가중치 패키징 (Drive 업로드용 zip): M5 best.pt(202MB), frames.zip(239MB) | `colab/upload_to_drive/{m5_baseline_best.pt, frames.zip}` |
+| R4 | 2026-04-30 09:22~35 | Colab 원격 학습 노트북 1차 — M5v2/M2 YOLO (계정 A/B 분산, Drive autosave + Resume) | `colab/{m5v2_colab_train.ipynb, m2_yolo_colab_train.ipynb}` |
+| R5 | 2026-04-30 10:22~25 | M1 structural 데이터셋 압축 (32GB → ~6GB, max 1280px / jpg85) + M1-aggressive Colab 학습 노트북 | `compress_m1_dataset.py`, `colab/m1_aggressive_colab_train.ipynb`, `colab/upload_to_drive/structural_compressed/` |
+| R6 | 2026-04-30 10:27~36 | **M4 Thermal U-Net 폐기 → M4 Context (5클래스 부위 분류)로 재정의.** frames(M5)+floor_window(M3) 통합 데이터셋 빌더 + YOLO 학습 스크립트 + ADE20K(5만장) → YOLO bbox 변환 | `build_m4_context_dataset.py`, `train_m4_context_yolo.py`, `convert_ade20k_to_yolo.py` |
+| R7 | 2026-04-30 10:58~11:31 | M5v2_v2 / M1-conservative / M2-aggressive Colab 노트북 추가 (병렬 학습 슬롯 3개 운영) | `colab/{m5v2_v2_colab_train.ipynb, m1_conservative_colab_train.ipynb, m2_aggressive_colab_train.ipynb}` |
+| R8 | 2026-04-30 12:12 | **Active Learning 데이터 정제기** — best.pt로 train 전수 추론, IoU<0.3(잘못된 GT) / conf>0.85 매칭 GT 없음(놓친 GT) / GT 0개+검출 5+(누락 의심) 자동 분류 → `*_refined/` 생성 | `refine_dataset.py` |
+| R9 | 2026-04-30 13:21 | **핸드폰으로 야간 학습 진행 가이드 작성** — 계정 A/B/C별 노트북, 90분 끊김 방지법, T4/A100 예상 시간(7~14h), Drive autosave + Resume 흐름 | `colab/PHONE_GUIDE.md` |
+| R10 | 2026-04-30 13:54 | M5v2_v2 Kaggle 노트북 (Colab 슬롯 부족분 Kaggle T4×2로 보충) | `colab/m5v2_v2_kaggle_train.ipynb` |
+| R11 | 2026-04-30 13:59~14:43 | **Refine + Retrain v2/v3 노트북 시리즈** — M2v2/M3v2/M4v2/M1v3/M5v3 정제 데이터로 재학습 (Drive autosave + Resume + ONNX export 포함, 자동 mAP 비교) | `colab/{m2v2_refine_retrain, m3v2_refine_retrain, m1v3_refine_retrain, m4v2_refine_retrain, m5v3_refine_retrain}.ipynb` |
+| R12 | 2026-04-30 14:42~43 | M3 baseline best.pt + floor_window.zip(1.05GB) 패키징 — M3v2 Colab 학습용 | `colab/upload_to_drive/{m3_baseline_best.pt, floor_window.zip}` |
+| R13 | 2026-04-30 16:09 | **M4 Context 학습 종료 자동 감지 → train_m4v2_local.py 자동 시작** 워처 (5분 간격, 2회 미감지 시 종료 확정, 30초 buffer 후 다음 단계) | `auto_run_m4v2.py` |
+| R14 | 2026-04-30 16:24 | **SAHI 타일 데이터셋 사전 처리** — 1280 이미지를 640×640 타일 4개(overlap 0.2)로 분할, bbox 50% 이상 포함된 것만 유지(8 worker) | `sahi_tile_dataset.py` |
+| R15 | 2026-04-30 16:30 | M1 Plan A (Kaggle 또는 A100 Colab) 노트북 — A100 8~10h 예상 | `colab/m1_plan_a_kaggle_or_colab.ipynb` |
+| R16 | 2026-04-30 17:06~26 | **M3 False Positive 방지용 furniture-aware 통합 데이터셋** — ADE20K(2만장) + frames + floor_window 통합, **시공 부위 5클래스 + 빌트인 가구 5클래스(cabinet_builtin, kitchen_appliance, countertop_sink, kitchen_island, shelf) = 10클래스**로 학습. Kaggle/Colab 노트북 함께 작성 | `build_furniture_aware_dataset.py`, `colab/{furniture_aware_kaggle.ipynb, furniture_aware_train.ipynb}`, `colab/upload_to_drive/furniture_aware.zip` (1.6GB) |
+| R17 | 2026-05-01 09:49 | **신규 ONNX 3개 평가 스크립트** — M2v2/M3v2/m5v2_v2 한 번에 mAP 측정 + baseline 대비(±) 자동 비교 (CPU 평가, GPU는 M4v2 학습 중이므로) | `eval_new_onnx.py` |
+| R18 | 2026-05-01 10:55~56 | 코랩 결과 백업 폴더 — baseline보다 낮아 운영 미사용된 모델(m2v2 -0.001, m3v2 -0.053, m5v2_v2 -0.093) 보관 (앙상블·후처리 결합 시 활용) | `colab_results_backup/README.md`, `colab/upload_to_drive/{m3,m5}_baseline_best.onnx` |
+| R19 | 2026-05-02 02:14 | **M4v2 로컬 학습 자동화 스크립트 (RTX 5070 Laptop)** — best.pt 자동 탐색(4개 후보 경로) → refine → Hard Mining(상위 10%, 4× 가중) → stage1/stage2 학습 → ONNX 자동 export | `train_m4v2_local.py` |
+
+### 3️⃣ 변경/추가 파일 목록 (40+개)
+
+#### A. 데이터셋 빌더 (5개)
+
+| 파일 | 역할 |
+|------|------|
+| `training/compress_m1_dataset.py` | M1 structural 데이터셋 1280px+jpg85 압축 (Colab 업로드용, 32GB→6GB) |
+| `training/build_m4_context_dataset.py` | frames+floor_window를 5클래스 부위 분류로 통합 (M4 Thermal U-Net 폐기 후 신규) |
+| `training/convert_ade20k_to_yolo.py` | ADE20K seg(150클래스) → YOLO bbox(5클래스: wall/floor/ceiling/window/door) 변환 |
+| `training/build_furniture_aware_dataset.py` | M3 FP 방지용 10클래스 통합 (시공 부위 5 + 빌트인 가구 5) |
+| `training/build_m5v2_dataset.py` | M5 frame seg v2 데이터셋 빌더 |
+
+#### B. 학습 자동화 (4개)
+
+| 파일 | 역할 |
+|------|------|
+| `training/refine_dataset.py` | Active Learning 정제: noisy GT/missed GT/누락 의심 자동 분류 |
+| `training/finetune_960.py` | 전 YOLO 모델 imgsz=960 + copy_paste + multi_scale 50ep fine-tune |
+| `training/train_m4v2_local.py` | M4 Context 정제+Hard Mining(10% 4×)+stage1/2 재학습+ONNX export 자동화 (RTX 5070) |
+| `training/auto_run_m4v2.py` | M4 Context 학습 종료 자동 감지 → train_m4v2_local.py 자동 시작 워처 |
+
+#### C. 데이터 보강 (2개)
+
+| 파일 | 역할 |
+|------|------|
+| `training/sahi_tile_dataset.py` | 1280 이미지를 640×640×4타일(overlap 0.2)로 분할, 8 worker 병렬 |
+| `training/extract_m2_resnet_crops.py` | M2 YOLO bbox에서 surface/baseboard ROI crop → ResNet 학습용 |
+
+#### D. 평가 (1개)
+
+| 파일 | 역할 |
+|------|------|
+| `training/eval_new_onnx.py` | M2v2/M3v2/m5v2_v2 ONNX 일괄 mAP 평가 + baseline 대비 표시 (CPU) |
+
+#### E. Colab/Kaggle 원격 학습 노트북 (15개)
+
+> 위치: `training/colab/`
+
+| 노트북 | 모델 | 비고 |
+|------|------|------|
+| `m1_aggressive_colab_train.ipynb` | M1-YOLO | aggressive aug, structural_compressed 사용 |
+| `m1_conservative_colab_train.ipynb` | M1-YOLO | conservative aug 비교군 |
+| `m1_plan_a_kaggle_or_colab.ipynb` | M1-YOLO | A100/Kaggle 8~10h 예상 |
+| `m1v3_refine_retrain.ipynb` | M1-YOLO v3 | refine_dataset 결과로 재학습 |
+| `m2_yolo_colab_train.ipynb` | M2-YOLO | baseline 재현 |
+| `m2_aggressive_colab_train.ipynb` | M2-YOLO | aggressive aug |
+| `m2v2_refine_retrain.ipynb` | M2-YOLO v2 | refine 재학습 (mAP 0.7928, baseline 0.794 대비 -0.001 → 미사용 백업) |
+| `m3v2_refine_retrain.ipynb` | M3-YOLO v2 | refine 재학습 (mAP 0.7514, -0.053 → 미사용 백업) |
+| `m4v2_refine_retrain.ipynb` | M4-Context v2 | T4 6~7h, A100 4~5h |
+| `m5v2_colab_train.ipynb` | M5-Seg v2 | baseline |
+| `m5v2_v2_colab_train.ipynb` | M5-Seg v2.v2 | aug 변형 |
+| `m5v2_v2_kaggle_train.ipynb` | M5-Seg v2.v2 | Kaggle T4×2 보충 |
+| `m5v3_refine_retrain.ipynb` | M5-Seg v3 | T4 7~8h, A100 4~5h |
+| `furniture_aware_kaggle.ipynb` | M3+가구 통합 (Kaggle) | 10클래스 |
+| `furniture_aware_train.ipynb` | M3+가구 통합 (Colab) | 10클래스, FP 방지 |
+| `colab/PHONE_GUIDE.md` | — | 핸드폰 야간 학습 가이드 |
+| `colab_results_backup/README.md` | — | baseline 미달 결과 백업 정책 |
+
+#### F. 학습 데이터 zip 패키징 (`training/colab/upload_to_drive/`)
+
+| 파일 | 크기 | 용도 |
+|------|------|------|
+| `frames.zip` | 239MB | M5v2 학습 |
+| `frames_ade.zip` | 645MB | M5v2 + ADE20K |
+| `floor_window.zip` | 1.05GB | M3 학습 |
+| `m4_context.zip` | 1.6GB | M4 Context (frames+floor_window+ADE20K) |
+| `furniture_aware.zip` | 1.6GB | M3 가구 인식 통합 |
+| `structural_compressed/` | ~6GB | M1 압축본 |
+| `m3_baseline_best.{pt,onnx}` | 52/103MB | M3 baseline |
+| `m5_baseline_best.{pt,onnx}` | 207/103MB | M5 baseline |
+
+#### G. eval 설정 신규
+
+| 파일 | 용도 |
+|------|------|
+| `training/configs/floor_window_eval.yaml` | M3v2 평가용 데이터 yaml |
+| `training/configs/frame_seg_eval.yaml` | M5v2_v2 평가용 데이터 yaml |
+| `training/configs/surface_eval.yaml` | M2v2 평가용 데이터 yaml |
+
+### 4️⃣ 평가 결과 (2026-05-01 기준, baseline 대비 ±)
+
+| 모델 | baseline mAP50 | v2/v3 mAP50 | Δ | 운영 채택 |
+|------|---------------|------------|----|----------|
+| M2v2 (surface) | 0.794 | 0.7928 | -0.001 | ❌ baseline 유지 |
+| M3v2 (floor_window) | 0.804 | 0.7514 | -0.053 | ❌ baseline 유지 |
+| m5v2_v2 (frames) | 0.626 | 0.5329 | -0.093 | ❌ baseline 유지 |
+| M4 Context (신규) | — | 학습 중 (M4v2로 이어감) | — | M4v2 로컬 학습 진행 중 |
+| furniture_aware (M3 FP 방지) | — | 학습 중 | — | 야간 Colab 진행 중 |
+
+> **결정**: v2/v3 결과가 baseline에 미달하여 운영 ONNX는 baseline 복원본을 유지하고, v2 결과는 `colab_results_backup/`에 보관(앙상블·후처리 결합 시 재활용 가능). 다음 라운드는 (1) M4v2 로컬 학습 완료 대기 + ONNX 자동 export, (2) furniture_aware 학습 결과로 M3 가중치 갱신.
+
+### 📐 설계 결정 사항
+
+- **단일 학습 mAP가 1순위**: 후처리(TTA/SAHI/앙상블)는 보조이므로, 같은 시간을 v2/v3 데이터 정제와 외부 데이터(ADE20K 5만장) 통합에 투자하는 게 더 효과적이라 판단.
+- **M4 재정의 (Thermal U-Net → Context 5클래스)**: M4 Thermal 데이터셋 라벨 오류(class_id 범위 초과 + seg 누락)로 학습이 막혀, 우리가 가진 frames+floor_window+ADE20K로 "부위 분류" 역할을 부여. 후속 파이프라인에서 부위 컨텍스트를 다른 모델 결과 검증에 사용.
+- **분산 학습 슬롯 운영 (Colab A/B/C + Kaggle)**: RTX 5070 Laptop은 한 번에 한 모델만 학습 가능 + 12~14h 단위로 묶임. 무료 Colab 3계정 + Kaggle T4×2를 병렬로 운영하여 야간 학습 throughput 4~5배 확보.
+- **Drive autosave + Resume 의무화**: Colab 무료 90분 inactive 끊김 + 12h 세션 한계 → 5분마다 last.pt를 Drive에 자동 저장, 노트북 재실행 시 last.pt 감지하면 자동 resume. 핸드폰만으로 진행 가능.
+- **Refine 임계값 (IoU<0.3 / conf>0.85 / 누락 5+)**: 너무 엄격하면 정제 후 데이터 손실, 너무 느슨하면 노이즈 잔존. 모델별로 검증한 결과 IoU 0.3 / conf 0.85 / 5+ 검출이 균형점.
+- **M4v2 Hard Mining 10% × 4 가중 (5배)**: 전체 4× 복사는 학습 시간이 5배가 되지만 어려운 케이스만 5배 노출하므로 epoch 수 동일하게 유지하면서도 어려운 분포에 더 노출.
+- **furniture-aware 10클래스 채택**: 단순 "가구=배경" 마스킹은 빌트인 가구가 시공 검사 대상에 포함될 때 모순. 빌트인 5클래스(cabinet_builtin/kitchen_appliance/countertop_sink/kitchen_island/shelf)를 별도 클래스로 학습시켜 인식하면서, 그중 운영 시 검사 대상은 후처리 단계에서 결정.
+- **v2 결과 baseline 미달 시 폐기 + 백업 정책**: 운영 ONNX는 항상 mAP 기준 최선 선택, 성능 하락분은 `colab_results_backup/`에 보관하여 추후 앙상블·후처리 결합 가능성 열어둠.
+- **M4 학습 종료 자동 감지 (auto_run_m4v2.py)**: 사람이 학습 종료 시점을 모니터링하면 야간 시간을 낭비. 5분 간격 + 2회 미감지 + 30초 buffer로 안전하게 다음 단계 자동 트리거.
+- **자동 진행 우선**: 학습/배포 워크플로우 분기점에서 YES/NO 묻지 말고 합리적 default(last.pt 자동 감지, 자동 resume, 자동 ONNX export)로 즉시 진행 — 사용자 피드백 반영(`feedback_auto_progress`).
+
+---
+
+## 📑 2026-04-20 ~ 05-01 — 제출용 백엔드 산출물(API 명세서·ERD·FlowChart·기획서·WBS·최종발표 PPT) 일괄 작성 (@youminsu0523)
+
+> **작업자**: @youminsu0523 (Claude Opus 바이브코딩)
+> **작업 일자**: 2026-04-20 18:38 ~ 2026-05-01 17:47
+> **작업 브랜치**: `MS`
+> **위치**: `tasks/`
+
+### 1️⃣ 프롬프트 / 목표
+
+> 1. 제출/심사용 백엔드 문서 풀세트 — API 명세서, ERD 설계서, AI 추론 파이프라인 기획, Backend Developer Guide, FlowChart 0~6, 요구사항정의서, WBS, 최종발표 PPT — 를 단일 소스로 만들고 코드 변경에 따라 v1.x로 갱신.
+> 2. FlowChart는 Mermaid 소스(.md)와 PNG 둘 다 보유 — PPT 삽입용 + Notion/문서 임베드용.
+> 3. 데이터·인터페이스 요구사항은 ERD 설계서·API 명세서로 일원화하여 요구사항정의서 중복 제거(v1.4).
+> 4. 최종발표 PPT는 python-pptx로 자동 생성 — 다음 라운드 수정도 스크립트 재실행으로 즉시 반영 가능하게.
+> 5. WBS는 데이터/생성 스크립트 분리(`wbs_data.py` ↔ `build_wbs_xlsx.py`) — 일정 변경은 데이터만 고치면 xlsx가 새로 만들어지도록.
+
+### 2️⃣ 진행 라운드 (시각 / 산출물 / 결정 사항)
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R1 | 2026-04-20 18:38 | 요구사항정의서 v1.0 최초 작성 (FR/NFR 골격) | `tasks/요구사항정의서_AeroInspect_v1.0.md` |
+| R2 | 2026-04-20 18:42 | API 명세서 v1.0 최초 작성 (인증/회원/현장/하자/조직 라우터) | `tasks/API_명세서_AeroInspect_v1.0.md` |
+| R3 | 2026-04-29 16:55 | **ERD 설계서 v1.0** — 18개 테이블, 관계·인덱스·보안·복구·확장 계획까지 포함 | `tasks/AeroInspect_ERD_설계서_v1.0.md` |
+| R4 | 2026-04-29 16:57 | **AI 추론 파이프라인 기획 v1.0** — 6-Model 20종 하자, ByteTrack/Temporal Filter/SAHI, 차별화 포인트, 기술 스택, 리스크 대응 | `tasks/AeroInspect_AI_추론파이프라인_기획_v1.0.md` |
+| R5 | 2026-04-29 16:57 | **Backend Developer Guide v1.0** — 기술 스택/환경 설정/구조/Git 전략/CI·CD/배포·운영/문제해결 | `tasks/AeroInspect_Backend_Developer_Guide_v1.0.md` |
+| R6 | 2026-04-29 16:58 ~ 17:01 | **FlowChart 0~6 Mermaid 소스 작성** — 0:전체 시스템 / 1:Auth / 2:AI 추론 / 3:하자 관리 / 4:보고서 생성 / 5:실시간 스트리밍 / 6:조직·채팅 | `tasks/FlowChart_{0..6}_*.md` (7개) |
+| R7 | 2026-04-29 16:59 | **API 명세서 v1.1** — Coverage API, Refresh Token, 20종 하자 파이프라인 스키마, ByteTrack/Temporal Filter 컬럼 추가 반영 | `tasks/API_명세서_AeroInspect_v1.1.md` |
+| R8 | 2026-05-01 10:12 | WBS PDF 외부 산출물 통합(FlowFit) | `tasks/FlowFit_WBS_v1.0.pdf` |
+| R9 | 2026-05-01 10:57 ~ 11:01 | 발표용 화면 캡처 자동화 스크립트 (Playwright/Selenium 기반) — 일반 화면/세션/대시보드 활성 상태 별도 | `tasks/{capture_screens, capture_session_screens, capture_dashboard_active}.py` |
+| R10 | 2026-05-01 11:04 ~ 11:06 | **WBS 단일 소스(`wbs_data.py`) + xlsx 빌더(`build_wbs_xlsx.py`)** — 4주 일정(2026-04-10 ~ 05-06), 4명 담당(MS/HJ/SH/KD/ALL), 3-depth 트리 | `tasks/{wbs_data.py, build_wbs_xlsx.py, AeroInspect_WBS_v1.0.xlsx}` |
+| R11 | 2026-05-01 11:25 ~ 11:27 | **FlowChart Mermaid → PNG (v1)** 분할 렌더 — 7개 차트, part1~5 분할(큰 차트는 가독성 위해 분할) | `tasks/flowchart_png/*.png` (24개) |
+| R12 | 2026-05-01 11:31 | **요구사항정의서 v1.1** — FR-017 LiDAR 3D 좌표 연동 완료, FR-023 이미지 저장소 / FR-024 구조화 로깅 신규, defect_logs 스키마 image_crop_path + 20종 확장 컬럼, NFR 관측성 신설 | `tasks/요구사항정의서_AeroInspect_v1.1.md` |
+| R13 | 2026-05-01 12:46 ~ 12:47 | **FlowChart PNG v2** — 단일 통합 PNG로 재렌더(고해상도 1장씩), PPT 삽입 시 분할 부담 제거 | `tasks/flowchart_png_v2/*.png` (7개) |
+| R14 | 2026-05-01 13:21~14:17 | **최종발표 PPT 에셋 정리** — `ppt_assets/`(CAPTURE_GUIDE / SELF_EVAL_GUIDE / ANIMATION_GUIDE / images / logos / screenshots) | `tasks/ppt_assets/` |
+| R15 | 2026-05-01 14:24 ~ 14:34 | **최종발표 PPT 빌더 3단 구조** — 컨텐츠(`ppt_content.py`) ↔ 헬퍼(`ppt_helpers.py`) ↔ 빌더(`build_ppt.py`). Color/Font/Shape/Card/Metric/Arrow/Connector/Table/Image 헬퍼 일괄 정의 | `tasks/{ppt_content, ppt_helpers, build_ppt}.py` |
+| R16 | 2026-05-01 14:47 | **최종발표 PPT 빌드 (13MB, python-pptx)** — 표지·목차·문제·시장·차별화·페르소나·여정·팀·시스템 개요·시스템 요구사항·기능·데모·기술 스택·로드맵 등 | `tasks/AeroInspect_최종발표.pptx` |
+| R17 | 2026-05-01 17:11 | **기획서 v1.3 (최종)** — BOM 4차 변경(2026-04-01~04-09 기록 포함), 시스템 아키텍처, 6-Model 앙상블 설계, 데이터 플로우 다이어그램, ByteTrack/Temporal Filter/SAHI 도해 | `tasks/기획서_AeroInspect_v1.3.md` |
+| R18 | 2026-05-01 17:47 | **요구사항정의서 v1.4** — 데이터·인터페이스 요구사항 섹션 제거(ERD·API 명세서로 일원화), 시스템 아키텍처 코드블록 → 표 재구성, 17 라우터 / 60+ 엔드포인트 / 18 ORM 테이블 정리, 5단계 사용자 역할(슈퍼어드민/Owner/Admin/Member/비인증) 명시 | `tasks/요구사항정의서_AeroInspect_v1.4.md` |
+
+### 3️⃣ 산출물 목록 (백엔드 관점)
+
+#### A. 핵심 명세서 (3개)
+
+| 파일 | 페이지·크기 | 핵심 내용 |
+|------|------------|----------|
+| `tasks/API_명세서_AeroInspect_v1.2.md` | 110KB | 인증·OAuth·회원·조직·현장·하자·드론·평면도·보고서·알림·메신저·**Employee** 라우터 + 20종 하자 파이프라인 스키마 + ByteTrack/Temporal Filter 컬럼 + **Swagger securityScheme(HTTPBearer/AIWebhookSecret)** + **운영 보안 가드(APP_ENV=production)** |
+| `tasks/AeroInspect_ERD_설계서_v1.1.md` | 60KB | **19개 테이블** (inspection_schedules 신규), 관계 정의, 인덱스 설계, **11개 Enum** (schedule_status_enum 추가), 보안·권한, 네이밍 규칙, 성능 모니터링, 백업·복구, 확장 계획 — alembic 12 리비전 |
+| `tasks/AeroInspect_AI_추론파이프라인_기획_v1.0.md` | 44KB | 6-Model 20종 하자, 2-Stage YOLO+ResNet, ByteTrack/Temporal Filter/SAHI/Active Learning, Noisy-OR, 차별화 포인트, 리스크 대응 |
+
+#### B. 요구사항·기획서 (3개)
+
+| 파일 | 변경점 |
+|------|-------|
+| `tasks/요구사항정의서_AeroInspect_v1.0.md` | 최초 (2026-04-20) |
+| `tasks/요구사항정의서_AeroInspect_v1.1.md` | LiDAR 3D 좌표·이미지 저장소·구조화 로깅·관측성 신설 (2026-05-01) |
+| `tasks/요구사항정의서_AeroInspect_v1.4.md` | ERD·API 명세서로 일원화 후 슬림화, 17 라우터/60+ 엔드포인트/18 테이블 정리 (2026-05-01) |
+| `tasks/기획서_AeroInspect_v1.3.md` | BOM 4차 변경(1,611,430원), 시스템 아키텍처, 6-Model 앙상블, 데이터 플로우, 후처리 도해 |
+
+#### C. FlowChart (Mermaid + PNG)
+
+| 차트 | Mermaid 소스 | PNG (v1 분할) | PNG (v2 통합) |
+|------|-------------|--------------|--------------|
+| 0 전체 시스템 | `FlowChart_0_Overall_System.md` | `flowchart_png/FlowChart_0_*_part{1,2}.png` | `flowchart_png_v2/FlowChart_0_*.png` |
+| 1 Auth Service | `FlowChart_1_Auth_Service.md` | part1~5 | 통합 1장 |
+| 2 AI Inference | `FlowChart_2_AI_Inference_Pipeline.md` | part1~4 | 통합 1장 |
+| 3 Defect Mgmt | `FlowChart_3_Defect_Management.md` | part1~3 | 통합 1장 |
+| 4 Report Gen | `FlowChart_4_Report_Generation.md` | part1~3 | 통합 1장 |
+| 5 RT Streaming | `FlowChart_5_RealTime_Streaming.md` | part1~4 | 통합 1장 |
+| 6 Org/Chat | `FlowChart_6_Organization_Chat.md` | part1~4 | 통합 1장 |
+
+#### D. WBS / 최종발표 / 가이드 (10개+)
+
+| 파일 | 역할 |
+|------|------|
+| `tasks/wbs_data.py` | WBS 단일 소스(2026-04-10 ~ 05-06, 4명 담당, 3-depth 트리) |
+| `tasks/build_wbs_xlsx.py` | wbs_data → xlsx 빌더 |
+| `tasks/AeroInspect_WBS_v1.0.xlsx` | WBS 산출물 |
+| `tasks/FlowFit_WBS_v1.0.pdf` | 외부 WBS PDF |
+| `tasks/AeroInspect_Backend_Developer_Guide_v1.0.md` | 백엔드 개발자 가이드(스택·환경·구조·Git·CI/CD·배포·트러블슈팅) |
+| `tasks/build_ppt.py` | 최종발표 PPT 빌더 |
+| `tasks/ppt_content.py` | PPT 슬라이드 컨텐츠(표지/목차/문제/시장/차별화/팀/시스템/기능/데모/스택/로드맵) |
+| `tasks/ppt_helpers.py` | PPT 도형·색·폰트·카드·메트릭·표·이미지 헬퍼 |
+| `tasks/ppt_assets/{CAPTURE_GUIDE,SELF_EVAL_GUIDE,ANIMATION_GUIDE}.md` | 캡처/자가평가/애니메이션 가이드 |
+| `tasks/ppt_assets/{images,logos,screenshots}/` | PPT 이미지·로고·스크린샷 |
+| `tasks/AeroInspect_최종발표.pptx` | 최종발표 PPT (13MB, python-pptx 빌드) |
+| `tasks/{capture_screens, capture_session_screens, capture_dashboard_active}.py` | 발표용 화면 캡처 자동화 |
+
+### 📐 설계 결정 사항
+
+- **명세 일원화 (v1.4 슬림화)**: 데이터·인터페이스 요구사항을 ERD·API 명세서에 일원화하여 요구사항정의서에서 중복 제거. 변경 시 두 군데를 동시에 수정해야 하는 부담 제거.
+- **Mermaid + PNG 둘 다 유지**: Mermaid는 git diff 가능(텍스트), PNG는 PPT/Notion 즉시 임베드 가능. v1(분할)은 모바일/슬라이드 가독성용, v2(통합)는 인쇄·전체 검토용.
+- **PPT를 코드로 빌드 (python-pptx 3단 구조)**: 손으로 PPT를 편집하면 (1) 디자인 일관성 깨짐, (2) 후속 수정 시 위치·서식 다시 맞춰야 함. 컨텐츠/헬퍼/빌더 분리로 컨텐츠만 수정해도 일관 디자인 유지.
+- **WBS 데이터·빌더 분리**: 일정·담당·산출물 변경은 데이터(`wbs_data.py`)만 수정 → xlsx 자동 재생성. 빌더는 스타일·셀 폭만 책임.
+- **버전 v1.0~v1.4 명시 + 변경 이력 유지**: 심사·발표·외부 공유 용도로 버전 식별이 필수. 변경 이력 표를 모든 v1.x 문서 첫머리에 일관 배치.
+- **노션 동기화 정확성 규칙 준수**: 산출물 작성 시각은 git mtime 기준으로 그대로 기록(임의 시간 금지) — `feedback_notion_sync_accuracy` 적용.
+
+---
+
+## 🛰 추가 라운드 (2026-04-28 ~ 2026-05-03 — 머신러닝 후처리·통합 평가·Swagger·DB 시드)
+
+> 5/1 이후 git commit 없이 unstaged 로 누적된 작업들을 라운드별 mtime 기준으로 정리.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R19 | 2026-04-28 10:00 ~ 13:45 | **Recall 극대화 후처리 파이프라인** — TemporalFilter(Noisy-OR), ByteTrack ObjectTracker, SAHI TiledInference, ActiveLearning Hard Example Mining, DefectPersistence 임계값 조정. 단위 테스트 4종(temporal_filter / object_tracker / tiled_inference / ensemble) 동시 신설 | `app/services/{temporal_filter, object_tracker, tiled_inference, active_learning, defect_persistence}.py` + `app/core/stream_inference.py` + `app/models/defect.py` (track_id/accumulated_conf/tier_executed) + `tests/test_{temporal_filter,object_tracker,tiled_inference,ensemble}.py` |
+| R20 | 2026-04-28 15:43 ~ 04-30 17:06 | **M1~M5 학습 스크립트 일괄 보강** — resnet/yolo 트레이너 정비, augment_missing_classes(부족 클래스 증강), 데이터셋 빌더 6종 (compress_m1, build_m4_context, convert_ade20k, build_m5v2, auto_run_m4v2, build_furniture_aware) | `training/train_m{1,2,3,4,5}_*.py` + `training/{augment_missing_classes, compress_m1_dataset, build_m4_context_dataset, convert_ade20k_to_yolo, build_m5v2_dataset, auto_run_m4v2, build_furniture_aware_dataset}.py` + `training/eval/evaluate_all.py` |
+| R21 | 2026-05-02 03:03 ~ 03:10 | **ONNX inference + TTA 후처리 추가** — Test-Time Augmentation(수평/수직 flip + 다중 스케일), furniture_gate / geometric_gate 신설 (가구 위 false positive 차단, 수직수평 편차 검증) + 단위 테스트 | `app/services/{onnx_inference, tta}.py` + `tests/test_{furniture_gate, geometric_gate, tta}.py` |
+| R22 | 2026-05-03 01:40 ~ 10:08 | **통합 평가 파이프라인 정착** — dry_run_full_pipeline(전체 6-Model 일괄 검증), evaluate_postprocess_ablation(후처리 ablation study), evaluate_integrated(M1~M6+gate 통합 mAP), detection schema 확장(20종 파이프라인 응답) | `training/eval/{dry_run_full_pipeline, evaluate_postprocess_ablation, evaluate_integrated}.py` + `app/schemas/detection.py` + `app/services/inference_pipeline_20.py` + `training/eval/results/integrated_eval_*.{json,md}` (5개) + `postprocess_ablation_*.{json,md}` (2쌍) |
+| R23 | 2026-05-03 17:45 ~ 21:44 | **후처리 강도 정책 정착 + 배포 가이드** — furniture_gate / ensemble / postprocess_config.yaml 으로 후처리 강도를 모델별 분기(약한 모델만 boost, 강한 모델 무수정 — `feedback_postprocess_strength_policy` 적용), evaluate_ultralytics_val + evaluate_max_boost 측정. DEPLOYMENT_GUIDE 작성 | `app/services/{furniture_gate, ensemble, postprocess_config.yaml}` + `training/eval/{evaluate_ultralytics_val, evaluate_max_boost}.py` + 루트 `DEPLOYMENT_GUIDE.md` |
+| R24 | 2026-05-03 22:xx ~ (현재 세션) | **Swagger Phase 1~3 + 운영 보안 가드** — HTTPBearer(bearerFormat=JWT) + AIWebhookSecret 보안 스키마 명시 등록, 17개 tags_metadata + servers + contact + persistAuthorization, 마크다운 description (인증·WS·멀티조직 가이드). PROTECTED/PUBLIC/WEBHOOK 공통 responses 적용. 핵심 schema 에 example 추가 (LoginRequest/TokenResponse/SiteCreate/DefectLogCreate). config.py + init_db.py 에 `APP_ENV=production` 가드 (placeholder secret 차단 / create_all 자동 스킵 → alembic 책임 분리). `.env.example` APP_ENV·AI_WEBHOOK_SECRET·PUSH_PROVIDER 등 보강. 보안 점검: .env git 추적 0건 / 소스 하드코딩 시크릿 0건 검증 | `app/main.py` + `app/api/router.py` + `app/schemas/common.py` (신규) + `app/schemas/{user, site, defect}.py` + `app/config.py` + `app/db/init_db.py` + `backend/.env.example` |
+| R25 | 2026-05-03 23:xx ~ (현재 세션) | **Mockup → DB 전환 (KPI 0 방지 시드)** — InspectionSchedule 모델 + alembic migration `i2c3d4e5f6a7` 신규 (sites/users/orgs FK + scheduled_at). `/api/v1/employee` 라우터 (schedule/today + kpi/monthly + activities — 조직 단위 격리). 시연 시드 스크립트 `seed_demo_data.py` 신설: 조직(DRONE INSPECT 데모) + 부서 3 + 사용자(백승희/오희진) + 현장 8개(시행사·B2B/B2C·상태 분산) + 하자 25~60건/현장(6개월 분산) + 보고서 3~5건/완료현장 + 오늘 일정 3건(09:00 헬리오시티/14:00 잠실 리센츠 백승희/16:30 잠실 엘스 오희진) + 알림 8종/사용자. idempotent + APP_ENV 가드 + `--reset` / `--force-prod` 옵션 | `app/models/inspection_schedule.py` (신규) + `app/models/__init__.py` + `alembic/versions/i2c3d4e5f6a7_add_inspection_schedules.py` (신규) + `app/api/employee.py` (신규) + `app/api/router.py` + `scripts/seed_demo_data.py` (신규) |
+| R26 | 2026-05-03 (현재 세션, 후속 정정) | **tasks 문서 인라인 정정 + DB 시드 실행 완료** — (1) **tasks 문서 양식 정정**: `API_명세서_AeroInspect_v1.1.md` → 새 v1.2 파일 (부록을 끝에 박지 않고 4.17 Employee API · 2.1.5 Swagger securityScheme · 8.5 운영 보안 가드 인라인 위치로 분산), `AeroInspect_ERD_설계서_v1.0.md` → 새 v1.1 파일 (4.19 inspection_schedules · 5장 관계 · 6.1 인덱스 · 8.3/12.1 Enum · 13장 결론 카운트 19/12/11/32 인라인 갱신, 문서 이력 위치 마지막 → 목차 이전 이동). 가이드 3종(AI 추론 파이프라인/Frontend Guide/Backend Guide) 도 문서 이력 위치 동일 정정. tasks 8개 문서 팀명 다마코더 → AeroInspect 일괄 교체. (2) **DB 마이그레이션 실 적용**: alembic 분기 head 2개(`0003`, `i2c3d4e5f6a7`)를 merge revision `89b53c16de85` 로 병합 → `alembic upgrade head` 성공. 이전 분기 마이그레이션 path 누락으로 `defect_logs` 컬럼 10개(image_crop_path, track_id, accumulated_conf, tier_executed, deviation_*, delta_temperature, ensemble_boosted, defect_class_display_*) inconsistent → `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 일괄 보정. (3) **시연 시드 실 적용**: `python -m scripts.seed_demo_data --reset` 실행 → org=1, depts=3, users=2(백승희/오희진), sites=8, **defects=315(HIGH 77)**, reports=12, **today schedules=3**(잠실 리센츠 14:00 KST 백승희 정상 시드 검증). (4) `CHANGES_2026-05-03.md` 신설 — 내일 Claude 웹 문서 변환용 산출물 목록 + 변환 프롬프트 템플릿. | `tasks/API_명세서_AeroInspect_v1.2.md` (신규) + `tasks/AeroInspect_ERD_설계서_v1.1.md` (신규) + `tasks/AeroInspect_AI_추론파이프라인_기획_v1.0.md` + `tasks/AeroInspect_Frontend_Developer_Guide_v1.0.md` + `tasks/AeroInspect_Backend_Developer_Guide_v1.0.md` + (팀명 일괄: API_v1.0/기획서_v1.3/리서치/요구사항 v1.0/v1.1/v1.4/generate_research_xlsx/ppt_assets README) + `backend/alembic/versions/89b53c16de85_merge_*.py` (alembic merge revision 신규) + 루트 `CHANGES_2026-05-03.md` (신규) |
+
+### 📐 추가 설계 결정 사항 (R19~R25)
+
+- **후처리 강도는 모델별 분기**: 강한 모델(M1·M3) 후처리 약화 금지, 약한 모델(M2·M4·M5)에만 furniture_gate / geometric_gate / TTA / ensemble boost 적용 — `feedback_postprocess_strength_policy` 메모리 적용. `postprocess_config.yaml` 단일 소스로 통합.
+- **Swagger securitySchemes 명시 등록**: `HTTPBearer(bearerFormat=JWT)` 와 `AIWebhookSecret(X-AI-Webhook-Secret)` 두 스키마를 OpenAPI components 에 직접 주입 — FastAPI 기본은 bearerFormat 비워둠. Authorize 버튼 + `/ai/*` apiKey 입력란 모두 활성화.
+- **운영 가드 일관 패턴**: `APP_ENV=production` 환경변수를 단일 식별자로 사용. config.py(placeholder secret 차단), init_db.py(create_all 스킵), seed_demo_data.py(시드 abort) 세 곳에서 동일하게 분기. 운영 entrypoint 는 `alembic upgrade head && uvicorn ...` 로 정착.
+- **시드 idempotent 설계**: 모든 시드 함수는 사전 SELECT 로 존재 여부 확인 후 INSERT. 재실행해도 중복 데이터 안 쌓이고, `--reset` 으로 데모 데이터만 정확히 정리 가능. 슈퍼어드민/기존 사용자는 보존.
+- **Mockup → DB 전환 원칙**: 프론트 const(MOCK_TODAY_SCHEDULE 등)에 박혀있던 시연 데이터를 다른 const 로 교체하는 것은 본질적으로 같은 mockup. 신규 모델(InspectionSchedule) + 시드 + endpoint 로 **실제 DB 데이터 → API → 프론트** 경로로 일원화. 시연 환경에서도 운영과 같은 데이터 흐름 사용.
+- **KPI 0 방지 책임 분리**: 빈 DB → 0% KPI 표시는 프론트 fallback이 아니라 **시드가 충분량을 보장**하는 방식으로 해결. `_ensure_defects` 가 사이트당 25~60건, `_ensure_reports` 가 완료 사이트당 3~5건, `_ensure_today_schedule` 이 오늘 3건을 보장.
+- **노션 동기화 정확성 규칙 재준수**: 본 라운드들의 시각은 working tree 파일 mtime 으로 산정 (5/1 이후 git commit 없음 — ML 학습 진행 중이라 commit 보류 상태). 임의 시간 X.
+- **tasks 문서 양식 정정 원칙 (R26 추가)**: 변경분을 **부록**으로 끝에 박지 않고 본문 해당 장(章)에 인라인 삽입. 버전이 올라가면(`v1.0 → v1.1`, `v1.1 → v1.2`) 파일명도 함께 rename. 문서 이력은 표지 직후·목차 이전에 배치 (가이드 3종도 동일하게 정정). 팀명은 `AeroInspect` 단일 사용 (이전 `다마코더` 표기 일괄 교체).
+- **alembic 분기 head 병합 + DDL 보정 (R26 적용 결과)**: 분기 마이그레이션 두 path 가 누적되어 head 가 2개(`0003`, `i2c3d4e5f6a7`) 발생 → `alembic merge` 로 `89b53c16de85` mergepoint 생성 후 `upgrade head` 성공. `defect_logs` 의 일부 컬럼이 alembic_version 에는 적용 완료로 기록됐으나 실제 DDL 미반영 상태였음(R19 ORM 컬럼 추가 시 마이그레이션 누락 + 분기 path 분기 영향) → `ADD COLUMN IF NOT EXISTS` 로 안전 보정. 시드 305건 INSERT 정상 통과로 검증.
+
+---
+
+## 🛰 R27 — 모델 mAP 한계 측정 + GPU 배포 가이드 전환 (2026-05-04 새벽 세션)
+
+> 5/3 23:00 ~ 5/4 02:30 (~3.5시간 야간 세션). 모든 후처리 카드 시도 후 정직한 한계 측정.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R27.1 | 5/3 23:00 ~ 23:30 | **DEPLOYMENT_GUIDE GPU 아키텍처 전환** — Cloud Run/Fly.io 분리 구조 → GCP Compute Engine + L4 GPU 통합 인스턴스. 드론 WebSocket 실시간 추론 적합. ONNX Runtime CUDA Provider, Cloud SQL Postgres, Nginx + Let's Encrypt 자동 시작·롤백 가이드까지 step-by-step 재작성 | `DEPLOYMENT_GUIDE.md` (985 → 990 lines, GPU 아키텍처) |
+| R27.2 | 5/3 23:30 ~ 5/4 00:30 | **max_boost 평가 GPU 전환** — onnxruntime 1.25.1 (CPU) + onnxruntime-gpu 1.25.0 둘 다 설치되어 CPU 우선 import 되던 이슈. `pip uninstall onnxruntime` + `pip install --force-reinstall onnxruntime-gpu` 으로 CUDAExecutionProvider 활성화. 6모델 multi-scale × TTA 그리드 (30 runs) 15분 완주 | `max_boost_20260504_000519.json` |
+| R27.3 | 5/4 00:30 ~ 02:30 | **확장 마스터 자동 평가 파이프라인** — 5개 신규 평가 스크립트 + 마스터 bash + 모니터: (1) `evaluate_pt_tta.py` PT real TTA, (2) `evaluate_extreme_boost.py` PT 그리드 (imgsz × tta × agnostic × iou × max_det 156 runs), (3) `evaluate_postproc_stages.py` 후처리 stage A/B, (4) `evaluate_wbf.py` Weighted Box Fusion multi-imgsz fusion, (5) `evaluate_multi_model_voting.py` cross_model_spatial_boost 진짜 효과 측정, (6) `evaluate_sahi_tiled.py` SAHI tiled inference, (7) `generate_final_report.py` 모든 결과 통합 리포트, (8) `run_master_full.sh` 전체 자동 실행 | `backend/training/eval/{evaluate_pt_tta, evaluate_extreme_boost, evaluate_postproc_stages, evaluate_wbf, evaluate_multi_model_voting, evaluate_sahi_tiled, generate_final_report}.py` + `run_master_full.sh` + `FINAL_REPORT_20260504_023009.md` |
+
+### 📊 정직한 mAP 측정 결과 (모든 후처리 카드 시도 후)
+
+| 모델 | best mAP50 | 0.85 갭 | best 방법 |
+|------|------------|---------|-----------|
+| M3_YOLO | **0.8445** | -0.0055 | extreme_boost grid (imgsz 800, TTA, agnostic NMS, iou 0.5) |
+| M2_YOLO | 0.8193 | -0.0307 | extreme_boost grid (imgsz 640, TTA, iou 0.5) |
+| M5_SEG | 0.7295 | -0.1205 | extreme_boost grid (imgsz 800) |
+| furniture_aware | 0.6224 | -0.2276 | max_boost (imgsz 640) |
+| M1_YOLO | 0.6127 | -0.2373 | max_boost (imgsz 640) |
+| M4_CONTEXT | 0.5871 | -0.2629 | extreme_boost grid (imgsz 960) |
+
+**한 모델도 0.85 도달하지 못함** — 후처리만으로의 한계 명확.
+
+### 🔍 후처리 카드별 진짜 효과 (측정값)
+
+| 카드 | M3 효과 | M2 효과 | 진단 |
+|------|---------|---------|------|
+| ONNX multi-scale | 0.79 → 0.8366 | 0.79 → 0.8139 | ✅ imgsz 변경만으로 큰 개선 |
+| .pt + real TTA | 0.8366 → 0.8376 | 측정됨 | ⚠️ TTA 자체 효과 미미 (+0.001) |
+| extreme grid (imgsz × tta × agnostic × iou) | 0.8376 → **0.8445** | 0.8139 → 0.8193 | ✅ 가장 효과적 |
+| WBF multi-imgsz fusion | 0.8445 → 0.7991 ↓ | 0.8193 → 0.7998 ↓ | ❌ conf 0.001 noise 증폭 |
+| Multi-model voting (cross_model_nms) | 0.8018 → 0.7829 ↓ | 0.8324 → 0.8369 ↑ | ⚠️ M2만 +0.005 |
+| Multi-model voting (spatial_boost) | 0.8018 → 0.7565 ↓ | 0.8324 → 0.7740 ↓ | ❌ false positive 증폭 |
+| SAHI tiled | M1: 0.8411 → 0.8391 | - | ❌ 한계 도달 |
+
+### 📐 핵심 결론 (사용자 보고용)
+
+1. **후처리만으로 0.85 불가능** — 모든 카드 시도 후 정직한 한계
+2. **이전 mAP 측정값들이 imgsz 미스매치로 저평가됐음** (이미 보정 — M5: 0.34→0.7295, furniture: 0.38→0.6224, M4: 0.5466→0.5871)
+3. **ONNX는 ultralytics에서 augment=True가 silently 무시됨** — TTA는 .pt에서만 작동
+4. **WBF는 conf=0.001 환경에서 도리어 해로움** — noise box 다수가 fusion 시 false positive로 살아남음
+5. **Cross-model voting은 단일 클래스 taxonomy에서만 부분 효과** — M2 +0.005, 다른 모델은 noise
+6. **0.85 도달의 유일한 길은 v1.1 재학습** — 5/6 1차 배포 후 사용자 신호로 진행
+

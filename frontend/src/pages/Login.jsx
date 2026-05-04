@@ -98,8 +98,7 @@ export default function Login() {
       const res = await loginApi(form.userId, form.password)
       const { access_token, refresh_token, user } = res.data
       setAuth(access_token, user, refresh_token)
-      const hasOrg = user.organizations && user.organizations.length > 0
-      navigate((hasOrg || user.is_superadmin) ? '/employee' : '/employee/onboarding')
+      navigate('/')
     } catch (err) {
       setError(err.response?.data?.detail || '로그인에 실패했습니다.')
     } finally {

@@ -41,6 +41,7 @@ export default function AdminMembers() {
   const [deptEditName, setDeptEditName] = useState('')
   const [deptEditId, setDeptEditId] = useState(null)
   const [newDeptName, setNewDeptName] = useState('')
+  const [copied, setCopied] = useState(false)
 
   const headers = { Authorization: `Bearer ${token}` }
 
@@ -188,7 +189,23 @@ export default function AdminMembers() {
           {orgInfo?.invite_code && (
             <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-center">
               <div className="text-xs text-gray-500 mb-1">초대 코드</div>
-              <div className="font-mono text-lg font-bold tracking-widest text-slate-900">{orgInfo.invite_code}</div>
+              <div
+                onClick={() => {
+                  navigator.clipboard.writeText(orgInfo.invite_code).then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  })
+                }}
+                title="클릭하여 복사"
+                className="font-mono text-lg font-bold tracking-widest text-slate-900 cursor-pointer hover:text-blue-600 transition"
+              >
+                {orgInfo.invite_code}
+              </div>
+              {copied && (
+                <div className="text-xs text-green-600 font-medium mt-1 animate-pulse">
+                  클립보드에 복사되었습니다
+                </div>
+              )}
               {orgInfo.invite_code_expires_at && (() => {
                 const expires = new Date(orgInfo.invite_code_expires_at)
                 const now = new Date()

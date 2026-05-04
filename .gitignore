@@ -32,8 +32,20 @@ new_urls.json
 output.txt
 run.bat
 _capture_rounds_*.py
+_capture_*.py
 
 tasks/
+
+# 운영/배포 가이드 (GCP/R2/Vercel 인프라명·버킷·도메인·systemd 설정 노출 위험)
+# 시크릿 값 자체는 placeholder여도 인프라 토폴로지 노출은 commercial-grade에서 부적절
+DEPLOYMENT_GUIDE.md
+DEPLOYMENT_*.md
+DEPLOY_*.md
+INFRA_*.md
+PRODUCTION_*.md
+
+# 세션 변경 메타 (작업 산출물 — tasks/와 동일 카테고리, 외부 공유 불요)
+CHANGES_*.md
 
 # ML 학습 산출물 (대용량)
 backend/training/runs/
@@ -44,6 +56,26 @@ backend/training/eval/evaluation_results.json
 *.npy
 *.pt
 !backend/models_weights/.gitkeep
+
+# Eval 평가 산출물 (timestamped JSON/MD, 시각화 jpg, 트래킹 영상 — 재생성 가능)
+# COMPREHENSIVE_REPORT.md만 keep, 나머지 전부 무시
+backend/training/eval/results/*
+!backend/training/eval/results/COMPREHENSIVE_REPORT.md
+backend/training/eval/results/visual/
+backend/training/eval/results/video_tracked/
+
+# Colab 학습 노트북 + 업로드 묶음 (개인 Google 계정 A/B/C 분리 워크플로우)
+# 16개 ipynb는 drone_inspect_A/B/C Drive 식별자 노출, PHONE_GUIDE.md는 핸드폰 모니터링 가이드
+# upload_to_drive/는 12GB 데이터셋·모델 zip — 모두 개인 환경 의존, 외부 공유 불가
+backend/training/colab/
+*.zip
+
+# 학습 ipynb 레거시 (개인 Drive mount 패턴 — 신규는 colab/ 안, 루트는 untrack 예정)
+backend/training/AeroInspect_Training*.ipynb
+
+# 개인 학습 자동화 wrapper (개인 GPU 스케줄 의존)
+backend/training/auto_run_m4v2.py
+backend/training/overnight_train.py
 
 # 학습 로그 (재생성 가능)
 backend/training/*_log.txt
@@ -67,3 +99,7 @@ runs/
 
 # Claude Code lock
 .claude/scheduled_tasks.lock
+
+# AI Agent Temp Dirs (Gemini, Taskmaster)
+.gemini/
+.taskmaster/

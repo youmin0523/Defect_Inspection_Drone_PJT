@@ -9,7 +9,27 @@
 from pydantic_settings import BaseSettings
 from pydantic import field_validator, model_validator
 import json
+import os
+import warnings
 from typing import List
+
+
+# 운영(prod) 환경 판정에 사용되는 환경변수.
+# 값이 "production"·"prod"·"live" 중 하나면 placeholder secret 검증을 강제(raise)한다.
+# 그 외 값(개발/테스트)에서는 경고만 띄우고 통과 → 로컬 개발 흐름 방해 X.
+APP_ENV_VAR = "APP_ENV"
+PROD_ENV_VALUES = {"production", "prod", "live"}
+
+# 운영에서 절대 통과되면 안 되는 placeholder 값 목록.
+# config.py default 와 .env.example sentinel 모두 포함.
+_PLACEHOLDER_SECRETS = {
+    "JWT_SECRET": {"change-me-in-production", "", "secret", "changeme"},
+    "AI_WEBHOOK_SECRET": {"change-me-in-production", ""},
+    "DB_PASSWORD": {"password", ""},
+    "GOOGLE_CLIENT_SECRET": {"your-google-client-secret", ""},
+    "KAKAO_CLIENT_SECRET": {"your-kakao-client-secret", ""},
+    "NAVER_CLIENT_SECRET": {"your-naver-client-secret", ""},
+}
 
 
 class Settings(BaseSettings):
@@ -57,8 +77,9 @@ class Settings(BaseSettings):
     YOLO_DELAM_WEIGHTS: str = "yolov8s_delamination_best.pt"
     WALLPAPER_WEIGHTS: str = "resnet50_wallpaper_best.pt"
 
-    # YOLO 공통 신뢰도 임계값 (crack_moisture + delamination)
-    YOLO_CONF_THRESHOLD: float = 0.25
+    # YOLO 공통 신뢰도 임계값 — 0.10으로 하향하여 Recall 극대화
+    # Precision 하락은 TemporalFilter가 보완
+    YOLO_CONF_THRESHOLD: float = 0.10
     # ResNet50 벽지 분류 신뢰도 임계값 (val_acc 54% 감안, top1 최소 신뢰도)
     WALLPAPER_CONF_THRESHOLD: float = 0.35
     # top1 - top2 최소 마진. 모호한 예측(top1/top2 근소차) 차단용
@@ -78,17 +99,17 @@ class Settings(BaseSettings):
     # M1: 구조·방수 (2-Stage YOLO→ResNet)
     M1_YOLO_ONNX: str = "m1_yolo_structural.onnx"
     M1_RESNET_ONNX: str = "m1_resnet_crack_classifier.onnx"
-    M1_CONF_THRESHOLD: float = 0.15          # 높은 재현율 (구조 하자 놓치면 안 됨)
+    M1_CONF_THRESHOLD: float = 0.25          # 4차 결과 최고 — precision 우위 (FP 감소)
 
     # M2: 마감·표면 (2-Stage YOLO→ResNet)
     M2_YOLO_ONNX: str = "m2_yolo_surface.onnx"
     M2_RESNET_ONNX: str = "m2_resnet_surface_classifier.onnx"
-    M2_CONF_THRESHOLD: float = 0.20
+    M2_CONF_THRESHOLD: float = 0.30
 
     # M3: 바닥·창호 (2-Stage YOLO→ResNet)
     M3_YOLO_ONNX: str = "m3_yolo_floor_window.onnx"
     M3_RESNET_ONNX: str = "m3_resnet_floor_window_classifier.onnx"
-    M3_CONF_THRESHOLD: float = 0.20
+    M3_CONF_THRESHOLD: float = 0.30
 
     # M4: 열화상 단열 (U-Net + RGB Context)
     M4_UNET_ONNX: str = "m4_unet_thermal_insulation.onnx"
@@ -104,8 +125,12 @@ class Settings(BaseSettings):
     SQUARENESS_ANGLE_THRESHOLD: float = 0.3  # 직각도 편차 임계값 (도)
 
     # M6: PatchCore 앙상블 폴백
-    M6_PATCHCORE_ONNX: str = "m6_patchcore_surface.onnx"
-    PATCHCORE_THRESHOLD: float = 0.5         # 이상 점수 임계값
+    M6_PATCHCORE_ONNX: str = "m6_patchcore_feature_extractor.onnx"
+    PATCHCORE_THRESHOLD: float = 27.0        # 이상 점수 임계값 (feature extractor + coreset 거리 기반)
+
+    # furniture_aware: 빌트인 가구 인식 (M1+M2+M3 검출이 가구 위면 false positive 차단용)
+    FURNITURE_AWARE_ONNX: str = "furniture_aware.onnx"
+    FURNITURE_AWARE_CONF_THRESHOLD: float = 0.60  # 매우 보수적 (확실한 가구만)
     PATCHCORE_ENSEMBLE_BOOST: float = 0.15   # 앙상블 신뢰도 승격 값
 
     # 열화상-RGB 공간 정렬 Homography (3x3 JSON)
@@ -120,6 +145,19 @@ class Settings(BaseSettings):
     TEMPORAL_FILTER_WINDOW: int = 5          # 프레임 윈도우 크기
     TEMPORAL_FILTER_MIN_DETECTIONS: int = 2  # 최소 검출 횟수
     TEMPORAL_INSTANT_THRESHOLD: float = 0.85 # 즉시 보고 임계값
+    TEMPORAL_FILTER_IOU: float = 0.3         # IoU 매칭 임계값
+
+    # ByteTrack 객체 추적
+    TRACKER_MIN_HITS: int = 3               # 트랙 확정 최소 탐지 횟수
+    TRACKER_MAX_AGE: int = 15               # 미탐지 허용 프레임 수
+    TRACKER_IOU_THRESHOLD: float = 0.3      # ByteTrack IoU 매칭 임계값
+
+    # Hard Example Mining (Active Learning Phase 1)
+    HARD_EXAMPLE_ENABLED: bool = False       # 기본 비활성 (명시적 활성화 필요)
+    HARD_EXAMPLE_DIR: str = "./training/hard_examples"
+    HARD_EXAMPLE_LOW_CONF_MIN: float = 0.15  # 수집 대상 하한
+    HARD_EXAMPLE_LOW_CONF_MAX: float = 0.40  # 수집 대상 상한
+    HARD_EXAMPLE_SAVE_INTERVAL: float = 30.0 # 디스크 저장 주기 (초)
 
     # 신규 파이프라인 활성화 플래그 (기존 파이프라인과 전환용)
     USE_20DEFECT_PIPELINE: bool = False
@@ -189,6 +227,31 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return json.loads(v)
         return v
+
+    @model_validator(mode="after")
+    def enforce_no_placeholder_secrets_in_prod(self):
+        """
+        APP_ENV=production 일 때 placeholder/빈값 시크릿이 그대로 들어가면 기동 차단.
+        그 외 환경(개발/테스트)에서는 경고만 출력 — 운영 사고 방지.
+        """
+        env = os.environ.get(APP_ENV_VAR, "").strip().lower()
+        offending: list[str] = []
+        for field, bad_values in _PLACEHOLDER_SECRETS.items():
+            value = getattr(self, field, None)
+            if value in bad_values:
+                offending.append(field)
+
+        if not offending:
+            return self
+
+        msg = (
+            "보안: 다음 환경변수가 placeholder/빈값 상태입니다 → " + ", ".join(offending)
+            + ". .env 또는 시크릿 매니저에서 실제 값을 주입하세요."
+        )
+        if env in PROD_ENV_VALUES:
+            raise RuntimeError(f"[CONFIG] 운영 환경 기동 차단 — {msg}")
+        warnings.warn(f"[CONFIG] 개발 모드 경고 — {msg}", stacklevel=2)
+        return self
 
     class Config:
         env_file = ".env"

@@ -116,7 +116,8 @@
 
 ## 향후 계획 (미완료)
 - [ ] `ProtectedEmployeeLayout` — 직원 라우트 인증 가드
-- [ ] MOCK_* 상수 → 실제 API 훅 교체
+- [x] **(2026-05-03)** EmployeeLanding MOCK_* 4개 상수 → 백엔드 `/api/v1/employee/*` + `/organizations/members` 병렬 fetch로 완전 교체
+- [x] **(2026-05-03)** 가짜 팀원명 → 실제 팀(백승희/오희진/유민수)로 통일 (4파일)
 - [ ] 반응형 전면 검증 (Mobile/Tablet/Desktop)
 - [ ] 접근성(a11y) 감사 (키보드 내비게이션 포커스 복원)
 - [ ] 다크 모드 지원
@@ -124,6 +125,11 @@
 ---
 
 ## Revision History
+
+### v5.0_260503 (작성자: @youminsu0523 / branch: MS)
+- **R12 (5/3)** EmployeeLanding.jsx의 4개 MOCK_* const(`MOCK_TODAY_SCHEDULE`, `MOCK_TEAM_MEMBERS`, `MOCK_MONTHLY_KPI`, `MOCK_RECENT_ACTIVITIES`) 완전 삭제 + axios 병렬 fetch (`/api/v1/employee/schedule/today`, `/employee/kpi/monthly`, `/employee/activities`, `/organizations/members`)
+- KPI snake_case → camelCase 변환, 빈 응답 fallback 처리 (EMPTY_MONTHLY_KPI), 토큰 없으면 fetch 스킵
+- mockup 팀원명 4파일(mockTrendData / chatConstants / SiteFormModal / EmployeeLanding) 일괄 정리
 
 ### v4.2_260427 (작성자: @youminsu0523 / branch: MS)
 - Step 13 추가: 3D 리포트 샘플 페이지 (SampleReport.jsx)

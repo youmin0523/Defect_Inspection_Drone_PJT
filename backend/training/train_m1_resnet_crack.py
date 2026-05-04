@@ -30,10 +30,10 @@ from torchvision import datasets, models, transforms
 
 
 # ── 하이퍼파라미터 ──────────────────────────
-NUM_CLASSES = 2
-CLASS_NAMES = ["crack_structural", "crack_finishing"]
+NUM_CLASSES = 5   # 실제 crop 데이터 클래스 수 (ImageFolder 알파벳순)
+CLASS_NAMES = ["caulking_indicator", "crack_indicator", "moisture_indicator", "structural_damage", "waterproof_defect"]
 INPUT_SIZE = 224
-BATCH_SIZE = 32
+BATCH_SIZE = 16  # M5 YOLO과 GPU 공유 (8GB VRAM 분할)
 EPOCHS = 50
 LR = 1e-4
 WEIGHT_DECAY = 1e-4
@@ -66,7 +66,7 @@ val_transforms = transforms.Compose([
 
 
 def build_model() -> nn.Module:
-    """ResNet50 + 2-class fc head."""
+    """ResNet50 + NUM_CLASSES fc head."""
     model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
     model.fc = nn.Sequential(
         nn.Dropout(0.3),
@@ -84,17 +84,17 @@ def train():
 
     train_loader = DataLoader(
         train_dataset, batch_size=BATCH_SIZE, shuffle=True,
-        num_workers=4, pin_memory=True,
+        num_workers=0, pin_memory=(device.type == "cuda"),
     )
     val_loader = DataLoader(
         val_dataset, batch_size=BATCH_SIZE, shuffle=False,
-        num_workers=4, pin_memory=True,
+        num_workers=0, pin_memory=(device.type == "cuda"),
     )
 
     model = build_model().to(device)
 
-    # 구조균열에 약간 높은 가중치 (HIGH severity → 놓치면 안 됨)
-    class_weights = torch.tensor([1.2, 1.0], dtype=torch.float32).to(device)
+    # 클래스 가중치 (구조손상에 높은 가중치 — HIGH severity, 소수 클래스 보정)
+    class_weights = torch.tensor([1.0, 1.0, 2.0, 2.0, 1.0], dtype=torch.float32).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_MAX, eta_min=ETA_MIN)
