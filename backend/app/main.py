@@ -11,6 +11,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
@@ -139,13 +140,104 @@ async def lifespan(app: FastAPI):
     telemetry_cache.clear()
 
 
+# ── OpenAPI 메타데이터 ───────────────────────
+# Swagger UI 좌측 상단/태그 그룹 헤더에 노출되는 설명 + 외부 문서 링크.
+tags_metadata = [
+    {"name": "Health", "description": "서버/모델/카메라/스트림 워커 헬스체크. 운영 알람 훅 대상."},
+    {"name": "Employee", "description": "직원 랜딩(/employee) 통합 데이터 — 오늘 일정·월간 KPI·최근 활동. 조직 단위 격리."},
+    {"name": "Auth", "description": "회원가입·로그인·JWT 발급/갱신·내 정보 관리."},
+    {"name": "OAuth", "description": "Google / Kakao / Naver 소셜 로그인 콜백."},
+    {"name": "Organizations", "description": "조직(회사) 멤버 / 초대 / 역할 관리. X-Organization-Id 헤더로 다중 조직 분기."},
+    {"name": "Sites", "description": "현장(점검 대상) CRUD. 평면도·텔레메트리·결함 로그가 사이트 단위로 묶임."},
+    {"name": "Floorplan", "description": "평면도 업로드/처리. 드론 비행 좌표를 평면도 좌표계로 매핑."},
+    {"name": "Telemetry", "description": "드론 좌표/배터리/IMU/LiDAR 등 실시간 텔레메트리. 캐시 + WebSocket 브로드캐스트."},
+    {"name": "Coverage", "description": "드론 비행 텔레메트리 convex hull로 점검 커버리지·미점검 구역 산출."},
+    {"name": "SLAM", "description": "SLAM 맵(point cloud / occupancy grid) 저장·조회."},
+    {"name": "Defects", "description": "하자 탐지 로그 CRUD. 보고서·통계·심각도 매핑의 원천 데이터."},
+    {"name": "Detect", "description": "3-모델 파이프라인(YOLO + ResNet) multipart 업로드 추론 엔드포인트."},
+    {"name": "Stream", "description": "MJPEG/HLS 카메라 스트림 (RGB / 열화상 / 블렌드)."},
+    {"name": "WebSocket", "description": "실시간 이벤트(추론 결과 / 텔레메트리 / 알림). HTTP가 아니라 ws:// 핸드셰이크 — Swagger에선 테스트 불가, 별도 클라이언트 필요."},
+    {"name": "Report", "description": "LLM 기반 점검 보고서 생성·저장·조회·다운로드."},
+    {"name": "Notifications", "description": "사용자 알림 CRUD + 푸시(FCM/APNS) 발송."},
+    {"name": "Chat", "description": "조직 내 메신저(채널/DM) + 파일 첨부."},
+    {"name": "AI Webhook", "description": "외부 AI 추론 서버 → 백엔드 콜백. X-AI-Webhook-Secret 헤더 인증 필수."},
+]
+
+
+def _custom_openapi():
+    """
+    OpenAPI 스키마에 JWT Bearer 보안 스키마(bearerFormat=JWT)와
+    설명 마크다운을 명시적으로 주입한다. FastAPI 기본은 bearerFormat을 비워둠.
+    """
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+        tags=tags_metadata,
+        servers=app.servers,
+        contact={
+            "name": "DRONE INSPECT Backend",
+            "email": "droneinspect.noreply@gmail.com",
+        },
+        license_info={"name": "Proprietary", "identifier": "LicenseRef-Proprietary"},
+    )
+
+    components = schema.setdefault("components", {})
+    security_schemes = components.setdefault("securitySchemes", {})
+    security_schemes["HTTPBearer"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "POST `/api/v1/auth/login` 응답의 `access_token` 값을 그대로 입력 (Bearer 접두사 자동 부여).",
+    }
+    security_schemes["AIWebhookSecret"] = {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-AI-Webhook-Secret",
+        "description": "외부 AI 추론 서버 → 백엔드 콜백(/api/v1/ai/*) 인증용 사전 공유 시크릿.",
+    }
+
+    app.openapi_schema = schema
+    return schema
+
+
 # FastAPI 앱 생성
 app = FastAPI(
-    title="AeroInspect API",
-    description="실제 드론 기반 자율 하자 점검 플랫폼 - FastAPI 백엔드",
+    title="DRONE INSPECT API",
+    description=(
+        "실제 드론 기반 자율 하자 점검 플랫폼 — FastAPI 백엔드.\n\n"
+        "## 인증\n"
+        "1. `/api/v1/auth/login` 으로 access_token 획득\n"
+        "2. 우측 상단 **Authorize** 버튼 → `HTTPBearer` 에 토큰 입력 → 보호 엔드포인트 테스트 가능\n\n"
+        "## WebSocket\n"
+        "Swagger 에선 ws:// 핸드셰이크를 직접 호출할 수 없습니다. "
+        "`WebSocket` 태그의 엔드포인트는 메시지 스키마/이벤트 흐름 참고용이며, "
+        "실제 연결은 프론트엔드 또는 `wscat` 같은 ws 클라이언트로 테스트하세요.\n\n"
+        "## 다중 조직\n"
+        "한 사용자가 여러 조직에 소속된 경우 `X-Organization-Id` 헤더로 분기합니다 (미지정 시 가장 최근 활성 조직)."
+    ),
     version="1.3.0",
     lifespan=lifespan,
+    openapi_tags=tags_metadata,
+    servers=[
+        {"url": "http://localhost:8000", "description": "Local dev"},
+        # 운영/스테이징 도메인은 배포 확정 후 추가 (예시: {"url": "https://api.droneinspect.io", "description": "Production"}).
+    ],
+    swagger_ui_parameters={
+        # 페이지 새로고침 후에도 Authorize 토큰 유지 — Swagger 사용성 핵심
+        "persistAuthorization": True,
+        # 대규모 스키마(20+ 라우터)는 기본 펼침 시 노이즈가 큼
+        "defaultModelsExpandDepth": 0,
+        "docExpansion": "none",
+        "filter": True,
+        "tryItOutEnabled": True,
+    },
 )
+app.openapi = _custom_openapi  # type: ignore[method-assign]
 
 # ── 미들웨어 ─────────────────────────────────
 # RequestIDMiddleware 먼저 (가장 바깥) → CORS
@@ -189,21 +281,45 @@ async def prometheus_metrics():
 @app.get("/health", tags=["Health"])
 async def health_check():
     """
-    카메라 + AI 3-모델 + 스트림 워커 상태 확인.
-    프롬프트 스펙대로 models_loaded / device / frame_skip / wallpaper_classes_count 포함.
+    카메라 + AI 모델 + 스트림 워커 상태 확인.
+    3-모델 파이프라인 또는 20종 파이프라인 상태 모두 포함.
+    필수 모델 미로드 시 503 반환.
     """
+    from app.services.inference_pipeline_20 import pipeline20
+
     models = inference_pipeline.models_loaded
-    all_loaded = models.yolo_thermal and models.yolo_delam and models.wallpaper
-    return {
-        "status": "ok" if all_loaded else "degraded",
+    all_3model_loaded = models.yolo_thermal and models.yolo_delam and models.wallpaper
+
+    # 20종 파이프라인 상태 (활성화 시)
+    pipeline20_status = None
+    if settings.USE_20DEFECT_PIPELINE:
+        pipeline20_status = {
+            "loaded": pipeline20.is_loaded,
+            "models": pipeline20.models_loaded.model_dump() if pipeline20.is_loaded else None,
+        }
+
+    # 상태 판정: 활성 파이프라인의 필수 모델이 모두 로드되어야 "ok"
+    if settings.USE_20DEFECT_PIPELINE:
+        is_healthy = pipeline20.is_loaded
+    else:
+        is_healthy = all_3model_loaded
+
+    from fastapi.responses import JSONResponse
+
+    status_code = 200 if is_healthy else 503
+    body = {
+        "status": "ok" if is_healthy else "degraded",
         "device": inference_pipeline.device,
-        "models_loaded": {
+        "active_pipeline": "20defect" if settings.USE_20DEFECT_PIPELINE else "3model",
+        "models_loaded_3model": {
             "yolo_thermal": models.yolo_thermal,
             "yolo_delam": models.yolo_delam,
             "wallpaper": models.wallpaper,
         },
+        "pipeline20": pipeline20_status,
         "wallpaper_classes_count": len(WALLPAPER_CLASSES),
         "stream_worker_running": stream_inference_worker.is_running,
+        "stream_worker_stats": stream_inference_worker.stats,
         "frame_skip": settings.FRAME_SKIP,
         "rgb_camera": rgb_camera_service.is_open,
         "thermal_camera": thermal_camera_service.is_open,
@@ -216,3 +332,4 @@ async def health_check():
             "age_sec": telemetry_cache.age_sec,
         },
     }
+    return JSONResponse(content=body, status_code=status_code)

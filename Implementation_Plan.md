@@ -205,15 +205,32 @@
 - [ ] 드론 비행 후 가용면적 자동 계산 + 커버리지율 + 미점검 구역 리포트
 
 ### Phase 25. MOCK_* → 실API 교체
-- [ ] EmployeeLanding MOCK_* 상수 → 실제 API 훅 호출
+- [x] **(2026-05-03)** EmployeeLanding `MOCK_TODAY_SCHEDULE` / `MOCK_TEAM_MEMBERS` / `MOCK_MONTHLY_KPI` / `MOCK_RECENT_ACTIVITIES` 4개 const 삭제 + 백엔드 `/api/v1/employee/{schedule/today, kpi/monthly, activities}` + `/organizations/members` 병렬 fetch로 완전 교체
+- [x] **(2026-05-03)** mockup 팀원명(가짜 5명) → 실제 팀(백승희/오희진/유민수)로 통일 (mockTrendData / chatConstants / SiteFormModal / EmployeeLanding)
 - [ ] ProtectedEmployeeLayout 인증 가드
 
 ### Phase 26. 통합 테스트 & QA
 - [ ] 풀스택 E2E, 반응형 검증, 보안 점검, 접근성(a11y) 감사
 
+### Phase 27. 배포 직전 안정화 (2026-05-03 ~ 2026-05-06)
+- [x] **Swagger Phase 1~3** — HTTPBearer/AIWebhookSecret 보안 스키마, 17 tags_metadata, persistAuthorization, 공통 401/403 responses, schema example 4종
+- [x] **운영 보안 가드** — `APP_ENV=production` 기준으로 config.py(placeholder secret 차단) / init_db.py(create_all 자동 스킵, alembic 책임 분리) / seed_demo_data.py(시드 abort) 3중 가드
+- [x] **InspectionSchedule 모델 + alembic migration `i2c3d4e5f6a7`** — DB 19테이블/12리비전
+- [x] **`/api/v1/employee` 라우터 신규** — schedule/today + kpi/monthly + activities (조직 단위 격리)
+- [x] **`scripts/seed_demo_data.py` 신설** — 조직/부서/사용자(백승희·오희진)/현장 8/하자 25~60건/보고서 3~5건/오늘 일정 3건/알림. idempotent + APP_ENV 가드 + `--reset` / `--force-prod`
+- [x] **문서 동기화 (1차)** — API 명세서 v1.1 → v1.2, ERD v1.0 → v1.1, Vibe_Coding_Log backend R19~R25 / frontend R10~R12 append
+- [x] **문서 양식 정정 (R26 후속)** — tasks 문서 부록을 본문 인라인으로 재배치 + 파일명 rename + 팀명 `다마코더 → AeroInspect` 일괄 + 가이드 3종 문서이력 위치 정정 + `CHANGES_2026-05-03.md` 신설
+- [x] **alembic upgrade head + seed_demo_data 실 적용** — 분기 head 병합(`89b53c16de85`) + 누락 컬럼 10건 `ADD COLUMN IF NOT EXISTS` 보정 + 시드 결과: sites=8 / defects=315 / reports=12 / schedules=3 (잠실 리센츠 14:00 KST 백승희 검증)
+
 ---
 
 ## Revision History
+
+### v5.1_260503 (작성자: @youminsu0523 / branch: MS)
+- Phase 27 추가 완료 항목: alembic 분기 head 병합(`89b53c16de85`) + `defect_logs` 누락 컬럼 ALTER 보정 + `seed_demo_data --reset` 실행 (sites=8/defects=315/reports=12/schedules=3). tasks 문서 양식 정정 (API v1.2/ERD v1.1 인라인 + 파일 rename + 팀명 일괄). CHANGES_2026-05-03.md 신설.
+
+### v5.0_260503 (작성자: @youminsu0523 / branch: MS)
+- Phase 25 부분 완료 (mockup → DB API 전환), Phase 27 신설(배포 직전 안정화 — Swagger / 운영 가드 / InspectionSchedule / Employee 라우터 / 시드 / 문서 동기화)
 
 ### v4.0_260427 (작성자: @youminsu0523 / branch: MS)
 - 전면 재작성: git log 기반 21개 Phase 상세 기록 (파일 수, 구체적 구현 내용, 담당자, 함수명/API/모델 상세)

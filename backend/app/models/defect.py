@@ -109,6 +109,14 @@ class DefectLog(Base):
     # 앙상블 부스팅 여부
     ensemble_boosted = Column(String(5), nullable=True, default=None, comment="PatchCore 앙상블 승격 (true/false)")
 
+    # ── 추적·시간 필터 확장 컬럼 ─────────────
+    # ByteTrack 객체 추적 ID (동일 track_id = 동일 물리 하자)
+    track_id = Column(BigInteger, nullable=True, comment="ByteTrack 추적 ID (프레임 간 동일 하자 식별)")
+    # 시간 누적 신뢰도 (TemporalFilter Noisy-OR 결과)
+    accumulated_conf = Column(Float, nullable=True, comment="시간 누적 신뢰도 (Noisy-OR)")
+    # 실행 계층 (1=M1+M2, 2=+M3+M5, 3=+M4+M6)
+    tier_executed = Column(BigInteger, nullable=True, comment="실행 Tier (1/2/3)")
+
     # ── 인덱스 ───────────────────────────────
     # 필터링 쿼리 최적화: 심각도+시간 / 영역+시간 / 프레임
     __table_args__ = (

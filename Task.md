@@ -261,6 +261,18 @@
 
 ## Revision History
 
+### v5.1_260503 (작성자: @youminsu0523 / branch: MS)
+- **tasks 문서 양식 정정**: API 명세서 `v1.1.md → v1.2.md` 파일명 rename + 부록을 4.17/2.1.5/8.5 인라인으로 분산. ERD `v1.0.md → v1.1.md` rename + 4.19/5장/6장/8.3/12.1/13장 인라인 갱신, 문서 이력 위치 마지막→목차 이전 이동. 가이드 3종(AI 추론/Frontend/Backend) 도 문서 이력 위치 정정. tasks 8개 문서 팀명 `다마코더 → AeroInspect` 일괄 교체.
+- **DB 마이그레이션 + 시드 실 적용**: alembic 분기 head 병합(`89b53c16de85`) + `defect_logs` 누락 컬럼 10개 ALTER 보정 + `seed_demo_data --reset` 실행 → org/depts/users(백승희·오희진)/sites=8/defects=315/reports=12/today_schedules=3 (잠실 리센츠 14:00 KST 백승희 정상 시드).
+- **CHANGES_2026-05-03.md 신설**: Claude 웹 문서 변환용 산출물 목록 + 변환 프롬프트 템플릿.
+
+### v5.0_260503 (작성자: @youminsu0523 / branch: MS)
+- **Swagger Phase 1~3 + 운영 보안 가드** (backend R24): main.py에 HTTPBearer/AIWebhookSecret 보안 스키마 명시 등록(bearerFormat=JWT) + 17개 tags_metadata + servers + persistAuthorization. config.py/init_db.py에 `APP_ENV=production` 가드 (placeholder secret 차단 + create_all 자동 스킵). schemas/common.py 신규(PROTECTED/PUBLIC/WEBHOOK responses), 핵심 schema 4종에 example 추가.
+- **Mockup → DB 전환 (KPI 0 방지 시드)** (backend R25 + frontend R12): InspectionSchedule 모델 + alembic migration `i2c3d4e5f6a7` + `/api/v1/employee/{schedule/today, kpi/monthly, activities}` 라우터 신규. 시연 시드 스크립트 `scripts/seed_demo_data.py` 신설(조직/부서/사용자 백승희·오희진/현장 8개/하자 25~60건/보고서 3~5건/오늘 일정 3건/알림). EmployeeLanding.jsx의 MOCK_* 4개 const 삭제 + axios useEffect API fetch로 완전 교체.
+- **프론트 mockup 팀원명 정리** (frontend R12): mockTrendData / chatConstants / SiteFormModal / EmployeeLanding 4파일에서 가짜 팀원명(김다연/이준혁/박지훈/이서현/박서연) → 실제 팀(백승희/오희진/유민수)로 통일.
+- **문서**: API 명세서 v1.1 → **v1.2** (Employee API 섹션 + Swagger 보강 부록 추가), ERD v1.0 → **v1.1** (inspection_schedules 테이블 정의 부록 추가, 총 19 테이블/12 alembic 리비전).
+- **보안 점검**: .env git 추적 0건 / 소스 하드코딩 시크릿 0건 검증.
+
 ### v4.0_260427 (작성자: @youminsu0523 / branch: MS)
 - 전면 재작성: 팀원 4명 전체(@youminsu0523, @Hijin554, @unknownName-15, @Antigravity) 10일간 작업 상세 기록
 - 각 버전별 변경 파일 수, 구체적 파일 경로, 함수명/컴포넌트명/API 엔드포인트/DB 모델 상세 기술

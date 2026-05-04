@@ -52,6 +52,27 @@ class SiteCreate(BaseModel):
     assigned_members: Optional[List[AssignedMember]] = []
     memo: Optional[str] = None
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "래미안 송파 101동",
+                "inspection_type": "사전점검",
+                "address": "서울시 송파구 OO로 123",
+                "building_type": "아파트",
+                "total_area": 84.5,
+                "building_count": 1,
+                "unit_count": 24,
+                "client_type": "B2B",
+                "client_name": "삼성물산 건설부문",
+                "client_contact": "010-1234-5678",
+                "contract_start": "2026-05-10",
+                "contract_end": "2026-06-30",
+                "status": "pending",
+                "memo": "입주 전 사전점검 — 1차 비행 5/15 예정",
+            },
+        },
+    }
+
 
 class SiteUpdate(BaseModel):
     """PATCH /api/v1/sites/{id} — 부분 업데이트"""

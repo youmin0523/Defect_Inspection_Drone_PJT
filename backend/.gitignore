@@ -18,9 +18,20 @@ __pycache__/
 *.pyd
 .Python
 
-# YOLOv8 가중치 파일 (용량 큼)
+# YOLOv8 가중치 파일 (용량 큼) — ONNX 포함 모두 제외
 models_weights/*.pt
 models_weights/*.pth
+models_weights/*.onnx
+
+# 학습 산출물 (수십 GB) — GCS로 별도 관리
+training/runs/
+training/datasets/
+training/eval/results/*.json
+training/eval/results/*.md
+training/colab/upload_to_drive/
+training/colab_results_backup/
+*.cache
+*.npy
 
 # 하자 이미지 크롭 저장 디렉토리
 captured_frames/*

@@ -18,8 +18,8 @@ from pathlib import Path
 from ultralytics import YOLO
 
 EPOCHS = 200
-BATCH = 8           # seg 모델은 메모리 사용량 높음
-IMGSZ = 640
+BATCH = 4           # RTX 5070 Laptop 8GB VRAM
+IMGSZ = 960         # 기하학 프레임: 정밀한 엣지 탐지 필요 → 고해상도
 PATIENCE = 30
 LR0 = 1e-4
 DATA_YAML = "configs/frame_seg.yaml"
@@ -33,7 +33,10 @@ def train():
     print("[M5-Seg] YOLOv8m-seg 기하학 프레임 세그멘테이션 학습")
     print("=" * 60)
 
-    model = YOLO("yolov8m-seg.pt")     # segmentation 변형 pretrained
+    # seg 데이터셋 라벨 불일치(2.8% 세그멘트 누락)로 seg 학습 불가
+    # → Detection 모드로 우선 학습. 기하학 분석은 bbox로 대체 가능.
+    # TODO: 데이터셋 정제 후 yolov8m-seg.pt로 전환
+    model = YOLO("yolov8m.pt")          # detection pretrained
     model.train(
         data=DATA_YAML,
         epochs=EPOCHS,
@@ -55,7 +58,9 @@ def train():
         fliplr=0.5,
         mosaic=0.8,
         mixup=0.05,
-        erasing=0.1,
+        erasing=0.0,
+        copy_paste=0.2,     # 소형 프레임 복사-붙여넣기
+        multi_scale=0.3,    # 기하학은 약한 multi_scale (엣지 보존)
         project=PROJECT,
         name="train",
         exist_ok=True,

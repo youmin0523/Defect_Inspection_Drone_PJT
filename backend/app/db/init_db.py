@@ -1,15 +1,23 @@
 # =============================================
 # app/db/init_db.py
-# 역할: 애플리케이션 시작 시 DB 테이블 자동 생성
+# 역할: 애플리케이션 시작 시 DB 테이블 자동 생성 (개발/테스트 전용)
 #       - Base.metadata.create_all로 존재하지 않는 테이블을 생성
-#       - 프로덕션에서는 Alembic 마이그레이션 사용 권장
-#       - 개발/테스트 환경에서 빠른 초기화용
+#       - 약관 시드 데이터 삽입 (idempotent)
+#
+# ⚠️ 운영(APP_ENV=production)에서는 create_all 을 자동 스킵.
+#   운영 스키마는 반드시 `alembic upgrade head` 로 적용해야 한다.
+#   이유: create_all 은 ALTER 를 못 해서 alembic 과 상태가 어긋나면 silent 실수가 누적되고,
+#         alembic 마이그레이션이 "이미 존재함" 에러로 실패할 수 있음.
+#
 # 호출: main.py lifespan 핸들러에서 await init_db()
 # =============================================
+
+import os
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import APP_ENV_VAR, PROD_ENV_VALUES
 from app.db.base import engine, Base
 from app.db.session import async_session_factory
 
@@ -34,7 +42,7 @@ _TERM_SEEDS = [
 
 
 async def _seed_terms(session: AsyncSession) -> None:
-    """terms 테이블에 기본 약관이 없으면 삽입."""
+    """terms 테이블에 기본 약관이 없으면 삽입 (idempotent — 운영에서도 안전)."""
     result = await session.execute(select(Term.code))
     existing_codes = {row[0] for row in result.all()}
 
@@ -45,15 +53,26 @@ async def _seed_terms(session: AsyncSession) -> None:
     await session.commit()
 
 
+def _is_production() -> bool:
+    return os.environ.get(APP_ENV_VAR, "").strip().lower() in PROD_ENV_VALUES
+
+
 async def init_db() -> None:
     """
-    비동기 방식으로 모든 테이블 생성 + 시드 데이터 삽입.
-    테이블이 이미 존재하면 건너뜀 (checkfirst=True 기본 동작).
+    개발/테스트: create_all 로 누락 테이블 자동 생성 + 약관 시드.
+    운영(APP_ENV=production): create_all 스킵, 약관 시드만 실행.
+        스키마는 alembic 이 책임지므로 create_all 호출 자체가 위험.
     """
-    # 1) 테이블 생성
+    if _is_production():
+        # 운영: create_all 비활성. alembic upgrade head 가 이미 적용됐다고 가정.
+        # 시드만 idempotent 하게 보장.
+        async with async_session_factory() as session:
+            await _seed_terms(session)
+        return
+
+    # 개발/테스트: 테이블 생성 후 시드.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # 2) 시드 데이터 (약관)
     async with async_session_factory() as session:
         await _seed_terms(session)

@@ -35,7 +35,7 @@ import segmentation_models_pytorch as smp
 
 
 # ── 설정 로드 ──────────────────────────────
-with open("configs/thermal_unet.yaml") as f:
+with open("configs/thermal_unet.yaml", encoding="utf-8") as f:
     CFG = yaml.safe_load(f)
 
 NUM_CLASSES = CFG["model"]["num_classes"]
@@ -82,7 +82,7 @@ class ThermalDefectDataset(Dataset):
         temp_norm = (temp_map - temp_map.mean()) / (temp_map.std() + 1e-6)
         input_3ch = np.stack([temp_norm] * 3, axis=0).astype(np.float32)
 
-        return torch.from_numpy(input_3ch), torch.from_numpy(mask)
+        return torch.from_numpy(input_3ch), torch.from_numpy(mask).long()
 
     @staticmethod
     def _augment(temp_map: np.ndarray, mask: np.ndarray):
@@ -147,7 +147,8 @@ def build_model() -> nn.Module:
 
 
 def train():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # GPU는 YOLO+ResNet이 사용 중 — 소규모 데이터(1.8K)라 CPU로 충분
+    device = torch.device("cpu")
     print(f"[M4-UNet] Device: {device}")
 
     full_dataset = ThermalDefectDataset(
@@ -164,10 +165,11 @@ def train():
         generator=torch.Generator().manual_seed(42),
     )
 
+    # num_workers=0: Windows에서 multiprocessing fork 문제 방지
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,
-                              num_workers=4, pin_memory=True)
+                              num_workers=0, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False,
-                            num_workers=4, pin_memory=True)
+                            num_workers=0, pin_memory=True)
 
     model = build_model().to(device)
     criterion = DiceCELoss(NUM_CLASSES, CLASS_WEIGHTS).to(device)

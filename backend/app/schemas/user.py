@@ -131,6 +131,12 @@ class LoginRequest(BaseModel):
     username: str = Field(..., description="로그인 아이디")
     password: str = Field(..., description="비밀번호")
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {"username": "admin", "password": "admin"},
+        },
+    }
+
 
 class OAuthCallbackRequest(BaseModel):
     """프론트에서 전달하는 OAuth 인가 코드"""
@@ -144,6 +150,27 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: "UserResponse"
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "token_type": "bearer",
+                "user": {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "account_type": "personal",
+                    "email": "user@example.com",
+                    "username": "tester01",
+                    "name": "홍길동",
+                    "phone": "010-1234-5678",
+                    "is_superadmin": False,
+                    "created_at": "2026-05-03T10:00:00Z",
+                    "organizations": [],
+                },
+            },
+        },
+    }
 
 
 class RefreshTokenRequest(BaseModel):

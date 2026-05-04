@@ -205,3 +205,4 @@ class ModelsLoadedStatus20(BaseModel):
     m4_context: bool = False
     m5_seg: bool = False
     m6_patchcore: bool = False
+    furniture_aware: bool = False

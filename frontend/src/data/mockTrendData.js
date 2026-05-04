@@ -119,25 +119,25 @@ export function getLastWeekRange(baseDate = new Date()) {
 /** 전주 실적 (Mock) */
 export const LAST_WEEK_TASKS = [
   { id: 'lw1', site: '송파 헬리오시티 101동~109동', task: '103동~105동 사전점검 비행', assignee: '유민수', planned: true, done: true, note: '하자 18건 검출, 보고서 발행 완료' },
-  { id: 'lw2', site: '송파 헬리오시티 101동~109동', task: '106동 도면 사전 업로드', assignee: '김다연', planned: true, done: true, note: 'L1 CAD 업로드 완료' },
-  { id: 'lw3', site: '성북구 성북로 23-5', task: '하자점검 1차 비행', assignee: '김다연', planned: true, done: true, note: '하자 5건 검출' },
-  { id: 'lw4', site: '판교 알파돔시티 A·B·C동', task: '사전 도면 확보 및 현장 답사', assignee: '이준혁', planned: true, done: false, note: '도면 수령 지연 (삼성물산 회신 대기)' },
+  { id: 'lw2', site: '송파 헬리오시티 101동~109동', task: '106동 도면 사전 업로드', assignee: '백승희', planned: true, done: true, note: 'L1 CAD 업로드 완료' },
+  { id: 'lw3', site: '성북구 성북로 23-5', task: '하자점검 1차 비행', assignee: '백승희', planned: true, done: true, note: '하자 5건 검출' },
+  { id: 'lw4', site: '판교 알파돔시티 A·B·C동', task: '사전 도면 확보 및 현장 답사', assignee: '오희진', planned: true, done: false, note: '도면 수령 지연 (삼성물산 회신 대기)' },
   { id: 'lw5', site: '위례 자이 201동~205동', task: '최종 보고서 납품', assignee: '유민수', planned: false, done: true, note: '긴급 요청으로 추가 진행' },
 ]
 
 /** 금주 계획 (Mock) */
 export const THIS_WEEK_TASKS = [
   { id: 'tw1', site: '송파 헬리오시티 101동~109동', task: '107동~109동 사전점검 비행', assignee: '유민수', priority: 'P1', targetDate: '04/21~22' },
-  { id: 'tw2', site: '성북구 성북로 23-5', task: '하자점검 2차 비행 + 보고서 작성', assignee: '김다연', priority: 'P1', targetDate: '04/22' },
-  { id: 'tw3', site: '판교 알파돔시티 A·B·C동', task: '도면 수령 및 L1 업로드', assignee: '이준혁', priority: 'P2', targetDate: '04/23' },
-  { id: 'tw4', site: '강남 래미안 1단지 103동 1201호', task: '담당자 배정 및 일정 조율', assignee: '미정', priority: 'P2', targetDate: '04/24' },
+  { id: 'tw2', site: '성북구 성북로 23-5', task: '하자점검 2차 비행 + 보고서 작성', assignee: '백승희', priority: 'P1', targetDate: '04/22' },
+  { id: 'tw3', site: '판교 알파돔시티 A·B·C동', task: '도면 수령 및 L1 업로드', assignee: '오희진', priority: 'P2', targetDate: '04/23' },
+  { id: 'tw4', site: '강남 래미안 1단지 103동 1201호', task: '담당자 배정 및 일정 조율', assignee: '백승희', priority: 'P2', targetDate: '04/24' },
   { id: 'tw5', site: '—', task: '월간 경향보고서 작성 및 공유', assignee: '유민수', priority: 'P3', targetDate: '04/25' },
 ]
 
 /** 현안·리스크 (Mock) */
 export const ISSUES = [
-  { id: 'i1', level: 'red', title: '판교 알파돔시티 도면 미수령', desc: '삼성물산 측 도면 회신 3일째 지연 중. 5월 착수 일정에 영향 우려.', action: '금주 수요일까지 미수령 시 직접 방문 수령 예정' },
-  { id: 'i2', level: 'yellow', title: '강남 래미안 담당자 미배정', desc: 'B2C 의뢰 건 담당자 배정 필요. 점검일(4/25) 3일 전까지 확정 필요.', action: '김다연 대리 배정 검토 중' },
+  { id: 'i1', level: 'red', title: '판교 알파돔시티 도면 미수령', desc: '삼성물산 측 도면 회신 3일째 지연 중. 5월 착수 일정에 영향 우려.', action: '금주 수요일까지 미수령 시 오희진 직접 방문 수령 예정' },
+  { id: 'i2', level: 'yellow', title: '강남 래미안 담당자 배정 완료', desc: 'B2C 의뢰 건 담당자 배정 완료 (백승희). 점검일(4/25) 일정 확정.', action: '백승희 주도, 유민수 백업 지원' },
   { id: 'i3', level: 'green', title: '송파 헬리오시티 일정 정상 진행', desc: '전체 9동 중 6동 완료(66.7%), 금주 잔여 3동 점검 예정.', action: '예정대로 진행' },
 ]
 
