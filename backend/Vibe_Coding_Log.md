@@ -2168,3 +2168,11 @@ API 시그니처 변경에 따른 Store 수정:
 - **조직 정책 우회는 프로젝트 레벨 override 로 최소 침습**: 조직 전체에 `disableServiceAccountKeyCreation` 을 끄지 않고 이 프로젝트만 해제. 다른 프로젝트 보안 영향 없음.
 - **워크플로우 paths 필터**: monorepo 라 frontend/ 만 변경된 PR 도 Fly 배포가 트리거되던 미해결 이슈 → `paths: ["backend/**", ".github/workflows/fly-deploy.yml"]` 로 backend 변경 시에만 실행.
 
+
+### R28.6 Fly.io 배포 설정 파일 main 반영 (CI 통과용) (2026-05-04)
+
+GitHub Actions Fly Deploy 가 `fly.toml` 미커밋으로 'missing app name' 실패 → 누락된 배포 설정을 main 에 반영.
+- `fly.toml`: aeroinspect-backend 앱 설정
+- `.dockerignore`: 1.8GB models_weights/ + captured_frames/ + uploads/ 제외
+- `Dockerfile`: `libgl1-mesa-glx` → `libgl1` (Debian trixie 호환)
+- `.gitignore`: 학습 로그/uploads/.onnx.data 추가

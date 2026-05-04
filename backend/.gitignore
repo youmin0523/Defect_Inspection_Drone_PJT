@@ -22,6 +22,9 @@ __pycache__/
 models_weights/*.pt
 models_weights/*.pth
 models_weights/*.onnx
+models_weights/*.onnx.data
+models_weights/*.engine
+models_weights/*.bin
 
 # 학습 산출물 (수십 GB) — GCS로 별도 관리
 training/runs/
@@ -33,9 +36,22 @@ training/colab_results_backup/
 *.cache
 *.npy
 
+# 학습 로그 (큰 파일, 수십~수백 MB)
+training/*.log
+training/*.txt
+!training/datasets_sources.md
+!training/README.md
+
 # 하자 이미지 크롭 저장 디렉토리
 captured_frames/*
 !captured_frames/.gitkeep
+
+# 런타임 업로드 (프로필/평면도/채팅 첨부 등)
+uploads/
+
+# 학습 시 다운받은 모델 가중치 (yolov8m, yolo11l 등)
+*.pt
+yolo*.pt
 
 # 빌드 / 배포
 *.egg-info/
