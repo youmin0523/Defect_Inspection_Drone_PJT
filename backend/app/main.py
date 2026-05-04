@@ -234,8 +234,8 @@ app = FastAPI(
     lifespan=lifespan,
     openapi_tags=tags_metadata,
     servers=[
+        {"url": "https://aeroinspect-backend.fly.dev", "description": "Production (Fly.io)"},
         {"url": "http://localhost:8000", "description": "Local dev"},
-        # 운영/스테이징 도메인은 배포 확정 후 추가 (예시: {"url": "https://api.droneinspect.io", "description": "Production"}).
     ],
     swagger_ui_parameters={
         # 페이지 새로고침 후에도 Authorize 토큰 유지 — Swagger 사용성 핵심
