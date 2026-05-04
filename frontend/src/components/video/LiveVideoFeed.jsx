@@ -11,7 +11,7 @@
  *       - //* [Modified Code] mode prop: store 의 cameraMode 대신 명시 모드 사용 (PIP 멀티 피드용)
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import useDroneStore from '../../store/droneStore.js'
 import useSessionStore from '../../store/sessionStore.js'
 import useDefectStore from '../../store/defectStore.js'
@@ -57,6 +57,14 @@ export default function LiveVideoFeed({ fill = false, mode }) {
       : null
   const displayUrl = defectFrameUrl || streamUrl
   const isDefectView = !!defectFrameUrl
+
+  // src가 바뀌면 에러/로드 플래그 리셋 — 그렇지 않으면 이전 src에서 발생한 onError가
+  // 영구적으로 No-Signal 플레이스홀더에 고정되어, TEST MODE 진입(/stream/rgb → /stream/test/rgb)
+  // 후에도 새 스트림이 마운트되지 못함.
+  useEffect(() => {
+    setHasError(false)
+    setIsLoaded(false)
+  }, [displayUrl])
 
   // fill 모드: 부모(풀스크린 컨테이너) 를 꽉 채움. 일반 모드: 16/9 고정.
   const containerClass = fill
