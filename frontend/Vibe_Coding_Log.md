@@ -1981,3 +1981,19 @@ localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT �
 - **OAuth 콜백 단일 페이지화**: 3개 provider(Google/Kakao/Naver) 모두 `/oauth/callback?provider=...` 로 수렴 — provider별 별도 페이지 없이 단일 OAuthCallback.jsx 가 분기 처리.
 
 ---
+
+## 🛰 R13 — 슈퍼어드민 GPU 추론 서버 제어 페이지 (2026-05-04 오후)
+
+> 로컬 bat 파일을 폐기하고, 어떤 브라우저에서도 슈퍼어드민이면 GCP L4 GPU VM 을 켜고/끌 수 있는 페이지를 플랫폼 내부에 신설.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R13 | 2026-05-04 오후 | **AdminGpu 페이지 + 진입 카드** — 시작/정지/상태 + 마지막 시작 이후 누적 시간 + 예상 비용(시간당 $0.71) 표시. 10초 폴링으로 상태 자동 갱신. 시작/정지 전 확인 모달. 슈퍼어드민이 아니면 거부 화면. EmployeeLanding 의 QuickActions 에 슈퍼어드민 전용 카드(`Cpu` 아이콘, cyan accent) 추가. 라우트 `/employee/admin/gpu` (OrgRequired adminOnly 가드) | `pages/employee/AdminGpu.jsx` + `App.jsx` + `pages/EmployeeLanding.jsx` |
+
+### 📐 설계 결정 사항
+
+- **상용 멀티유저 전제**: 사용자 노트북 종속 X. 어떤 브라우저든 admin 로그인만 하면 제어 가능.
+- **권한 게이트 이중화**: 라우트 가드(`OrgRequired adminOnly`) + 페이지 본문(`isSuperadmin` 체크) + 백엔드(`require_superadmin`) 3단계로 차단. 일반 조직 admin/owner 도 GPU 제어는 불가.
+- **비용 가시화**: 단순 ON/OFF 만 노출하지 않고 마지막 시작 이후 경과 시간 + 누적 추정 비용을 항상 표시 → 운영자가 끄는 걸 깜빡하지 않도록 압박. 비용 가이드 카드도 페이지 하단에 상시 노출.
+- **확인 모달 필수**: 시작/정지 모두 확인 모달을 통과해야 실제 호출. 실수 클릭으로 추론 세션 끊기는 사고 방지.
+
