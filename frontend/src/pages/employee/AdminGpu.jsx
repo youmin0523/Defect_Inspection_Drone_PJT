@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { ArrowLeft, Power, PowerOff, RefreshCw, Cpu, AlertTriangle, Clock } from 'lucide-react'
+import { ArrowLeft, Power, PowerOff, RefreshCw, Cpu, AlertTriangle, Clock, RotateCcw } from 'lucide-react'
 import useAuthStore from '../../store/authStore'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
@@ -31,7 +31,16 @@ const STATUS_LABEL = {
 }
 
 const HOURLY_RATE_USD = 0.71  // L4 GPU asia-northeast3-a 기준
+const USD_TO_KRW = 1380       // 환율은 운영 시 환경변수로 빼는 게 정석. 데드라인상 상수 고정.
 const POLL_INTERVAL_MS = 10_000
+
+const formatMinutes = (totalSec) => {
+  const m = Math.floor(totalSec / 60)
+  const h = Math.floor(m / 60)
+  return h > 0 ? `${h}시간 ${m % 60}분` : `${m}분`
+}
+const usdFromSec = (sec) => (sec / 3600) * HOURLY_RATE_USD
+const krwFromUsd = (usd) => Math.round(usd * USD_TO_KRW)
 
 export default function AdminGpu() {
   const navigate = useNavigate()
@@ -42,7 +51,8 @@ export default function AdminGpu() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)  // start/stop 중일 때 버튼 비활성화
   const [error, setError] = useState('')
-  const [confirmAction, setConfirmAction] = useState(null)  // 'start' | 'stop' | null
+  const [confirmAction, setConfirmAction] = useState(null)  // 'start' | 'stop' | 'reset' | null
+  const [resetting, setResetting] = useState(false)
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
   const pollTimerRef = useRef(null)
@@ -94,21 +104,44 @@ export default function AdminGpu() {
     }
   }
 
-  // 누적 사용 시간/예상 비용 (마지막 start 이후, RUNNING 상태일 때만)
-  const runtimeInfo = useMemo(() => {
-    if (status?.status !== 'RUNNING' || !status?.last_start_at) return null
-    const startedAt = new Date(status.last_start_at)
-    const now = new Date()
-    const ms = now - startedAt
-    const totalMin = Math.floor(ms / 60000)
-    const hours = Math.floor(totalMin / 60)
-    const minutes = totalMin % 60
-    const cost = (totalMin / 60) * HOURLY_RATE_USD
+  // 이번 사이클(현재 RUNNING 중인 세션) — 백엔드 usage.in_progress_seconds 사용.
+  // GCP last_start_at 직접 계산보다 백엔드 추적이 reset/롤오버까지 정합.
+  const cycleInfo = useMemo(() => {
+    const sec = status?.usage?.in_progress_seconds ?? 0
+    if (sec <= 0) return null
+    const usd = usdFromSec(sec)
+    return { seconds: sec, label: formatMinutes(sec), usd, krw: krwFromUsd(usd) }
+  }, [status])
+
+  // 이번 달 누적 (KST 매월 1일 자동 롤오버, 사용자 리셋 시 그 시점 이후만 누적)
+  const monthInfo = useMemo(() => {
+    const usage = status?.usage
+    if (!usage) return null
+    const sec = usage.total_seconds ?? 0
+    const usd = usdFromSec(sec)
     return {
-      label: hours > 0 ? `${hours}시간 ${minutes}분` : `${minutes}분`,
-      costUsd: cost,
+      seconds: sec,
+      label: formatMinutes(sec),
+      usd,
+      krw: krwFromUsd(usd),
+      periodLabel: usage.period_label,
+      periodStart: usage.period_start,
     }
   }, [status])
+
+  const handleReset = async () => {
+    setResetting(true)
+    setError('')
+    try {
+      await axios.post(`${API_BASE}/api/v1/admin/gpu/usage/reset`, {}, { headers })
+      await fetchStatus()
+    } catch (err) {
+      setError(err.response?.data?.detail || '누적 사용량 초기화에 실패했습니다.')
+    } finally {
+      setResetting(false)
+      setConfirmAction(null)
+    }
+  }
 
   if (!isSuperadmin) {
     return (
@@ -180,19 +213,52 @@ export default function AdminGpu() {
             </button>
           </div>
 
-          {/* 실행 중일 때 누적 사용 시간 + 예상 비용 */}
-          {runtimeInfo && (
-            <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-1 text-xs text-gray-400 mb-1"><Clock className="w-3 h-3" /> 마지막 시작 후 경과</div>
-                <div className="font-semibold text-slate-900">{runtimeInfo.label}</div>
+          {/* 사용량 카드: 이번 사이클 + 이번 달 누적 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 text-sm">
+            {/* 이번 사이클 — RUNNING 중일 때만 의미 있음 */}
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <div className="flex items-center gap-1 text-xs text-gray-400 mb-1">
+                <Clock className="w-3 h-3" /> 이번 사이클 (현재 실행)
               </div>
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <div className="text-xs text-gray-400 mb-1">이번 세션 누적 비용 (추정)</div>
-                <div className="font-semibold text-slate-900">${runtimeInfo.costUsd.toFixed(2)}</div>
-              </div>
+              {cycleInfo ? (
+                <>
+                  <div className="font-semibold text-slate-900">{cycleInfo.label}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    ${cycleInfo.usd.toFixed(2)} · ₩{cycleInfo.krw.toLocaleString('ko-KR')}
+                  </div>
+                </>
+              ) : (
+                <div className="text-gray-400 text-xs">실행 중 아님</div>
+              )}
             </div>
-          )}
+
+            {/* 이번 달 누적 */}
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-xs text-gray-400">
+                  이번 달 누적{monthInfo?.periodLabel ? ` (${monthInfo.periodLabel})` : ''}
+                </div>
+                <button
+                  onClick={() => setConfirmAction('reset')}
+                  disabled={resetting || !monthInfo}
+                  title="누적 초기화 — 이 시점 이후로 다시 카운트"
+                  className="p-1 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-700 disabled:opacity-40"
+                >
+                  <RotateCcw className={`w-3 h-3 ${resetting ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+              {monthInfo ? (
+                <>
+                  <div className="font-semibold text-slate-900">{monthInfo.label}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    ${monthInfo.usd.toFixed(2)} · ₩{monthInfo.krw.toLocaleString('ko-KR')}
+                  </div>
+                </>
+              ) : (
+                <div className="text-gray-400 text-xs">집계 대기 중</div>
+              )}
+            </div>
+          </div>
 
           {/* 버튼 */}
           <div className="grid grid-cols-2 gap-3">
@@ -234,27 +300,40 @@ export default function AdminGpu() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl">
               <h3 className="text-lg font-bold text-slate-900 mb-2">
-                {confirmAction === 'start' ? 'GPU 서버를 시작할까요?' : 'GPU 서버를 정지할까요?'}
+                {confirmAction === 'start' && 'GPU 서버를 시작할까요?'}
+                {confirmAction === 'stop' && 'GPU 서버를 정지할까요?'}
+                {confirmAction === 'reset' && '이번 달 누적 사용량을 초기화할까요?'}
               </h3>
               <p className="text-sm text-gray-600 mb-5">
-                {confirmAction === 'start'
-                  ? `시작 직후 시간당 ~$${HOURLY_RATE_USD.toFixed(2)} 과금이 시작됩니다. 점검이 끝나면 반드시 정지해주세요.`
-                  : '진행 중인 추론 세션이 모두 끊깁니다. 점검이 완전히 끝났는지 확인해주세요.'}
+                {confirmAction === 'start' && `시작 직후 시간당 ~$${HOURLY_RATE_USD.toFixed(2)} 과금이 시작됩니다. 점검이 끝나면 반드시 정지해주세요.`}
+                {confirmAction === 'stop' && '진행 중인 추론 세션이 모두 끊깁니다. 점검이 완전히 끝났는지 확인해주세요.'}
+                {confirmAction === 'reset' && '누적이 0으로 초기화되고, 지금 시점부터 다시 카운트됩니다. 진행 중인 세션은 절단되어 새 누적의 일부로만 잡힙니다.'}
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setConfirmAction(null)}
-                  disabled={busy}
+                  disabled={busy || resetting}
                   className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition disabled:opacity-50"
                 >
                   취소
                 </button>
                 <button
-                  onClick={confirmAction === 'start' ? handleStart : handleStop}
-                  disabled={busy}
-                  className={`flex-1 px-4 py-2.5 text-white rounded-lg transition disabled:opacity-50 ${confirmAction === 'start' ? 'bg-green-600 hover:bg-green-700' : 'bg-slate-900 hover:bg-slate-800'}`}
+                  onClick={
+                    confirmAction === 'start' ? handleStart
+                    : confirmAction === 'stop' ? handleStop
+                    : handleReset
+                  }
+                  disabled={busy || resetting}
+                  className={`flex-1 px-4 py-2.5 text-white rounded-lg transition disabled:opacity-50 ${
+                    confirmAction === 'start' ? 'bg-green-600 hover:bg-green-700'
+                    : confirmAction === 'reset' ? 'bg-amber-600 hover:bg-amber-700'
+                    : 'bg-slate-900 hover:bg-slate-800'
+                  }`}
                 >
-                  {busy ? '처리 중...' : confirmAction === 'start' ? '시작' : '정지'}
+                  {(busy || resetting) ? '처리 중...'
+                    : confirmAction === 'start' ? '시작'
+                    : confirmAction === 'reset' ? '초기화'
+                    : '정지'}
                 </button>
               </div>
             </div>
