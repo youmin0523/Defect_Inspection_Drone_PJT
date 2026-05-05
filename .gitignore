@@ -103,3 +103,5 @@ runs/
 # AI Agent Temp Dirs (Gemini, Taskmaster)
 .gemini/
 .taskmaster/
+# 분리 backend repo의 자체 워크플로우 (통합 repo는 추적 X)
+backend/.github/workflows/fly-deploy.yml
