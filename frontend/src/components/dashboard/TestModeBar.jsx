@@ -8,10 +8,11 @@
 
 import { useCallback, useRef, useState } from 'react'
 import {
-  FlaskConical, Upload, Trash2, FolderOpen, Check, Loader2,
+  Camera, FlaskConical, Upload, Trash2, FolderOpen, Check, Loader2,
   Database, HardDrive, Play, Pause, Square, Box, ScanSearch,
 } from 'lucide-react'
 import useSessionStore from '../../store/sessionStore.js'
+import useDefectStore from '../../store/defectStore.js'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -22,6 +23,8 @@ export default function TestModeBar() {
   const setTestPlayState = useSessionStore((s) => s.setTestPlayState)
   const testDetectionMode = useSessionStore((s) => s.testDetectionMode)
   const setTestDetectionMode = useSessionStore((s) => s.setTestDetectionMode)
+  const resetTestGate = useDefectStore((s) => s.resetTestGate)
+  const setDefects = useDefectStore((s) => s.setDefects)
   const fileInputRef = useRef(null)
 
   const [uploadedCount, setUploadedCount] = useState(0)
@@ -35,13 +38,16 @@ export default function TestModeBar() {
 
   // 재생 제어
   const handleStart = useCallback(async () => {
+    // ① 게이트 닫고 큐 비우기 + 이전 사이클 누적 카드 제거
+    resetTestGate()
+    setDefects([])
     try {
       const res = await fetch(`${API_BASE}/api/v1/stream/test/start`, { method: 'POST' })
       if (res.ok) setTestPlayState('playing')
     } catch (err) {
       console.warn('[TestMode] 시작 실패:', err)
     }
-  }, [setTestPlayState])
+  }, [resetTestGate, setDefects, setTestPlayState])
 
   const handlePause = useCallback(async () => {
     try {
@@ -64,11 +70,14 @@ export default function TestModeBar() {
   const handleStop = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/v1/stream/test/stop`, { method: 'POST' })
-      if (res.ok) setTestPlayState('stopped')
+      if (res.ok) {
+        setTestPlayState('stopped')
+        resetTestGate()  // 잔여 큐 폐기 + 게이트 닫음
+      }
     } catch (err) {
       console.warn('[TestMode] 정지 실패:', err)
     }
-  }, [setTestPlayState])
+  }, [resetTestGate, setTestPlayState])
 
   // 감지 모드 전환 (백엔드 동기화)
   const switchDetectionMode = useCallback(async (newMode) => {
@@ -96,12 +105,14 @@ export default function TestModeBar() {
         body: JSON.stringify({ source: newSource }),
       })
       setTestSource(newSource)
+      // 새 소스의 첫 프레임이 다시 떠야 우측 패널 갱신을 허용
+      resetTestGate()
     } catch (err) {
       console.warn('[TestMode] 소스 전환 실패:', err)
     } finally {
       setSwitchingSource(false)
     }
-  }, [testSource, setTestSource, switchingSource])
+  }, [testSource, setTestSource, switchingSource, resetTestGate])
 
   // 파일 업로드
   const handleFileChange = useCallback(async (e) => {
@@ -134,16 +145,20 @@ export default function TestModeBar() {
   }, [])
 
   return (
-    <div className="absolute top-[56px] left-0 right-0 z-20 flex items-center justify-center px-5 py-2 pointer-events-none">
-      <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-neutral-900/80 border border-red-500/40 backdrop-blur-sm shadow-lg pointer-events-auto">
+    /* //* [Modified Code] 반응형:
+       - 모바일(<md): 자연 흐름 + 가로 스크롤 (DashboardTopBar 가 모바일에서 relative 라 흐름 안 자리)
+       - 태블릿/데스크탑(md+): TopBar 가 absolute 라 자체도 absolute top-[56px] 로 띄움 + 컨텐츠 가로 스크롤 fallback */
+    <div className="relative md:absolute md:top-[56px] md:left-0 md:right-0 z-20 flex items-center justify-start md:justify-center px-3 md:px-5 py-2 pointer-events-none overflow-x-auto">
+      <div className="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2 rounded-xl bg-neutral-900/80 border border-blue-500/40 backdrop-blur-sm shadow-lg pointer-events-auto whitespace-nowrap shrink-0">
 
-        {/* TEST MODE 라벨 */}
+        {/* 1차 배포: 영상 수신기 미도착으로 testMode 를 "현장 점검" 으로 위장 노출.
+            수신기 도착 후 라벨/색상/아이콘 원복: Camera→FlaskConical, blue→red, "현장 점검"→"Test Mode" */}
         <div className="flex items-center gap-2">
-          <div className="p-1 bg-red-500 rounded-md">
-            <FlaskConical size={12} className="text-white" />
+          <div className="p-1 bg-blue-600 rounded-md">
+            <Camera size={12} className="text-white" />
           </div>
-          <span className="text-[11px] font-bold tracking-wider text-red-400 uppercase">
-            Test Mode
+          <span className="text-[11px] font-bold tracking-wider text-blue-300">
+            현장 점검
           </span>
         </div>
 

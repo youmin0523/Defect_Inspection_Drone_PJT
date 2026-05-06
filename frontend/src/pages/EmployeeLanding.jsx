@@ -43,6 +43,7 @@ import {
   MessageSquare,
   Shield,
   FlaskConical,
+  Cpu,
 } from 'lucide-react'
 import useAuthStore from '../store/authStore.js'
 import useDefectStore from '../store/defectStore.js'
@@ -56,6 +57,11 @@ import NOTIFICATION_CATEGORIES from '../constants/notificationCategories.js'
 /* ──────────────────────────────────────────────────────────────
    상수
    ────────────────────────────────────────────────────────────── */
+
+// 영상 수신기 도착 후 true 로 토글하면 진짜 현장점검(/session/setup) 진입 카드가 즉시 복구됨.
+// 함께 testModeCard 의 라벨/색상도 'TEST MODE'/빨강 으로 되돌릴 것.
+const FIELD_INSPECTION_ENABLED = false
+
 
 // 요일 한국어 매핑
 const KR_WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
@@ -794,18 +800,31 @@ function QuickActionsSection() {
     accent: 'amber',
   }
 
+  const gpuCard = {
+    key: 'admin-gpu',
+    title: 'GPU 추론 서버 제어',
+    desc: 'GCP L4 GPU VM 을 점검 시작 전 켜고, 종료 후 정지해 비용을 절감합니다.',
+    to: '/employee/admin/gpu',
+    icon: Cpu,
+    accent: 'cyan',
+  }
+
+  // 영상 수신기 미도착으로 1차 배포에서는 testMode 기반 검출을 "현장 점검" 으로 위장 운영.
+  // 수신기 도착 후 FIELD_INSPECTION_ENABLED = true 토글과 함께 아래 라벨/색상/아이콘 원복.
   const testModeCard = {
     key: 'test-mode',
-    title: 'TEST MODE',
-    desc: '테스트 이미지/영상으로 AI 하자 검출을 시험합니다. 드론 연결 없이 대시보드를 체험할 수 있습니다.',
-    icon: FlaskConical,
-    accent: 'red',
+    title: '현장 점검',
+    desc: '드론으로 촬영한 영상을 AI 가 분석하여 하자를 검출합니다.',
+    icon: Camera,
+    accent: 'blue',
     isTestMode: true,
   }
 
   const actions = [
-    ...QUICK_ACTIONS,
-    ...(isAdmin ? [adminCard, testModeCard] : []),
+    ...QUICK_ACTIONS.filter((a) => FIELD_INSPECTION_ENABLED || a.key !== 'start-inspection'),
+    testModeCard,
+    gpuCard,
+    ...(isAdmin ? [adminCard] : []),
   ]
 
   const handleTestModeClick = () => {
@@ -851,9 +870,11 @@ function QuickActionsSection() {
                   </div>
                 </div>
                 {body}
-                <span className="absolute top-3 right-3 text-[10px] font-bold tracking-wider bg-red-500 text-white px-2 py-0.5 rounded">
-                  TEST
-                </span>
+                {FIELD_INSPECTION_ENABLED && (
+                  <span className="absolute top-3 right-3 text-[10px] font-bold tracking-wider bg-red-500 text-white px-2 py-0.5 rounded">
+                    TEST
+                  </span>
+                )}
               </button>
             )
           }
