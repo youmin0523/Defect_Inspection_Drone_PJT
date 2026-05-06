@@ -221,10 +221,16 @@
 - [x] **문서 동기화 (1차)** — API 명세서 v1.1 → v1.2, ERD v1.0 → v1.1, Vibe_Coding_Log backend R19~R25 / frontend R10~R12 append
 - [x] **문서 양식 정정 (R26 후속)** — tasks 문서 부록을 본문 인라인으로 재배치 + 파일명 rename + 팀명 `다마코더 → AeroInspect` 일괄 + 가이드 3종 문서이력 위치 정정 + `CHANGES_2026-05-03.md` 신설
 - [x] **alembic upgrade head + seed_demo_data 실 적용** — 분기 head 병합(`89b53c16de85`) + 누락 컬럼 10건 `ADD COLUMN IF NOT EXISTS` 보정 + 시드 결과: sites=8 / defects=315 / reports=12 / schedules=3 (잠실 리센츠 14:00 KST 백승희 검증)
+- [x] **(2026-05-06)** 브라우저 탭 favicon 일원화 — 누락된 `/drone-icon.svg` 참조 제거, `frontend/public/`에 favicon.ico(16/32/48 다중 entry) + favicon-{16,32,192,512}.png + apple-touch-icon.png(180×180) 신규 + `index.html` link 5줄 명시 등록. 로고 알파 row 스캔으로 graphic/text 자동 분리 → 텍스트 제외 그래픽만 favicon 화
+- [x] **(2026-05-06, R19 후속)** favicon 흰 원 배경 추가 + 로고 확대 — 다크 탭/작은 사이즈 시인성 보강. 512×512 master `FillEllipse` 흰 원 + inscribed 사각형 92% 기준(333×312) 로고 fit + 모든 ico/PNG 갱신
 
 ---
 
 ## Revision History
+
+### v5.2_260506 (작성자: @youminsu0523 / branch: main)
+- Phase 27 추가 완료 항목: 브라우저 탭 favicon 자체 로고 적용 (frontend R19) — ico/PNG 다중 등록 + 알파 row 스캔으로 graphic/text 자동 분리 + 정사각 캔버스 가운데 배치. 배포 사이트 globe 기본 favicon 이슈 해소.
+- Phase 27 추가 완료 항목: favicon 흰 원 배경 + 로고 확대 (frontend R23, R19 후속) — 다크 탭/작은 사이즈에서 어두운 푸른빛이 묻히는 이슈 해결. 512×512 master 흰 원 fillEllipse + inscribed 사각형 92% 기준 로고 재배치.
 
 ### v5.1_260503 (작성자: @youminsu0523 / branch: MS)
 - Phase 27 추가 완료 항목: alembic 분기 head 병합(`89b53c16de85`) + `defect_logs` 누락 컬럼 ALTER 보정 + `seed_demo_data --reset` 실행 (sites=8/defects=315/reports=12/schedules=3). tasks 문서 양식 정정 (API v1.2/ERD v1.1 인라인 + 파일 rename + 팀명 일괄). CHANGES_2026-05-03.md 신설.

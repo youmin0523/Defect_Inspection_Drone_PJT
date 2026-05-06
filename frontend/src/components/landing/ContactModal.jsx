@@ -124,12 +124,14 @@ export default function ContactModal({ isOpen, onClose }) {
         onClick={onClose}
       />
 
-      {/* 모달 본체 — overflow-hidden 으로 자식 모서리 clip (라운드 안티앨리어싱 영역 흰색 노출 방지) */}
+      {/* 모달 본체 — 부모 배경을 헤더와 동일한 slate-900 으로 맞춰
+          라운드 모서리 안티앨리어싱 픽셀이 헤더 색에 자연스럽게 묻히도록.
+          폼 영역은 자체 bg-white + flex-1 로 부모 잔여 영역을 모두 채워 흰 배경 보장. */}
       <div
         ref={dialogRef}
-        className="relative w-full max-w-2xl max-h-[92vh] bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+        className="relative w-full max-w-2xl max-h-[92vh] bg-slate-900 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
       >
-        {/* 헤더 — 부모 overflow-hidden 으로 자동 라운드 clip되므로 rounded-t-2xl 불필요 */}
+        {/* 헤더 */}
         <div className="bg-slate-900 text-white py-5 px-6 text-center relative shrink-0">
           <button
             type="button"
@@ -147,8 +149,8 @@ export default function ContactModal({ isOpen, onClose }) {
           </p>
         </div>
 
-        {/* 폼 — 헤더는 sticky, 폼만 스크롤 */}
-        <form onSubmit={handleSubmit} className="p-6 md:p-7 space-y-4 overflow-y-auto">
+        {/* 폼 — bg-white + flex-1 로 부모(slate-900) 잔여 영역을 모두 채워 흰 배경 보장. 헤더는 고정, 폼만 스크롤. */}
+        <form onSubmit={handleSubmit} className="bg-white p-6 md:p-7 space-y-4 overflow-y-auto flex-1">
           {/* 고객 유형 */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">

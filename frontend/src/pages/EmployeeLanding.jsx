@@ -870,9 +870,11 @@ function QuickActionsSection() {
                   </div>
                 </div>
                 {body}
-                <span className="absolute top-3 right-3 text-[10px] font-bold tracking-wider bg-red-500 text-white px-2 py-0.5 rounded">
-                  TEST
-                </span>
+                {FIELD_INSPECTION_ENABLED && (
+                  <span className="absolute top-3 right-3 text-[10px] font-bold tracking-wider bg-red-500 text-white px-2 py-0.5 rounded">
+                    TEST
+                  </span>
+                )}
               </button>
             )
           }

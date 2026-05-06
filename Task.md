@@ -261,6 +261,10 @@
 
 ## Revision History
 
+### v5.2_260506 (작성자: @youminsu0523 / branch: main)
+- **(frontend R19)** 브라우저 탭 favicon = 자체 로고 그래픽만 적용 — `frontend/public/`에 favicon.ico(16/32/48 다중 entry) + favicon-{16,32,192,512}.png + apple-touch-icon.png(180×180) 신규. `frontend/index.html` 의 누락 자산 참조 `/drone-icon.svg` 1줄 → ico/PNG 5줄 명시 등록으로 교체. PowerShell + System.Drawing 알파 row 스캔으로 로고 graphic/text 자동 분리(rows 59–252, cols 235–441), 정사각 캔버스 가운데 배치(텍스트 "DRONE INSPECT / PRECISION DEFECT ANALYSIS" 제외). 배포 사이트 globe 기본 favicon 이슈 해소.
+- **(frontend R23, R19 후속)** favicon 흰 원 배경 추가 + 로고 확대 — 다크 탭/작은 사이즈에서 어두운 푸른빛이 잘 안 보이는 이슈 해결(구글 G 스타일). 512×512 master 캔버스에 흰 원(`FillEllipse(0,0,512,512)`) + inscribed 사각형 92%(333×312) 기준 로고 가운데 fit + 모든 사이즈 재생성 + 픽셀 검증.
+
 ### v5.1_260503 (작성자: @youminsu0523 / branch: MS)
 - **tasks 문서 양식 정정**: API 명세서 `v1.1.md → v1.2.md` 파일명 rename + 부록을 4.17/2.1.5/8.5 인라인으로 분산. ERD `v1.0.md → v1.1.md` rename + 4.19/5장/6장/8.3/12.1/13장 인라인 갱신, 문서 이력 위치 마지막→목차 이전 이동. 가이드 3종(AI 추론/Frontend/Backend) 도 문서 이력 위치 정정. tasks 8개 문서 팀명 `다마코더 → AeroInspect` 일괄 교체.
 - **DB 마이그레이션 + 시드 실 적용**: alembic 분기 head 병합(`89b53c16de85`) + `defect_logs` 누락 컬럼 10개 ALTER 보정 + `seed_demo_data --reset` 실행 → org/depts/users(백승희·오희진)/sites=8/defects=315/reports=12/today_schedules=3 (잠실 리센츠 14:00 KST 백승희 정상 시드).

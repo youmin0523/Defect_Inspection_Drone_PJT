@@ -2295,3 +2295,125 @@ R20 ~ R22 동안 Footer 를 슬림하게 만들고 `100dvh` / `min-h-0` 등으�
 
 ---
 
+## 🛰 R27 — 푸터 법적 정보 모달 (서비스 이용약관 / 개인정보처리방침 / 이메일 무단수집 거부) (2026-05-06 13:30)
+
+> 사용자 피드백: Footer 에 서비스 이용약관, 개인정보처리방침, 이메일 무단수집 거부 등을 누르면 볼 수 있게 추가.
+
+### 🎯 구현 결정
+
+페이지(`/terms`, `/privacy` 등) vs 모달 → **모달 채택**. 이유: (1) 랜딩 페이지에서 정보 확인 후 자연스럽게 본 흐름으로 복귀 가능, (2) 라우트/SEO 부담 없음, (3) 정식 법무 검토 후 정식 페이지로 승격 시 큰 리팩터 없이 컨텐츠만 옮기면 됨. 한국 메이저 SaaS(토스/카카오 등) 도 푸터 법적 정보를 모달로 처리하는 사례 多.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R27 | 2026-05-06 13:30 | **(1) 법적 컨텐츠 데이터** — `frontend/src/data/legalContents.js` 신규. `LEGAL_CONTENTS` 객체에 3종(`terms` / `privacy` / `noEmail`) 정의. 각 항목: `title`, `effectiveDate`, `sections` 배열(heading + body). `terms` 8조(목적·정의·약관변경·서비스내용·이용자의무·해지·책임제한·분쟁해결 + 부칙), `privacy` 8조(목적·수집항목·보유기간·제3자제공·정보주체권리·안전성조치·보호책임자·변경공지) — 한국 「개인정보 보호법」제30조 의무 항목 모두 커버. `noEmail` 은 「정보통신망법」제50조의2 정확 인용. 모두 임시 초안이며 정식 게시 전 법무 검토 명시. **(2) LegalModal 컴포넌트** — `frontend/src/components/landing/LegalModal.jsx` 신규. ContactModal 패턴 차용(ESC + 백드롭 + body 스크롤 잠금). `type` prop 으로 `LEGAL_CONTENTS` 분기. 헤더(sticky)·본문(섹션별 heading + whitespace-pre-line body)·푸터 닫기버튼(sticky) 3분할. max-h-[85vh] 자체 스크롤. **(3) Footer 통합** — `LEGAL_LINKS` 배열 정의 후 Copyright 라인 우측에 `<button>` 으로 렌더. `setLegalType` state 로 모달 토글. `개인정보처리방침` 만 `text-white font-semibold` 강조(개인정보보호법 권고 — 강조 표기 의무). `<LegalModal>` 을 footer 끝에서 렌더. 가운데 점(`|`) separator 로 3개 링크 구분. | `data/legalContents.js`(신규) + `components/landing/LegalModal.jsx`(신규) + `components/landing/Footer.jsx`(수정) |
+
+### 📐 설계 결정 사항
+
+- **모달 vs 페이지**: 정식 법무 게시 전 단계라 페이지 신설(=라우트·SEO 진입점) 부담이 큼. 모달은 풋프린트 작고 컨텐츠 교체 쉬움. 정식 게시 시점에 `LEGAL_CONTENTS` 만 풀텍스트로 교체 → 모달 구조는 그대로 유지 가능. 추후 `/terms` 같은 정식 페이지로 승격 시 동일 데이터 재사용 가능(데이터/UI 분리).
+- **3종 모두 임시 초안 명시**: `terms` `privacy` 는 법령상 형식 요건이 있어 정식 게시 시 법무 검토 필수. R27 의 컨텐츠는 한국 SaaS 표준 템플릿 + DRONE INSPECT 서비스 특성 반영 초안. 부칙/말미에 "본 약관/처리방침은 정식 게시 전 임시 초안입니다. 법무 검토 후 정식 약관으로 교체될 예정입니다." 명시 → 사용자에게 정식본 아님을 투명 고지.
+- **`noEmail` 은 표준 법령 인용**: 「정보통신망법」제50조의2 의 무단수집 금지 조항을 그대로 인용. 표준 문안이라 법무 검토 부담 zero, 즉시 게시 가능.
+- **`개인정보처리방침` 강조 표기**: 「개인정보 보호법」 시행령상 처리방침은 "개인정보처리자가 개인정보 처리방침을 정보주체가 쉽게 확인할 수 있도록 강조하여 표시" 권고. `text-white font-semibold` 로 다른 링크 대비 시각적으로 두드러지게 → 권고 사항 충족.
+- **`<address>` / `<nav aria-label>` / `role="dialog" aria-modal`**: 시맨틱 + 접근성. 푸터 연락처는 `<address>`(R26), 법적 정보 링크 그룹은 `<nav aria-label="법적 정보">`, 모달은 `role="dialog" aria-modal="true" aria-labelledby="legal-modal-title"`. 스크린리더 사용자도 푸터 구조 명확히 인식.
+- **모달 컨텐츠 자체 스크롤(`max-h-[85vh] overflow-y-auto`)**: 약관·처리방침은 길어 viewport 초과 가능. 모달 자체에 스크롤바 → body 는 스크롤 잠금. 작은 viewport 에서도 헤더(제목+닫기)·푸터(확인 버튼) sticky 로 항상 보임.
+
+---
+
+## 🛰 R28 — 법적 모달 z-index 수정 + Plan B 베타 임시본 배너 (2026-05-06 13:50)
+
+> 사용자 피드백: (1) 모달 위로 LandingHeader 의 네비 링크(서비스 소개/핵심 기술/도입 사례) 가 오버레이 되어 보임 → z-index 충돌. (2) 정식 법무 검토 보류 결정 → Plan B(베타 임시본 명시 후 게시) 진행 결정.
+
+### 🔍 z-index 진단
+
+LandingHeader: `fixed top-0 ... z-50`. 기존 ContactModal: `fixed inset-0 z-[100]`. R27 LegalModal 작성 시 임의로 `z-[60]` 사용 — **header z-50 보다 높지만 ContactModal 패턴(z-100)과 불일치**. Tailwind JIT 의 arbitrary value 처리 또는 stacking context 충돌로 일부 환경에서 z-[60] 이 z-50 을 안정적으로 덮지 못함. ContactModal 의 검증된 z-[100] 패턴으로 통일.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R28 | 2026-05-06 13:50 | **(1) z-index 통일** — LegalModal `z-[60]` → `z-[100]` (ContactModal 동일). header z-50 위에 안정적으로 오버레이. **(2) Plan B 베타 임시본 배너** — `legalContents.js` 에 `BETA_NOTICE_ENABLED` 플래그(true) + 각 컨텐츠에 `isBeta` boolean 추가. terms/privacy = `isBeta: true`(법무 검토 미완료), noEmail = `isBeta: false`(법령 직접 인용이라 즉시 게시 가능). LegalModal 본문 상단(헤더 sticky 영역 직하)에 빨간 경고 배너 조건부 렌더 — `BETA_NOTICE_ENABLED && content.isBeta` 시. 배너 내용: ⚠️ 아이콘 + "베타 테스트용 임시본 안내" 굵은 제목 + "본 [제목]은 베타 서비스 운영을 위한 임시본이며, 정식 서비스 개시 전 법무 검토를 거쳐 정식 약관으로 교체될 예정입니다. 정식본 게시 시 이용자에게 별도 통지하고 재동의를 받습니다." 본문. `bg-red-50 border-red-200 text-red-800` 톤. **(3) 정식 게시 시 배너 제거 절차** — `BETA_NOTICE_ENABLED = false` 로 토글하면 모든 모달에서 배너 자동 사라짐. 또는 항목별 `isBeta: false` 로 개별 해제 가능. | `LegalModal.jsx` + `data/legalContents.js` |
+
+### 📐 설계 결정 사항
+
+- **`BETA_NOTICE_ENABLED` + `isBeta` 이중 플래그**: 글로벌 토글(전체 베타 모드 해제) + 항목별 토글(예: terms 만 정식 게시, privacy 는 베타) 둘 다 지원. `BETA_NOTICE_ENABLED && content.isBeta` AND 조건이라 둘 중 하나라도 false 면 배너 안 뜸.
+- **noEmail 배너 제외 결정**: 법령 직접 인용(정보통신망법 §50조의2)이라 법무 검토 불필요. 처음부터 `isBeta: false` 로 정식 게시 가능. terms/privacy 만 임시본 표시 → 사용자에게 어떤 항목이 임시이고 어떤 항목이 정식인지 명확.
+- **Plan B 의 법적 안전망 의의**: 정식 약관 게시 전이라도 베타 서비스 운영 중 분쟁 발생 시, **"이용자가 임시본임을 명확히 인지하고 동의했다"** 는 점이 회사의 책임 경감 사유로 작용 가능. 단, 이게 면책 사유는 아니므로 **정식 게시까지 빠른 시일 내 진행 필수**.
+- **재동의 약속의 신뢰성**: 배너에 "정식본 게시 시 이용자에게 별도 통지하고 재동의를 받습니다" 명시. 추후 정식 게시 시 이 약속을 반드시 이행해야 신뢰 손상 방지 (예: 회원에게 이메일 통지 + 다음 로그인 시 재동의 모달).
+- **배너 디자인 — `bg-red-50` 의 의도**: 일반 정보 알림(`bg-blue-50`) 이 아닌 경고 톤(빨강) 사용. 사용자에게 "이건 정식 약관이 아니다" 라는 사실을 시각적으로 강하게 전달 → 임시본 임을 가볍게 넘기지 않도록.
+
+### R28.1 — 모달 backdrop 강화 (2026-05-06 14:00)
+
+> 사용자 피드백: z-[100] 적용 후에도 여전히 모달 위·아래 영역에 Footer 의 SITEMAP 네비(서비스 소개/핵심 기술/도입 사례) 가 비쳐 보임.
+
+진단: z-index 자체는 정상(z-[100] > z-50). 진짜 원인은 **backdrop 투명도** — `bg-black/60 backdrop-blur-sm` 조합이 약해서 모달 max-h-[85vh] 의 위·아래 7.5vh 빈 영역에서 Footer 의 흰색 SITEMAP 텍스트(다크 slate-950 배경 위) 가 고대비라 60% 검정 + 4px 블러 를 뚫고 보임.
+
+조치: `bg-black/60 backdrop-blur-sm` → `bg-black/80 backdrop-blur-md` (opacity 60→80%, blur 4→12px). 흰색 고대비 텍스트도 완전 obscure.
+
+### R28.2 — backdrop 완전 차단 + 모달 max-h 확대 (2026-05-06 14:10)
+
+> 사용자 피드백: 80% + blur-md 도 부족. Footer SITEMAP nav 가 여전히 비침.
+
+진단: 모달 max-h-[85vh] 의 잔여 영역 7.5vh × 2 가 viewport 하단의 Footer 와 겹쳐, 흰 nav 텍스트의 고대비가 80% 불투명도도 뚫음. 또 lg 이상 viewport 에서 모달 너비(max-w-3xl ≈ 768px) 좌우 backdrop 영역이 더 넓어 노출 표면 증가.
+
+조치 (조합):
+- backdrop `bg-black/80 backdrop-blur-md` → `bg-slate-950/95 backdrop-blur-lg` (95% 사실상 불투명 + 16px 블러)
+- 모달 `max-h-[85vh]` → `max-h-[92vh]` (잔여 backdrop 영역 절반 이하로 축소, 7.5→4vh each side)
+
+`slate-950` (rgb(2,6,23)) 은 순수 검정보다 약간 부드럽지만 95% 불투명도면 시각적으로 검정 패널과 동일. blur-lg 는 16px 로 텍스트 형태 자체를 인지 불가 수준으로 흐림.
+
+### R28.3 — React Portal + ContactModal 패턴 차용 + 볼드 해제 (2026-05-06 14:25)
+
+> 사용자 피드백: R28.2(95% slate-950 + blur-lg + max-h-92vh) 적용 후에도 동일 증상 — 모달 sticky bottom 영역 안에 Footer SITEMAP nav 가 비치고, 모달 외부 backdrop 영역에도 Footer 법적 링크 비침. **그리고 `개인정보처리방침` 만 볼드 처리한 이유 질문**.
+
+진단:
+1. **z-index/투명도 문제 아님** — 95% slate-950 + lg blur 면 시각적으로 거의 검정 패널 수준. 그래도 비친다는 건 다른 원인.
+2. **추정 원인**: 기존 LegalModal 구조가 `<div fixed bg-... z-100>` 한 layer 에 backdrop + 정렬 + bg 를 모두 담음. 이 패턴에서 Tailwind 의 `bg-{color}/{opacity}` 가 일부 환경(브라우저 캐시·HMR·중첩 stacking context) 에서 의도와 다르게 처리될 수 있음. ContactModal 은 검증된 패턴(`외곽 fixed flex centering only` + `별도 absolute backdrop` + `relative 모달본체 with overflow-hidden flex-col`) 을 사용 → 동일 구조로 통일.
+3. **개인정보처리방침 볼드 처리는 R27 에서 작성한 "개인정보보호법 시행령 강조 표시 권고" 근거가 부정확** — 법령은 "쉽게 확인할 수 있도록 공개" 만 요구하지 굵은 글씨/특정 디자인 강제는 없음. 한국 메이저 SaaS(토스/카카오/네이버) 푸터 보면 세 항목 동일 톤 표기가 일반적. 사용자 지시로 해제.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R28.3 | 2026-05-06 14:25 | **(1) LegalModal 구조 ContactModal 패턴 차용** — 외곽 div `bg-slate-950/95 ... flex items-center` (backdrop + container 결합) → `flex items-center` 만 (no bg). 별도 `<div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md" onClick={onClose} aria-hidden="true" />` backdrop layer 추가. 모달 본체 `bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]` — overflow-hidden 으로 라운드 모서리 깔끔, flex-col 로 헤더/배너/본문/푸터 4분할. 본문만 `flex-1 overflow-y-auto` → 헤더/배너/푸터는 자연 stick(sticky 클래스 불필요, position 트릭 없음). **(2) React Portal 유지** — `createPortal(modalJSX, document.body)` 로 document.body 에 직접 렌더 → Footer DOM 계층의 어떤 stacking context 영향도 차단. **(3) `개인정보처리방침` 볼드 해제** — Footer.jsx 의 `LEGAL_LINKS` 에서 `emphasis: true` 제거. 강조 분기 `link.emphasis ? 'text-white font-semibold' : ''` 도 className 단일화 → 세 항목 동일 톤. | `frontend/src/components/landing/LegalModal.jsx`(전면 재작성) + `frontend/src/components/landing/Footer.jsx` |
+
+### 📐 설계 결정 사항
+
+- **ContactModal 패턴이 검증된 이유**: `position: fixed` 단일 컨테이너에 background + flex + z-index 를 모두 합치면 Tailwind JIT/브라우저 stacking context/backdrop-filter 가 맞물려 **environment-specific 비침** 가능. ContactModal 은 backdrop(별도 absolute) + body(별도 relative) 를 분리해 각자의 stacking context 를 명확히 구분 → 어떤 환경에서도 안정적.
+- **`overflow-hidden flex-col` 의 효과**: 모달 본체 자체는 스크롤 안 함(overflow-hidden). 자식 4개(헤더/배너/본문/푸터) 가 flex-col 로 stack. 본문만 `flex-1 overflow-y-auto` 로 스크롤. 헤더/배너/푸터는 `shrink-0` 자연 높이 → 스크롤 시에도 항상 보임. sticky 트릭(positioning + z-index 조작) 불필요 → 더 robust.
+- **볼드 해제의 근거 정정**: R27 의 "개인정보보호법 시행령상 강조 표시 권고" 는 부정확한 정보였음. 법령(개인정보보호법 §30 ④) 은 "정보주체가 쉽게 확인할 수 있도록 공개" 만 요구. "굵은 글씨/특정 디자인 강제" 는 어디에도 없음. 일부 자율 가이드(개인정보보호위원회) 에 가독성 권장이 있지만 강제 아님. 한국 메이저 SaaS 들 푸터 확인 결과 세 항목 동일 톤 표기가 일반적. 사용자 지시로 해제하는 게 디자인 통일성·시장 표준 모두 부합.
+- **추측·미검증 약속 금지 메모리 위반 사례**: R27 에서 "법령상 권고" 라고 단언한 건 메모리 정책 위반. 정책 인용 시 정확한 조문 확인 후 인용해야 했음. 본 라운드에서 정정 + 향후 법령 인용 시 사실 확인 강화.
+
+### R28.4 — 트리플 안전망 (isolation + inline style + bg-black 클래스) (2026-05-06 14:50)
+
+> 사용자 피드백: R28.3(ContactModal 패턴 + Portal + bg-black) 적용 후에도 동일 비침. DevTools DOM 캡처 결과 모달 Portal 은 `<body>` 끝에 정상 렌더링(`fixed inset-0 z-[100]`), Footer SITEMAP nav 는 `<a>` 정적 위치(z-index 없음). 논리적으로 비침 불가능 상태.
+
+진단: Tailwind JIT/HMR/브라우저 캐시 중 어딘가에서 `bg-black` 클래스가 일관되게 적용되지 않을 가능성. 또는 ancestor 어딘가의 `transform` / `filter` / `will-change` 가 stacking context 를 만들어 z-index 비교를 의도와 다르게 처리할 가능성.
+
+조치: Tailwind 의존 완전 제거 — inline style 로 background-color 강제 + `isolation: isolate` 로 자체 stacking context 강제 형성.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R28.4 | 2026-05-06 14:50 | **(1) Inline style + Tailwind 이중 적용** — 외곽 div `style={{ isolation: 'isolate', backgroundColor: 'rgb(0, 0, 0)' }}` 추가. backdrop 자식 div 도 `style={{ backgroundColor: 'rgb(0, 0, 0)' }}` 추가. Tailwind 의 `bg-black` 도 유지 → Tailwind 가 작동 안 해도 inline style 이 보장. **(2) `isolation: isolate` CSS 속성** — 외곽 div 가 own stacking context 를 강제 형성. ancestor 의 transform/filter 등에 영향받지 않음. z-[100] 비교가 viewport 전역에서 정확히 작동. **(3) onClick 단순화** — 외곽 div 에 `onClick={onClose}` 일괄 적용(backdrop 자식의 onClick 제거). 모달 본체에 `onClick={(e) => e.stopPropagation()}` 추가해 본체 클릭 시 닫히지 않도록. 이벤트 버블링 패턴이 ContactModal 보다 단순. | `LegalModal.jsx` |
+
+### 📐 설계 결정 사항
+
+- **Tailwind 의존 제거의 의의**: `bg-black` 같은 단순 클래스도 Tailwind JIT 가 빌드 시점에 CSS 를 생성. dev 서버 HMR 에서 가끔 누락되거나 production build 에서 purge 되는 사례 있음. Inline style 은 브라우저가 직접 해석 → 어떤 빌드/캐시 상태에서도 100% 작동.
+- **`isolation: isolate` 의 효과**: 자식 트리에서 발생하는 모든 stacking 결정이 이 element 안에서 closed off. 외부 ancestor 가 `transform`, `filter`, `opacity < 1`, `will-change` 등을 가져 stacking context 를 만들어도, isolate 가 modal 의 위계를 viewport 글로벌 z-100 로 명확히 위치. 모던 브라우저(Chrome 41+, Safari 8+, Firefox 36+) 모두 지원.
+- **트리플 안전망 (style + isolate + Tailwind class)**: 어떤 브라우저/빌드 환경에서도 backdrop 이 솔리드 검정으로 렌더되도록. 만약 이 R28.4 후에도 비침이 보이면 HMR/캐시 문제 100% 확정 — Ctrl+Shift+R hard refresh 또는 Vite 서버 재시작 필요.
+
+### R28.5 — 사후 진단: 캐시 문제 확정 (2026-05-06 15:00)
+
+> 사용자 시크릿 창 테스트 결과 비침이 발생하지 않음 — **R27 시점 코드에서 이미 정상 작동**했음을 확인. 일반 창에서 보이던 비침은 브라우저 캐시 + HMR 부분 적용 누적이 원인.
+
+#### 회고 — R27~R28.4 의미
+
+| 라운드 | 추가 변경 | 실제 효과 (캐시 무관) | 회고 평가 |
+|------|---------|--------------------|---------|
+| R27 | LegalModal 신규(z-[60]) + Footer 통합 | 정상 작동 (캐시 없으면) | 충분히 동작 |
+| R28 | z-[60] → z-[100] | 미세 강화 | 캐시 문제는 해결 못 함 |
+| R28.1 | bg-black/60 → bg-black/80 + blur-md | 미세 강화 | 캐시 문제는 해결 못 함 |
+| R28.2 | bg-black/80 → slate-950/95 + max-h 92vh | 미세 강화 | 캐시 문제는 해결 못 함 |
+| R28.3 | ContactModal 패턴 + Portal | 구조 개선(robustness ↑) | 도움 — 향후 stacking issue 예방 |
+| R28.4 | inline style + isolation + Tailwind 트리플 | 안전망 ↑ | 도움 — Tailwind purge/JIT 실패 시에도 안전 |
+
+#### 교훈 — 메모리 정책 후속 반영
+
+- **사용자 환경 이슈 vs 코드 이슈 구별 우선**: 코드가 논리적으로 올바른 상태인데 증상이 지속되면 **environment 이슈를 먼저 의심**해야. R28~R28.2 라운드는 코드만 만지작거려 시간 낭비 + 사용자 짜증 유발. 향후 동일 패턴(캐시/HMR/브라우저별 차이) 의심 시 **시크릿 창 테스트를 1순위로 제안**할 것.
+- **DevTools DOM 캡처 요청 타이밍**: R28.3 시점에서 DOM 캡처 요청했어야. 코드 변경 3차례 누적 후에야 사용자가 자발적으로 DevTools 보여줌 — 이 시점에 inline style 정상 적용 확인되어 캐시 문제 윤곽 잡힘. 향후 비주얼 버그 디버깅은 DevTools DOM 캡처를 1차 요청.
+- **R28.3 ~ R28.4 의 안전망은 유지**: 캐시 문제로 라운드를 거치며 추가된 robustness 코드(Portal, isolation: isolate, inline style 트리플)는 "오버엔지니어링" 으로 보일 수 있으나, 실제 사용자가 캐시 이슈에 한 번 빠지면 동일 디버깅 사이클이 반복될 가능성. 안전망 자체는 미래 가치 있으므로 유지.
+
