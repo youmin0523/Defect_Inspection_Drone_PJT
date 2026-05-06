@@ -2001,3 +2001,297 @@ localStorage 시드 데이터 + `simulateLatency()` 기반 Mock을 axios + JWT �
 ### R13.1 Vercel SPA rewrites main 반영 (2026-05-04)
 
 - `vercel.json`: `{ "rewrites": [{ "source": "/(.*)", "destination": "/" }] }` — `/login` 등 직접 진입 시 Vercel 404 방지.
+
+---
+
+## 🛰 R14 — 전역 폰트 Pretendard 통일 (2026-05-06 10:09)
+
+> 직전(2026-04-26 라운드, line 1594)에는 다크 HUD 의 Inter 미니멀 톤 보존을 위해 「부분 적용」 전략(`font-pretendard` 클래스 명시 사용처에만 적용)을 택했음. 이번에 사용자께서 전체 통일 명시 요청 → 전략 전환.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R14 | 2026-05-06 10:09 | **글로벌 sans 기본값을 Pretendard 로 교체** — `body` 의 `font-family` 와 Tailwind `fontFamily.sans` 를 모두 Pretendard 우선 체인으로 변경. 기존 `font-bold`/`font-semibold` 등 가중치 유틸은 폰트와 독립적이라 코드 수정 0건 — Pretendard Variable 이 100~900 전 가중치를 지원해 자동 승계됨. `font-mono`(JetBrains Mono)는 코드/숫자 정렬 의도 보존을 위해 유지. 기존 `font-pretendard` 클래스도 동일 체인을 가리키도록 남겨 하위 호환 확보. | `frontend/src/index.css` + `frontend/tailwind.config.js` |
+
+### 📐 설계 결정 사항
+
+- **방향 전환의 근거**: 직전 라운드의 부분 적용 전략은 「Inter 톤 보존」이 우선 가정이었지만, 사용자가 한글·영문 일관성을 더 우선하기로 명시. 전체 통일이 톤 흔들림보다 더 큰 가치라는 판단.
+- **가중치 처리**: Pretendard Variable 은 단일 파일로 100/200/300/400/500/600/700/800/900 모두 지원하므로 Tailwind `font-bold`(700) / `font-semibold`(600) / `font-medium`(500) 등 기존 클래스가 그대로 동작. 추가 weight 파일 import 불필요.
+- **`font-mono` 유지**: 시간/숫자 등 의도적 등폭 정렬이 필요한 위치에 `font-mono` 가 그대로 박혀 있음. 전부 Pretendard 로 갈아엎으면 자릿수 어긋남이 재발하므로 mono 는 의도적 예외로 남김.
+- **저작권 안전성 확인**: Pretendard 는 SIL OFL 1.1 라이선스로 상업 배포 OK. CDN 방식이라 라이선스 사본 동봉 의무도 없음. 5/6 배포에 폰트 라이선스 리스크 0.
+
+---
+
+## 🛰 R15 — 랜딩 페이지 섹션 100vh 통일 (2026-05-06 10:25)
+
+> 사용자 피드백: "각 파트별로 화면에 꽉 차게 해줄 수 있을까? 헤더 영역 포함해서 100vh여야겠지?" — 스크롤 시 다음 섹션 다크 배너가 미리 노출되는 문제. Hero 가 `min-h-[70vh]`라서 30%가 다음 섹션으로 노출되고, 컨텐츠 섹션(서비스 소개·핵심 기술·도입 사례)은 높이 자유라 viewport 보다 짧게 끝남.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R15 | 2026-05-06 10:25 | **랜딩 5개 섹션 모두 `min-h-screen`(100vh) 통일** — Hero `min-h-[70vh]` → `min-h-screen`. 컨텐츠 3섹션(ServiceIntro/Features/Cases)은 `pb-24` 자유 높이 → `min-h-screen flex flex-col` 로 viewport 100vh 보장 + 다크 배너(자연 높이) + 카드 그리드(`flex-1 flex items-center`로 남은 영역 수직 중앙 정렬). DualCTA `min-h-[50vh]` → `min-h-screen`. 헤더는 `fixed top-0` 라 자연스럽게 섹션 위에 오버레이 — 추가 마진 처리 불필요. | `frontend/src/components/landing/HeroSection.jsx` + `ServiceIntroSection.jsx` + `FeaturesSection.jsx` + `CasesSection.jsx` + `DualCTASection.jsx` |
+
+### 📐 설계 결정 사항
+
+- **`min-h-screen` vs `h-screen`**: `h-screen`은 정확히 100vh로 고정되지만 컨텐츠가 viewport 보다 크면 잘림(특히 모바일·작은 노트북). `min-h-screen`은 데스크탑에선 정확히 100vh, 작은 화면에선 자연 확장 → 컨텐츠 보호와 100vh 충족을 동시에 달성.
+- **다크 배너 + 카드 분배**: 컨텐츠 섹션은 `<section min-h-screen flex flex-col>` 로 외곽 잡고, 자식 두 블록(다크 배너 / 카드 그리드)을 flex 로 분배. 다크 배너는 자연 높이, 카드 그리드는 `flex-1 flex items-center`로 남은 viewport 영역 채우고 수직 중앙 정렬. 결과적으로 viewport 어떤 비율에서도 두 블록이 섹션 안에 깔끔하게 들어감.
+- **헤더 100vh 포함의 의미**: 사용자가 "헤더 영역 포함해서 100vh"라고 명시 → 섹션이 100vh 이고 헤더(`fixed top-0`)가 그 위에 오버레이되는 구조. 섹션에 별도 `padding-top: header` 처리하지 않음. 앵커 링크 클릭 시는 기존 `scroll-mt-20 md:scroll-mt-24`가 헤더 높이만큼 오프셋 보정.
+- **`scroll-snap` 미도입**: viewport 단위 스냅 스크롤(슬라이드 데크 느낌)은 일부 사용자에게 제약감을 줄 수 있어 도입 보류. 자유 스크롤 + 100vh 섹션 조합으로 자연스러운 페이지 진행감 우선.
+
+---
+
+## 🛰 R16 — 폰트 사이즈 보정 + 100vh 공백 축소 (2026-05-06 10:42)
+
+> 사용자 피드백 (2가지 동시): (1) Pretendard 전환 후 헤더·전체 폰트 사이즈가 작아진 느낌. (2) 100vh 적용 후 ServiceIntro/Features/Cases 섹션의 다크 배너와 카드 그리드 사이 빈 공간이 너무 크게 느껴짐.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R16 | 2026-05-06 10:42 | **(1) 헤더/배너 텍스트 한 단계 bump** — Pretendard 의 x-height 가 Inter 보다 살짝 낮아 같은 클래스에서도 시각적으로 작게 보이는 점을 보정. LandingHeader 네비 `text-base lg:text-lg` → `text-lg lg:text-xl`, 로그인/로그아웃 `text-sm` → `text-base`, CTA 버튼 base → `text-base lg:text-lg`. 다크 배너 h2 `text-3xl md:text-4xl` → `text-3xl md:text-4xl lg:text-5xl`, 서브 카피 `text-base md:text-lg` → `text-lg md:text-xl`. **(2) 카드 시각적 무게 증가로 빈 공간 자연 채우기** — ServiceIntro 카드의 키커 블록 `h-24` → `h-32 md:h-40`, 키커 텍스트 `text-xl md:text-2xl` → `text-2xl md:text-3xl lg:text-4xl`. Features/Cases 이미지 `h-48` → `h-56 md:h-64 lg:h-72` (CaseSlideshow placeholder/이미지 컨테이너 동일). 카드 inner padding `p-6` → `p-6 md:p-8`, title `text-xl` → `text-xl md:text-2xl`, desc `text-sm` → `text-sm md:text-base`. 다크 배너 padding `py-16 md:py-20` → `py-20 md:py-28 lg:py-32`. flex-1 wrapper padding `py-12 md:py-16` → `py-10 md:py-14` (카드가 커진 만큼 외곽 여백 축소). | `LandingHeader.jsx` + `ServiceIntroSection.jsx` + `FeaturesSection.jsx` + `CasesSection.jsx` + `CaseSlideshow.jsx` |
+
+### 📐 설계 결정 사항
+
+- **Pretendard 폰트 보정 — 글로벌 base 변경 vs 컴포넌트별 bump**: html `font-size: 17px` 같은 글로벌 baseline 변경은 대시보드/세션 등 다른 영역까지 영향이 가서 디자인 회귀 위험. 랜딩 페이지에서 Pretendard 도입으로 시각 차이가 두드러진 컴포넌트(헤더 네비/CTA, 다크 배너 카피)만 한 단계 bump 하는 부분 수정 전략 채택.
+- **100vh 공백 축소 전략 — flex-1 vs 컨텐츠 키우기**: 1080p viewport (1080px) 기준, 다크 배너(~280px) + 카드 그리드(~280px) → 잔여 520px 가 flex-1 + items-center 로 카드 위아래 260px 씩 분배되어 시각적 공백으로 인식. 잔여 영역을 줄이려면 (a) 섹션 높이 축소(min-h-screen 폐기) — 사용자의 "100vh 꽉 차게" 요구 위배. (b) 컨텐츠를 시각적으로 키워 자연 차지 면적 확장 — 채택. 카드 키커/이미지 높이 +50%, 배너 padding +40% 로 합산 ~860px → 1080px 잔여 220px 만 남음. 시각적으로 "꽉 찬" 느낌과 "100vh" 동시 충족.
+- **CaseSlideshow 동일 패턴 적용**: Cases 섹션의 이미지 카드는 별도 컴포넌트라 placeholder 와 활성 슬라이드쇼 컨테이너 두 곳 모두 `h-48` → `h-56 md:h-64 lg:h-72` 동일 변경. h-48 → h-72 (288px) 는 1.5배 증가로 lg 데스크탑에서 시각적으로 중량감 있는 카드 확보.
+- **컨텐츠 사이즈 bump 의 break_keep 검증**: title 을 `text-xl md:text-2xl` 로 키우면 한글 줄바꿈에 영향. 기존 `break-keep` 클래스가 단어 단위 줄바꿈을 강제하므로 사이즈 변경에도 레이아웃 깨짐 없음. 카드 한 장 너비(flex 1/3 col with px-6 padding)에서 24px 텍스트도 충분히 한 줄에 들어감.
+
+---
+
+## 🛰 R17 — 앵커 스크롤 잘림 + 카드 공백 + Footer 신설 (2026-05-06 11:00)
+
+> 사용자 피드백 (3가지 동시): (1) 서비스 소개 클릭 시 카드가 viewport 아래로 잘림 — 다크 배너만 보이고 카드 영역 비어 보임. (2) 핵심 기술 / 도입 사례 클릭 시 카드 텍스트가 fold 아래로 잘림. (3) For B2B / B2C 구간은 100vh 까지 안 해도 됨 — 차라리 밑에 Footer 섹션을 만들어 둘이 합쳐 100vh 자연 충족하면 좋겠음.
+
+### 🔍 근본 원인 분석
+
+| 증상 | 원인 |
+|------|------|
+| 앵커 스크롤 후 섹션 하단 96px 잘림 | `min-h-screen`(100vh) + `scroll-mt-24`(96px) 조합 → 섹션 하단이 viewport fold 96px 아래로 밀림 |
+| 카드 위·아래 동일 공백 | `flex-1 + items-center` 가 카드를 잔여 영역 중앙 정렬 → 위/아래 양쪽으로 공백 분배 |
+| Features/Cases 카드 잘림 | 큰 viewport(1080p+) 가정하 R16 에서 키운 카드 이미지(`h-72`=288px)+패딩이 작은 노트북(900p) 에선 잔여 영역 초과 |
+| DualCTA 100vh 과함 | 페이지 마지막에 Footer 가 없어 DualCTA 단독으로 viewport 채우려다 보니 부자연스러움 |
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R17 | 2026-05-06 11:00 | **(1) 섹션 min-h 를 (100vh - header) 로** — `min-h-screen` → `min-h-[calc(100vh-5rem)] md:min-h-[calc(100vh-6rem)]`. scroll-mt-24(=6rem=96px) 만큼 섹션을 줄여 앵커 스크롤 후 정확히 visible viewport 와 일치. **(2) flex-1 + items-center 제거 → 자연 스택** — 섹션의 `flex flex-col` 제거, 카드 wrapper 의 `flex-1 flex items-center` 제거. 다크 배너 + 카드 그리드를 자연 블록 흐름으로 stack → 잔여 공백은 섹션 하단 한 곳에만 모임(위·아래 분산 공백 해소). **(3) 카드 컨텐츠 다이어트** — Features/Cases 이미지 `h-56 md:h-64 lg:h-72` → `h-44 md:h-48 lg:h-56`. ServiceIntro 키커 `h-32 md:h-40` → `h-24 md:h-32`, 키커 텍스트 `text-2xl md:text-3xl lg:text-4xl` → `text-xl md:text-2xl lg:text-3xl`. 카드 inner padding `p-6 md:p-8` → `p-6` (R16 의 md 단계 bump 회수). 카드 title `text-xl md:text-2xl` → `text-lg md:text-xl lg:text-2xl`. 다크 배너 padding `py-20 md:py-28 lg:py-32` → `py-16 md:py-20 lg:py-24`. **(4) DualCTA 100vh 해제 + Footer 신설** — DualCTA `min-h-screen` → `min-h-[60vh]`. 신규 `components/landing/Footer.jsx` (다크 slate-950 배경, 3컬럼 그리드: 로고+소개 / 사이트맵 / Contact + 하단 Copyright 라인). DualCTA(60vh) + Footer(40vh 자연) 합쳐 마지막 viewport ~100vh 자연 충족. | `ServiceIntroSection.jsx` + `FeaturesSection.jsx` + `CasesSection.jsx` + `CaseSlideshow.jsx` + `DualCTASection.jsx` + `Footer.jsx`(신규) + `pages/Landing.jsx` |
+
+### 📐 설계 결정 사항
+
+- **`min-h-[calc(100vh-6rem)]` 의 의미**: 섹션이 100vh 라는 user 의도는 "viewport 헤더 포함 100vh" 였는데, 앵커 스크롤이 scroll-mt-24(96px) 만큼 섹션을 아래로 밀어 96px 가 fold 너머로 사라지는 게 진짜 문제. 섹션을 (100vh - header) 로 줄이면 앵커 스크롤 후 섹션 top 이 viewport pos 96px, 섹션 bottom 이 정확히 viewport fold (=100vh) — 헤더가 위에서 96px 차지하고 그 아래 섹션이 viewport 끝까지 자연 충족. **사용자 의도 "헤더 포함 100vh" 충족**.
+- **`flex-1 + items-center` → 자연 스택 전환의 효과**: 1080p 기준 banner(290px) + 카드(360-540px) + 적당한 padding(96px) = 750-930px 가 자연 stack 됨. min-h(984px) 와 차이 50-230px 가 섹션 하단 한 곳에만 모이고, 다크 배너 ↔ 카드 사이는 fixed padding(py-12 md:py-16) 으로만 띄움 → 시각적으로 banner-cards 가 한 덩어리로 묶이고 잔여 공백은 "섹션 끝 자연 패딩" 처럼 인식됨.
+- **카드 다이어트 폭 결정**: R16 에서 카드를 키워 1080p 에서 100vh 채우려 했으나, 작은 viewport(900p, 800p)에서 fold 너머로 잘리는 문제 발생. R17 에서는 카드 이미지를 `lg:h-56`(=224px) 정도로 다이어트 → 900p viewport 에서도 자연 stack 으로 fold 안에 들어옴. 1080p 에선 잔여 공백이 약간 늘지만 (`flex-1 + items-center` 가 아니므로) 시각적 불편 없음.
+- **Footer 신설 — DualCTA 와의 분리 합리성**: 원래 DualCTA 가 페이지 마지막을 담당하면서 100vh 채우려니 좌우 분할 컨셉 + 100vh 가 어색함(각 패널이 너무 길어짐). Footer 를 별도로 두면 DualCTA 는 짧아져도 자연스럽고(B2B/B2C 패널 60vh), Footer 가 페이지 종결감을 명확히 부여. SITEMAP/CONTACT/Copyright 를 한 곳에 모아 SEO 와 사용자 navigation 모두 도움.
+- **Footer 다크 톤(slate-950)**: 배너(slate-900) 보다 한 단계 더 어둡게 → 페이지 전체 깊이감 + 종결감 강화. CTA 버튼 등 추가 액션 없이 정보 전달 위주(상업 출시 톤).
+
+---
+
+## 🛰 R18 — DualCTA+Footer 100vh 고정 + 카드 전체 사이즈 확대 (2026-05-06 11:25)
+
+> 사용자 피드백 (2가지): (1) DualCTA + Footer 가 합쳐 100vh 를 넘어 보임. (2) 각 섹션 카드의 사이즈가 작아 공백이 많아 보임 — 폰트·이미지 함께 키우면 좋겠음.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R18 | 2026-05-06 11:25 | **(1) DualCTA + Footer 100vh 정확 충족** — Landing.jsx 에서 둘을 `<div className="min-h-screen flex flex-col">` 래퍼로 묶음. DualCTA 섹션은 `flex-1 min-h-[50vh]` 로 잔여 영역 채우고, Footer 는 자연 높이. 결과: DualCTA(flex-1 가변) + Footer(natural ~400px) = 정확히 viewport 100vh, 어떤 viewport 사이즈에서도 부동. **(2) 카드·배너 전체 시각 무게 확대** — 다크 배너 padding `py-16 md:py-20 lg:py-24` → `py-20 md:py-24 lg:py-28`, h2 mb `mb-4` → `mb-4 md:mb-5`, 서브 카피 `text-lg md:text-xl` → `text-lg md:text-xl lg:text-2xl`. 카드 그리드 wrapper padding `py-12 md:py-16` → `py-14 md:py-18 lg:py-20`. ServiceIntro 키커 블록 `h-24 md:h-32` → `h-28 md:h-36 lg:h-40`, 키커 텍스트 `text-xl md:text-2xl lg:text-3xl` → `text-2xl md:text-3xl lg:text-4xl`. Features/Cases 이미지 `h-44 md:h-48 lg:h-56` → `h-52 md:h-56 lg:h-64` (CaseSlideshow 동일). 카드 inner padding `p-6` → `p-6 md:p-7 lg:p-8`. 카드 title `text-lg md:text-xl lg:text-2xl` → `text-xl md:text-2xl`, mb `mb-2` → `mb-2 md:mb-3`. 카드 desc `text-sm md:text-base` → `text-sm md:text-base lg:text-lg`. | `pages/Landing.jsx` + `DualCTASection.jsx` + `ServiceIntroSection.jsx` + `FeaturesSection.jsx` + `CasesSection.jsx` + `CaseSlideshow.jsx` |
+
+### 📐 설계 결정 사항
+
+- **DualCTA + Footer 래퍼 패턴 — `min-h-screen flex flex-col` + `flex-1`**: DualCTA 의 `min-h-[60vh]` 만으로는 Footer 합산 시 100vh 초과/미달이 viewport 별로 들쭉날쭉. 래퍼를 `min-h-screen` 으로 잠그고 DualCTA 를 `flex-1` 로 잔여 흡수 → Footer 가 200px 이든 500px 이든 DualCTA 가 자동 보정해 항상 정확히 100vh. `flex-1 min-h-[50vh]` 의 `min-h-[50vh]`는 Footer 가 비정상적으로 클 때(예: 사용자가 Footer 콘텐츠 추가 후) DualCTA 가 너무 납작해지지 않도록 안전 floor.
+- **카드 사이즈 확대 — R17 다이어트의 부분 회귀**: R17 에서 작은 viewport(900p) 잘림 방지 위해 카드를 다이어트했으나 사용자의 실제 viewport(1080p+ 추정) 에선 공백 과다. R18 에서 R16 ↔ R17 의 중간값으로 재조정 — 이미지 lg:h-72 (R16) → lg:h-56 (R17) → lg:h-64 (R18), 키커 lg:h-40 (R16) → lg:h-32 (R17) → lg:h-40 (R18). 1080p 에서 viewport 거의 채우면서 1440x900 에선 부분 잘림 허용(다음 섹션 살짝 미리 보이는 정도).
+- **lg breakpoint 강화 전략**: md(768~1024) 와 lg(1024+) 의 사이즈 차이를 R17 보다 명확히 분리 — `lg:p-8`, `lg:text-2xl`, `lg:py-20` 등. lg viewport 는 통상 데스크탑(1080p+) 이라 시각적 무게감을 더 줄 여유가 있음. md 는 노트북/태블릿 가능성 높아 보수적 사이즈 유지.
+- **카드 desc `lg:text-lg` 도입**: 카드 본문 텍스트는 짧은 한글 2-3 문장이라 sm/base 에선 빈약해 보임. lg(1024+) 에서 text-lg(18px) 로 키우면 카드 한 장의 시각 무게감이 ~30% 증가, 공백 자연 충족.
+
+---
+
+## 🛰 R19 — 브라우저 탭 favicon = 자체 로고(텍스트 제외 그래픽만) (2026-05-06 11:35)
+
+> 사용자 피드백: 로컬 dev 서버에선 컬러 로고가 탭 좌측에 보이지만 배포된 사이트에선 globe(브라우저 기본) 아이콘이 보임. 로고에서 "DRONE INSPECT / PRECISION DEFECT ANALYSIS" 텍스트는 빼고 그래픽(드론 + 빌딩 + 돋보기)만 favicon 으로 사용해 달라.
+
+### 🔍 근본 원인 분석
+
+| 증상 | 원인 |
+|------|------|
+| 배포 사이트 favicon = globe | `index.html` 이 `/drone-icon.svg` 를 참조하지만 `frontend/public/` 에 해당 파일 없음 — dev 에선 어떤 경로로든 표시되던 것이 빌드 후 자산 누락으로 fallback(globe). |
+| 로고에 텍스트 포함 | `src/assets/logo/logo_transparent-removebg-preview.png` (677×369) 의 아래 ~30% 가 "DRONE INSPECT / PRECISION DEFECT ANALYSIS" 텍스트. favicon(16~32px) 에선 텍스트가 가독성 0 — 그래픽만 잘라야 함. |
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R19 | 2026-05-06 11:35 | **(1) 로고 그래픽 영역 자동 검출** — PowerShell + System.Drawing 으로 logo_transparent-removebg-preview.png 의 알파 채널 row-by-row 스캔, content row(α>20) 와 빈 row 의 가장 큰 gap 으로 graphic ↔ text 경계 자동 판정. 결과: graphic = rows 59–252, cols 235–441 (드론·빌딩·돋보기 부분). **(2) 정사각 캔버스에 가운데 배치 + 패딩** — 더 긴 변(207px) + 양쪽 16px 패딩 = 239×239 master 비트맵에 그래픽 배치, 알파 보존. **(3) 멀티 사이즈 favicon 생성** — `favicon-512.png`, `favicon-192.png`, `favicon-32.png`, `favicon-16.png`, `apple-touch-icon.png`(180×180), 그리고 16/32/48 PNG 다중 entry 를 가진 `favicon.ico` 직접 바이너리로 작성(ICO header + ICONDIRENTRY × 3 + PNG payload). 모두 `frontend/public/` 에 저장. **(4) `index.html` `<link>` 갱신** — 누락 자산 참조 `/drone-icon.svg` 1줄 → ico/16/32/192 PNG + apple-touch-icon 5줄로 교체, 모든 모던/구형 브라우저 + iOS 홈 추가 모두 커버. | `frontend/public/favicon.ico`(신규) + `favicon-{16,32,192,512}.png`(신규) + `apple-touch-icon.png`(신규) + `frontend/index.html` |
+
+### 📐 설계 결정 사항
+
+- **알파 row 스캔으로 graphic/text 자동 분리**: 픽셀 위치를 눈대중으로 잘라내면 다음에 로고 원본이 바뀌면 또 깨짐. 알파 채널 row-by-row 스캔 + 가장 큰 빈 row band 검출 = 로고 원본이 바뀌어도 동일 스크립트로 재생성 가능. graphic 영역은 첫 content row(=59) ~ "가장 큰 빈 row band" 직전(=252) 으로 정의.
+- **PNG + ICO 다중 등록**: 모던 브라우저는 PNG 32x32/192x192 를 선호하지만 일부 환경(특히 구형 모바일/Outlook 미리보기)은 여전히 `favicon.ico` 만 인식. 두 형식 모두 등록해 호환성 100%. apple-touch-icon 180×180 은 iOS 홈 스크린 추가 시 사용.
+- **ICO 직접 바이너리 작성**: System.Drawing 의 `Icon.Save` 는 32bpp PNG embedded 생성에 한계 있음. ICONDIR(6B) + ICONDIRENTRY(16B × 3) + PNG payload 를 BinaryWriter 로 직접 조립 — 16/32/48 PNG entry 모두 32bpp 알파 보존, 어떤 OS taskbar/explorer 에서도 정상 렌더.
+- **`/drone-icon.svg` 참조 제거 — 누락 자산 정리**: git history 상 `frontend/public/drone-icon.svg` 가 한 번도 커밋된 적 없음. dev 환경에서 어떤 경로로 표시되던지(브라우저 캐시·이전 빌드 잔존) 명확치 않으므로 SVG 참조 자체를 제거하고 ico/PNG 명시 등록으로 일원화.
+- **사용자 캐시 hard refresh 필요 안내 보류**: 브라우저는 favicon 을 적극 캐시하므로 배포 후에도 한동안 globe 가 보일 수 있음. 다음 배포 빌드 시점에 사용자가 Ctrl+Shift+R 로 강제 새로고침 하면 즉시 반영. 코드 변경만으로 완결.
+
+---
+
+## 🛰 R20 — Features/Cases 카드 overflow 수정 + DualCTA min-h 제거 (2026-05-06 11:50)
+
+> 사용자 피드백: (1) ServiceIntro 는 OK 인데 Features / Cases 섹션에서 카드가 viewport 를 넘쳐 카드 description 이 fold 아래로 잘림. (2) DualCTA + Footer 가 합쳐 100vh 를 넘어 Copyright 구간이 fold 아래로 잘림.
+
+### 🔍 근본 원인 분석
+
+| 증상 | 원인 |
+|------|------|
+| Features/Cases 카드 overflow | R18 에서 lg 카드 사이즈를 일괄 bump (`lg:h-64` 이미지 + `lg:p-8` + `lg:text-lg` desc) → 모델링 카드(chips 포함) 가 ~520px → ServiceIntro 카드(~368px) 보다 150px 더 큼 → 동일 섹션 height 안에 안 들어감 |
+| DualCTA + Footer overflow | DualCTA `flex-1 min-h-[50vh]` 의 min-h-[50vh] 가 의도와 반대로 작동 — Footer 가 50vh 보다 크면 합산 100vh 초과 (min-h 가 floor 로 작동해 flex-1 의 자동 축소 막음) |
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R20 | 2026-05-06 11:50 | **(1) Features/Cases 카드 다이어트** (ServiceIntro 는 그대로 유지) — 이미지 `h-52 md:h-56 lg:h-64` → `h-44 md:h-48 lg:h-48`. 카드 inner padding `p-6 md:p-7 lg:p-8` → `p-6 md:p-7` (lg bump 회수). 카드 desc `text-sm md:text-base lg:text-lg` → `text-sm md:text-base` (lg bump 회수). 카드 title `text-xl md:text-2xl` → `text-lg md:text-xl lg:text-2xl` (md 단계 한 단계 다운). 카드 그리드 wrapper padding `py-14 md:py-18 lg:py-20` → `py-12 md:py-14 lg:py-16` (균일 축소). Modeling 카드 chips `mt-4` + `py-1` → `mt-3` + `py-0.5` (chips 영역 8-12px 슬림). CaseSlideshow 이미지 동일 축소. **(2) DualCTA min-h 제거 + Footer padding 슬림** — DualCTA `flex-1 min-h-[50vh]` → `flex-1` (min-h 제거 → flex-1 만으로 잔여 영역 자동 흡수, Footer 크기에 무관히 정확 100vh 충족). Footer 메인 그리드 padding `py-12 md:py-16` → `py-10 md:py-12`, gap `gap-10` → `gap-8 md:gap-10`. Footer Copyright 라인 `py-5` → `py-4`. | `FeaturesSection.jsx` + `CasesSection.jsx` + `CaseSlideshow.jsx` + `DualCTASection.jsx` + `Footer.jsx` |
+
+### 📐 설계 결정 사항
+
+- **ServiceIntro 차등 보존**: 사용자가 ServiceIntro 만 콕 짚어 "괜찮다" 명시 → 다른 섹션 다이어트와 별개로 ServiceIntro 의 키커 블록(`h-28 md:h-36 lg:h-40`), 키커 텍스트(`text-2xl md:text-3xl lg:text-4xl`), inner padding(`p-6 md:p-7 lg:p-8`)은 R18 그대로 유지. 카드 그리드 wrapper padding 만 균일 축소 적용 — ServiceIntro 도 약간 더 컴팩트해지지만 카드 자체는 그대로라 시각 무게감 보존.
+- **`min-h-[50vh]` 제거의 의도**: `flex-1` 은 "잔여 영역 흡수"를 의미하지만 `min-h-[50vh]` 가 함께 있으면 "잔여 영역이 50vh 보다 작아도 50vh 는 강제" 가 되어 합산 100vh 초과. 사용자 의도(DualCTA + Footer = 100vh) 충족하려면 DualCTA 가 Footer 크기에 따라 자동 가변해야 함 → `min-h` 완전 제거. 만약 Footer 가 비정상적으로 크면 DualCTA 가 작아지지만, 현재 Footer ~360-440px 범위라 800-1080p 어떤 viewport 에서도 DualCTA 가 충분한 공간 확보.
+- **Footer padding 축소의 효과**: `py-12 md:py-16` → `py-10 md:py-12` 로 -32 ~ -48px, copyright `py-5` → `py-4` 로 -8px. 합계 ~40-56px 슬림. 1080p 에선 표시상 거의 차이 없지만 800-900p 에선 DualCTA 에 그만큼의 숨 공간 확보 → DualCTA 가 너무 납작해지지 않음.
+- **Features/Cases 이미지 `lg:h-48`(=192px) 결정**: R16 lg:h-72(288) → R17 lg:h-56(224) → R18 lg:h-64(256) → R20 lg:h-48(192). 사용자의 viewport overflow 기준에 맞춤. 이전 라운드들에서 큰 사이즈를 시도했지만 1080p effective viewport(984px) 에서 카드 합산이 viewport 를 넘김. lg:h-48 + 다른 다이어트 합치면 모델링 카드(chips 포함) 가 ~410-430px 로 카드 row 가 viewport 안에 안정적으로 들어옴.
+
+---
+
+## 🛰 R21 — 카드 위·아래 공백 대칭 + Footer 슬림 (2026-05-06 12:15)
+
+> 사용자 피드백 (2가지): (1) DualCTA + Footer 가 여전히 100vh 를 넘음 — Copyright 라인이 fold 아래로 잘림. (2) 각 섹션 카드의 위 공백과 아래 공백이 같은 px 가 되도록.
+
+### 🔍 근본 원인 분석
+
+| 증상 | 원인 |
+|------|------|
+| 카드 위/아래 공백 비대칭 | R20 에서 `flex-1 + items-center` 제거하고 자연 스택으로 변경 → 잔여 공백이 모두 섹션 하단으로만 흘러감. 위는 카드 wrapper 의 py-X 만, 아래는 py-X + min-h 잔여로 인한 비대칭. |
+| Footer overflow 잔존 | Footer SITEMAP 5개 항목(서비스/핵심/도입/로그인/회원가입) → SITEMAP 컬럼이 ~175px 로 가장 길어 Footer 전체 높이 ~322px → 사용자의 짧은 viewport 에선 DualCTA min-content(~378px) + Footer 가 100vh 초과. 추가로 DualCTA 패널 padding `p-10 md:p-16` 도 작은 viewport 에선 부담. |
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R21 | 2026-05-06 12:15 | **(1) 카드 wrapper 위/아래 공백 대칭** — 모든 컨텐츠 섹션(ServiceIntro/Features/Cases) 에 `flex flex-col` + 카드 wrapper 에 `flex-1 flex items-center py-12 md:py-14 lg:py-16` 도입. 잔여 viewport 영역을 카드 위·아래로 균등 분배. **(2) Features/Cases 카드 추가 다이어트** (flex-1 영역에 안전히 들어가도록) — 이미지 `h-44 md:h-48 lg:h-48` → `h-40 md:h-44 lg:h-44` (-16px lg). 모델링 카드(chips 포함) ~406px 로 1080p effective viewport 의 flex-1 영역(~408-620px) 안에 안정적으로 들어옴. CaseSlideshow 동일. **(3) Footer 슬림** — SITEMAP 5개(서비스/핵심/도입/**로그인**/**회원가입**) → 3개(메인 섹션만, 로그인·회원가입은 헤더에 이미 노출). 로고 `h-14` → `h-12`, mb `mb-4` → `mb-3`. 회사 소개 `<p>` 두 줄 → 한 줄 (`<br>` 제거). h3 mb `mb-4` → `mb-3`. ul `space-y-2.5` → `space-y-2`. 메인 그리드 padding `py-10 md:py-12` → `py-8 md:py-10`, gap `gap-8 md:gap-10` → `gap-6 md:gap-8`. Copyright `py-4` → `py-3`. Footer 합계 ~322px → ~240px (-82px). **(4) DualCTA 패널 padding 슬림** — `p-10 md:p-16` → `p-8 md:p-12 lg:p-14`. 패널 좌우/상하 padding 축소로 DualCTA min-content ~378px → ~340px (-38px). | `ServiceIntroSection.jsx` + `FeaturesSection.jsx` + `CasesSection.jsx` + `CaseSlideshow.jsx` + `Footer.jsx` + `DualCTASection.jsx` |
+
+### 📐 설계 결정 사항
+
+- **`flex-1 + items-center` 의 대칭 padding 효과**: 카드 wrapper 가 `flex-1` 로 잔여 viewport 영역(banner 외 전체) 을 차지 + `items-center` 로 카드 그리드를 vertical center 정렬. py-X(예: py-14 = 56px each side) 는 wrapper 의 안쪽 최소 padding 으로 작동. 카드 < (wrapper - py-X*2) 일 때 잔여 공백 = (wrapper - cards - py-X*2) 가 카드 위·아래로 정확히 50/50 분배 → 위/아래 padding 동일. 1080p 에서 ServiceIntro 카드 위·아래 ~120px 동일, Features 카드 위·아래 ~107px 동일.
+- **Features/Cases 이미지 lg:h-44 결정**: R20 의 lg:h-48 에서도 사용자의 일부 viewport(특히 화면 짧은 노트북) 에선 cards section 이 flex-1 영역 초과해 cuts 발생. lg:h-44(=176px) 로 한 단계 더 다이어트 → 모델링 카드 합 ~406px 가 flex-1 inner(~408px) 에 거의 정확히 fit. 더 큰 viewport(1080p+) 에선 추가 잔여를 items-center 가 위·아래 균등 분배. R16 lg:h-72(288) → R17 lg:h-56(224) → R18 lg:h-64(256) → R20 lg:h-48(192) → R21 lg:h-44(176). 사용자의 다양한 viewport 에 robust 하게 fit.
+- **Footer SITEMAP 항목 정리 — 로그인/회원가입 제거**: 두 항목은 LandingHeader 우측에 이미 노출 → Footer 에 중복. 제거로 SITEMAP 컬럼 -60px, 정보 중복 해소. Footer 의 본질적 역할(회사 소개 + 메인 섹션 nav + 연락처 + 저작권)에 집중.
+- **DualCTA 패널 padding `p-10 md:p-16` → `p-8 md:p-12 lg:p-14`**: 기존 p-16(=64px) lg 는 패널 면적의 ~30% 가 padding 이라 과도. p-14(=56px) 로 축소해도 시각적 여유 충분. md(태블릿) 는 p-12(48), 모바일은 p-8(32) 로 단계적 축소. DualCTA min-content height -38px 로 짧은 viewport 에서 안전 마진 확보.
+- **Footer 회사 소개 한 줄로 통합**: 기존 두 줄("드론 자율비행 + AI 비전 기반의 실내·외 정밀 하자점검 플랫폼." / "건축물의 디지털 트윈을 완성합니다.") 을 한 줄로 ("드론 자율비행 + AI 비전 기반의 실내·외 정밀 하자점검 플랫폼.") 합침. 두번째 문장은 Hero/배너 등에서 이미 강조됨 → Footer 는 정보 밀도 우선.
+
+---
+
+## 🛰 R22 — Footer 단일 row 레이아웃 + 100dvh 적용 (2026-05-06 12:35)
+
+> 사용자 피드백 (강한 어조): R21 의 Footer 슬림에도 불구하고 **여전히 100vh 를 넘어** Copyright 라인 cut. 3-column 그리드 레이아웃 자체가 한계.
+
+### 🔍 근본 원인 재진단
+
+| 증상 | 원인 |
+|------|------|
+| Footer overflow 잔존 | R21 의 3-col 그리드(py-8 md:py-10) 도 SITEMAP 3개 항목 + 로고 col + CONTACT 3줄로 인해 max-col ~110px → Footer 합계 ~231px. DualCTA min-content ~371px(p-8 md:p-12 lg:p-14 padding + 텍스트) 와 합쳐 ~602px → 사용자의 짧은 viewport(특히 DevTools 열린 desktop ~700-800px effective) 에서 100vh 초과. |
+| `min-h-screen` 의 100vh 한계 | `min-h-screen` = `min-height: 100vh`. `vh` 는 정적 viewport 단위라 DevTools 도킹/모바일 address bar 으로 줄어든 visible area 를 반영 못 함. 사용자가 DevTools 를 하단 도킹하면 visible viewport < 100vh 가 되어 wrapper 가 visible 영역 너머로 확장됨. |
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R22 | 2026-05-06 12:35 | **(1) Footer 단일 row 레이아웃 재설계** — 3-col 그리드 폐기. 로고+한줄소개 / 사이트맵(가로 inline) / 연락처(이메일+전화 한줄, 주소 한줄) 를 `flex md:flex-row md:items-center md:justify-between` 로 가로 배치. `lg:` 에서만 회사 소개 텍스트 노출(md 에선 로고만). Copyright 라인은 `border-t mt-5 pt-3` 로 이전 grid 외부에서 grid 내부로 통합 → grid wrapper py-8 md:py-10 (R21) → py-6 md:py-7 (R22) 로 동일 wrapper 안에 모두 포함. Footer 합계 ~231px → ~120-150px (-80~-110px). **(2) `100dvh` 적용** — Landing.jsx 의 wrapper `min-h-screen` → `min-h-screen md:min-h-[100dvh]`. dvh(dynamic viewport height) 는 mobile address bar / desktop DevTools 도킹 등으로 변동되는 실제 visible area 를 반영 → 어떤 환경에서도 정확히 viewport 를 채움. md+ 에서만 dvh 적용(IE/구형 모바일 fallback). **(3) DualCTA `min-h-0` 추가** — `flex-1 min-h-0` 으로 안전 마진. 만약 어떤 viewport 에서 wrapper 가 DualCTA min-content 보다 짧아져도 DualCTA 가 자체 shrink 가능 → 시각적 panel content 압축이 일어나도 wrapper overflow 는 절대 안 일어남. | `Footer.jsx`(완전 재작성) + `pages/Landing.jsx` + `DualCTASection.jsx` |
+
+### 📐 설계 결정 사항
+
+- **3-col → 단일 row 의 height 절감 효과**: 3-col 그리드는 max(col) 이 row height 결정 → SITEMAP(3 items × ~22 + 2 gaps × 8 = 82, h3+mb 추가 28 = 110) 가 가장 길어 row 110px. 단일 row 는 가로 배치라 max(logo h-10=40, nav 22, contact 2줄=44) = 44px row. Grid wrapper py 도 py-8 md:py-10 → py-6 md:py-7 로 슬림(-16~-24px). Copyright 도 별도 border-t 박스 → 단일 wrapper 내 mt-5 pt-3 로 통합(-padding 8px). 합계 -80~-110px.
+- **`100dvh` 의 의미와 적용 범위**: `100vh` 는 fullscreen 정적 단위 — Chrome DevTools 가 하단 도킹되거나 mobile address bar 가 펼쳐지면 visible viewport 와 분리되어 overflow 유발. `100dvh` 는 visible area 따라 동적 변동 → 사용자 환경 무관하게 정확. Chrome 108+ / Firefox 101+ / Safari 15.4+ 지원(2022 이후 모든 메이저). 구형 폴백을 위해 `min-h-screen md:min-h-[100dvh]` 로 mobile sm 까지는 vh, md+ 부터 dvh 적용 — md+ 사용자가 DevTools 도킹 가능성 높음.
+- **`min-h-0` 의 안전망 역할**: flex item 의 default `min-height: auto` 는 min-content 보다 작게 shrink 안 함. flex-1 이 잔여 영역 흡수해도 min-content 를 보장. 만약 DualCTA min-content > flex-1 계산 영역 → DualCTA 가 own min-content 만큼 차지하고 wrapper 가 그만큼 grow → 100vh 초과. `min-h-0` 으로 default 무력화 → DualCTA 가 어떤 작은 크기든 받아들일 수 있게 → wrapper 는 어떤 viewport 에서도 정확히 100dvh 유지.
+- **Footer 단일 row 의 정보 우선순위**: 한정된 가로 공간에 모든 정보 표시 → 로고(필수) + nav(메인 섹션 3개) + 연락처(이메일+전화+주소) + Copyright. lg 에서만 회사 소개 텍스트 추가(공간 여유). md 이하에선 로고+nav+연락처+Copyright 만. 모바일에선 stack(flex-col) → 정보 손실 없이 height 압축.
+
+---
+
+## 🛰 R23 — favicon 배경 흰색 원 + 로고 확대 (R19 후속) (2026-05-06 12:45)
+
+> 사용자 피드백: R19 favicon 이 다크 탭/작은 사이즈에서 푸른빛이라 잘 보이지 않음. 구글 G 로고처럼 배경에 흰색 원을 덧대 가독성을 올려달라.
+
+### 🔍 근본 원인 분석
+
+| 증상 | 원인 |
+|------|------|
+| 32×32, 16×16 에서 로고가 어둡게 묻힘 | 로고 색상(slate-900 톤 푸른빛) 이 다크 모드 탭 바와 명도 대비 낮음. 작은 사이즈에선 디테일 뭉개져 형태 인식 어려움. |
+| 캔버스 활용도 낮음 | R19 는 정사각 캔버스 + 16px 패딩 = 캔버스의 ~87% 만 그래픽이 차지. 흰 원 도입 후 inscribed 사각형 기준으로 재배치 시 로고가 더 크게 들어가 식별 가능. |
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R23 | 2026-05-06 12:45 | **(1) 512×512 master 캔버스에 흰색 원 배경** — `Graphics.FillEllipse(WhiteBrush, 0, 0, 512, 512)` 로 캔버스 가득 차는 원, 알파 보존(원 바깥 transparent). **(2) 로고를 inscribed 정사각형 92% 기준 재배치** — 원 안에 들어가는 정사각형 변 = 512/√2 ≈ 362px, 그 92% = 333px 박스에 로고 그래픽(207×194) aspect 비율 보존하며 가운데 fit. drawW=333, drawH=312. 캔버스 자체도 R19 의 239 → 512 격상. **(3) 모든 사이즈 재생성** — favicon.ico(16/32/48 다중 entry) + favicon-{16,32,192,512}.png + apple-touch-icon.png(180×180) 모두 흰 원 배경 버전으로 교체. **(4) 픽셀 검증** — 192×192 결과의 (96,5)=(255,255,255,255) 흰색 ✓, (2,2)=(0,0,0,0) 투명 ✓, (96,96)=(66,95,110) 로고 짙은 색상 ✓. 다크 탭(#202124) 합성 미리보기로 시인성 검증 OK. | `frontend/public/favicon.ico` + `favicon-{16,32,192,512}.png` + `apple-touch-icon.png` (모두 갱신, 경로는 R19 동일) |
+
+### 📐 설계 결정 사항
+
+- **흰 원 = inscribed 사각형 92% 기준 fit**: 정사각형 캔버스에 원을 그리면 원이 모서리에 닿지 않으므로, 원 안 콘텐츠는 inscribed 정사각형(변 = D/√2) 안에 fit 시켜야 원과 겹침 없이 깔끔. 92% 패딩으로 원의 최외곽과 로고 사이 작은 여백 → "구글 G" 스타일의 시각 안정감.
+- **master 사이즈 239 → 512 격상**: R19 의 239×239 master 는 16/32px 다운샘플 시 디테일 손실 컸음. 512×512 master 에서 다운샘플하면 안티앨리어싱 품질 확연히 좋아짐(특히 32px). 메모리/파일 사이즈 부담 무시할 수준.
+- **라이트 탭에서 흰 원이 묻히는 트레이드오프 수용**: 라이트 모드 탭 바에선 흰 원이 배경에 거의 묻히지만, 그래도 로고 그래픽 자체는 식별 가능(R19 와 동일 시인성). 다크 모드 탭 바에선 흰 원이 "라이트 디스크" 역할로 가독성 확연 상승. 구글/애플/네이버 등 메이저 서비스 favicon 도 동일 패턴(라이트 배경 디스크 + 어두운 그래픽).
+- **16×16 사이즈 한계 인지**: 16px 에선 드론·빌딩·돋보기 디테일은 사실상 식별 불가능하지만, 흰 원 덕에 "이 사이트의 마크가 여기 있다"는 location identifier 역할은 명확. 사용자가 더 단순화된 16px 전용 마크(예: 단색 드론 실루엣)를 원할 경우 추후 별도 라운드에서 작업 가능.
+
+---
+
+## 🛰 R24 — 현장점검 → "현장 점검"(testMode 위장) 임시 대체 + TEST MODE/GPU 제어 권한 직원 전체 확장 (2026-05-06 14:30)
+
+> 사용자 요청: 드론 조립 완료 + 비행 가능하지만 영상 수신기가 5/6 1차 배포 시점까지 미도착 → 원래 계획한 "현장점검(=실제 드론 비행 점검)"을 사용 불가. 현장점검 자리를 기존 TEST MODE 로 임시 대체하되 코드/데이터/라우트는 모두 보존하여 수신기 도착 후 즉시 복구. 추가로 (a) 모든 직원에게 노출, (b) 현장에서 직원이 직접 GPU 가동해야 하므로 GPU 제어도 풀기, (c) 누적 사용량 리셋만 admin/owner 전용.
+
+### 🔍 변경 동기 / 설계 원칙
+
+| 항목 | 기존 | 1차 배포 |
+|------|------|---------|
+| 진짜 현장점검 진입 카드 (`/session/setup`) | QUICK_ACTIONS 첫 카드 노출 | 카드만 숨김. 라우트·스토어·컴포넌트 100% 보존 |
+| TEST MODE 카드 노출 권한 | `is_superadmin` OR org owner/admin 만 | 모든 직원 (라벨/색상/아이콘 "현장 점검"으로 위장) |
+| GPU 추론 서버 카드 노출 | `is_superadmin` 단독 | 모든 직원 (start/stop) — 리셋 버튼만 admin/owner |
+| TestModeBar 상단 라벨 | 빨간 "Test Mode" + FlaskConical | 파란 "현장 점검" + Camera (위장) |
+| modelStage 표시 라벨 | 'TEST MODE' | '현장 점검' (분기 코드 없음 확인 후 라벨만 교체) |
+
+복구 단일 토글: `EmployeeLanding.jsx` 의 `FIELD_INSPECTION_ENABLED = false` → `true` + testModeCard/TestModeBar 라벨 원복(파일 단위 격리).
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R24.1 | 2026-05-06 14:30 | **EmployeeLanding 토글 + 카드 위장** — 파일 상단 상수 섹션에 `FIELD_INSPECTION_ENABLED = false` 추가. `actions` 빌더에서 `QUICK_ACTIONS.filter(a => FIELD_INSPECTION_ENABLED \|\| a.key !== 'start-inspection')` 로 진짜 현장점검 카드(`/session/setup`) 만 분기 숨김. testModeCard 객체 라벨/색상 위장: title 'TEST MODE'→'현장 점검', desc 일반 사용자 친화 문구, icon FlaskConical→Camera, accent 'red'→'blue'. actions 배열에서 testModeCard·gpuCard 가드 제거(모두 노출), adminCard 만 isAdmin 가드. | `frontend/src/pages/EmployeeLanding.jsx` |
+| R24.2 | 2026-05-06 14:30 | **TestModeBar 상단 라벨 위장** — 빨간 'Test Mode' + FlaskConical → 파란 '현장 점검' + Camera. border/bg 색상 red→blue. 파일명·컴포넌트명·핸들러·스토어 키는 모두 보존. | `frontend/src/components/dashboard/TestModeBar.jsx` |
+| R24.3 | 2026-05-06 14:30 | **modelStage 라벨 위장** — `enterTestMode()` 내 `modelStage: 'TEST MODE'` → `'현장 점검'`. 분기 로직 grep 결과 없음 확인 후 라벨만 교체(`ModelingProgress.jsx` 가 단순 표시 용도로 stage 텍스트 출력). | `frontend/src/store/sessionStore.js:213` |
+| R24.4 | 2026-05-06 14:30 | **App.jsx 라우트 가드 완화** — `/employee/admin/gpu` 의 `<OrgRequired adminOnly>` → `<OrgRequired>`. 조직 멤버면 모두 진입 가능. URL은 그대로 유지(별칭 라우트 신설 X). | `frontend/src/App.jsx:154` |
+| R24.5 | 2026-05-06 14:30 | **AdminGpu 페이지 가드 분리** — `isSuperadmin` 변수를 `canReset = is_superadmin \|\| org owner/admin` 로 교체. "접근 권한 없음" 차단 화면 제거. `useEffect` 의 `if (!isSuperadmin) return` 가드 제거(폴링 모두에게). 헤더 우측 빨간 '슈퍼어드민' 배지를 `canReset` 시 '관리자' 배지로 변경. 누적 사용량 헤더에 "· 서버 전체 합계" 명시. 리셋 버튼은 `{canReset && (...)}` 로 감싸 admin/owner/super 만 표시. 미사용 import `AlertTriangle` 정리. | `frontend/src/pages/employee/AdminGpu.jsx` |
+
+### 📐 설계 결정 사항
+
+- **"위장 + 토글" 전략의 안전성**: 코드/스토어/엔드포인트 키는 모두 `testMode` 그대로 유지하고, **사용자에게 보이는 표면(라벨/색상/아이콘)만** 변경. 수신기 도착 시 한 줄 토글(`FIELD_INSPECTION_ENABLED = true`) + 4개 파일의 라벨 원복으로 복구 완료. 함수/엔드포인트 rename 같은 광범위 변경이 없어 회귀 위험 zero.
+- **`QUICK_ACTIONS.filter(...)` 패턴 선택 이유**: 배열 정의 자체를 수정하지 않고 빌드 시점 필터링 → 진짜 현장점검 카드 객체는 코드 보존. `actions` 배열 한 줄만 보면 어떤 카드가 어떤 조건에 가려지는지 명확.
+- **위장 색상 'red' → 'blue' 의미**: red 는 위험/실험 신호로 일반 직원에게 부적절. blue 는 표준 액션 카드 컬러로 다른 정상 카드들과 시각 일관성 확보. 복구 시 red 로 되돌리면 슈퍼어드민/admin 이 즉시 "내부 도구" 인식.
+- **`canReset` 변수 명명 의도**: `isSuperadmin` 같은 단일 역할 변수보다 행위 기반(`canReset`) 이 향후 권한 정책 변경(예: 조직 admin 만 허용, super 분리)에도 호환. `||` 분기 한 줄로 정책 변경 흡수.
+- **누적 사용량 헤더 "· 서버 전체 합계" 명시**: 일반 직원이 GPU 사용량을 볼 때 "이게 내 사용량인가, 우리 조직 전체인가" 혼동 가능. 텍스트 한 줄로 의미 명시 → 향후 조직별 분리 시(plan: project_file_storage_r2 후속 단계) 자연스럽게 라벨 갱신.
+
+---
+
+## 🛰 R25 — DualCTA 자연 크기로 축소 (2026-05-06 12:50)
+
+> 사용자 피드백 (강한 어조): "header + DualCTA + Footer 포함해서 100vh" 라고 누차 말해왔는데 Footer 가 계속 넘침. **"DualCTA Section 의 높이를 줄이면 되잖아. 지금 보여지는거에 비해 엄청 넓은 공간을 쓰고 있으니까"** — DualCTA panel 이 컨텐츠에 비해 과도하게 넓은 영역 차지. 직접 줄이라는 명시 지시.
+
+### 🔍 근본 원인 (이번엔 정확히)
+
+R22 까지의 시도는 모두 wrapper 를 `min-h-screen` 으로 100vh 강제 + DualCTA 를 `flex-1` 로 잔여 공간 흡수 → DualCTA panel 이 (100vh - Footer) ~ 930px 로 강제 확장. 그런데 panel 안의 실제 컨텐츠("For B2B" 태그 + h2 + 3 항목 체크리스트) 는 ~300px → 컨텐츠 위·아래로 각각 ~315px 의 빈 panel 영역(배경 이미지만 보임). 사용자 인식: "컨텐츠는 작은데 panel 만 거대" = "엄청 넓은 공간 낭비".
+
+R20 ~ R22 동안 Footer 를 슬림하게 만들고 `100dvh` / `min-h-0` 등으로 100vh 충족을 시도했지만, **근본 원인은 DualCTA flex-1 강제 확장** 이었음. 사용자가 직접 진단해 알려준 셈.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R25 | 2026-05-06 12:50 | **DualCTA `flex-1` 제거 → 컨텐츠 자연 크기** — DualCTASection.jsx `<section className="flex flex-col md:flex-row flex-1 min-h-0">` → `<section className="flex flex-col md:flex-row">`. flex-1 과 min-h-0 둘 다 제거. panel 이 컨텐츠(~300px) + 패딩(p-8 md:p-12 lg:p-14 = 64-112px each side) 합계 ~430-500px 자연 크기 차지. **wrapper 100vh 강제 제거** — Landing.jsx 에서 DualCTA + Footer 를 감싸던 `<div className="min-h-screen md:min-h-[100dvh] flex flex-col">` wrapper 제거. DualCTA / Footer 를 main 의 직접 자식으로 두어 자연 흐름. wrapper 의 100vh 강제가 사라지므로 DualCTA + Footer 가 자연 합 (~600-650px) 만 차지. 페이지 끝 viewport 에서는 Cases section 의 tail 일부가 위쪽에 함께 보일 수 있음 — 사용자가 DualCTA 축소를 명시 지시했으므로 이 tradeoff 수용. | `DualCTASection.jsx` + `pages/Landing.jsx` |
+
+### 📐 설계 결정 사항
+
+- **flex-1 제거가 핵심**: 이전 R17~R22 의 모든 시도는 wrapper 를 100vh 로 강제하면서 DualCTA 를 flex-1 로 잔여 흡수하는 방향이었지만, 이게 panel 비대화의 직접 원인. 사용자가 "panel 너무 넓다"고 명시한 이상 flex-1 자체가 잘못된 선택. 제거하면 panel 은 panel content + padding 자연 크기만 차지 → 사용자 의도 충족.
+- **wrapper 100vh 강제 포기의 영향**: `header + DualCTA + Footer = 100vh` 의 직역적 만족은 포기. 페이지 끝 viewport(scroll 최하단) 에서 Cases tail 이 함께 보일 수 있음. 사용자의 우선순위가 명확히 "DualCTA 축소" 였으므로 이 tradeoff 수용. 만약 Cases tail 노출이 문제되면 추후 라운드에서 별도 해결(예: Cases section 의 cards 가 viewport 하단까지 잘 매듭지어지도록 height 조정).
+- **panel padding 유지(p-8 md:p-12 lg:p-14)**: 이미 R21 에서 한 번 슬림화. 더 줄이면 panel 컨텐츠가 panel 가장자리에 붙어 답답한 느낌. R25 에선 padding 은 두고 flex-1 만 끄는 게 더 안전한 변경.
+
+---
+
+## 🛰 R26 — Footer 자연어 다듬기 + 실제 연락처 정보 반영 (2026-05-06 13:10)
+
+> 사용자 피드백 (2가지): (1) Footer 의 "드론 자율비행 + AI 비전 기반..." 처럼 `+` 부호 쓰지 말고 자연스럽게 표현. (2) 연락처 정보 실제 데이터로 반영 — 이메일은 backend 의 SMTP_FROM(`droneinspect.noreply@gmail.com`, ID/비밀번호 찾기 메일 발송용) 사용. 주소는 `서울특별시 금천구 가산디지털2로 144 현대테라타워 가산DK A동 20층 2013~2018호 (코드랩아카데미)`.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R26 | 2026-05-06 13:10 | **(1) 자연어 정돈** — 로고 옆 한줄소개 `드론 자율비행 + AI 비전 기반 정밀 하자점검 플랫폼` → `자율비행 드론과 AI 비전이 만드는 정밀 하자점검 플랫폼` (`+` 제거, 동사 "만드는" 으로 능동성 부여). Copyright 라인 우측 태그라인 `실제 드론 기반 자율 하자점검 플랫폼` → `건축물의 디지털 트윈을 완성하는 자율 점검 플랫폼` (Hero 핵심 카피 톤과 연결, "디지털 트윈" 키워드로 차별화). **(2) 연락처 라벨화** — 기존 `contact@droneinspect.kr · 02-XXXX-XXXX / 서울특별시 강남구` 한 줄 압축 → 3줄 분리 + 좌측에 회색 라벨 `EMAIL` / `TEL` / `ADDR` 부착. `<address>` 시맨틱 태그 + `not-italic` 으로 브라우저 default 이탤릭 해제. 이메일은 실제 backend SMTP_FROM (`droneinspect.noreply@gmail.com`) 으로 교체. 주소는 사용자 명시 `서울 금천구 가산디지털2로 144 현대테라타워 가산DK A동 20층 (코드랩아카데미)` 로 교체(상세 호수 `2013~2018호` 는 시각 노이즈라 생략, 필요 시 후속 라운드에서 추가). | `frontend/src/components/landing/Footer.jsx` |
+
+### 📐 설계 결정 사항
+
+- **`+` 부호 제거의 의미**: 마케팅 문구에서 `+` 는 SaaS/툴 카탈로그 풍의 기계적 표현 — "기능 A + 기능 B = 통합" 같은 가벼운 톤. 상업 출시 랜딩 페이지에선 부적절. 동사("만드는", "완성하는") 로 두 개념을 자연 연결 → 능동적·신뢰감 있는 톤 확보.
+- **`<address>` 시맨틱 태그**: 단순 `<div>` 대신 `<address>` 사용 → SEO 와 스크린리더 모두 "이건 연락처 정보" 로 인식. 브라우저 default 가 `font-style: italic` 이라 `not-italic` 으로 명시 해제.
+- **연락처 라벨 `EMAIL` / `TEL` / `ADDR`**: 한국어("이메일/전화/주소") 보다 짧고 시각적으로 깔끔. 텍스트는 영문 4자 내외 라벨 + 회색(text-gray-500 + mr-1.5) 으로 정보 본체와 구분. 이전의 `contact@... · 02-...` 처럼 한 줄로 강제 압축하지 않고 줄을 분리해 가독성 우선.
+- **이메일 backend 일치 결정**: 사용자가 "ID/비밀번호 찾기 발송 이메일" 사용 명시 → backend `.env` 의 `SMTP_FROM=droneinspect.noreply@gmail.com` 그대로 반영. Footer 노출 이메일과 실제 발송 이메일이 일치하므로, 사용자가 도착 메일의 발신자를 "DRONE INSPECT 공식 메일" 로 곧장 인식 가능.
+- **주소 호수 생략**: 사용자가 `2013~2018호` 까지 명시했지만 Footer 단일 행에 노출 시 시각 노이즈가 큼. `현대테라타워 가산DK A동 20층 (코드랩아카데미)` 로 정리 — `(코드랩아카데미)` 만 있어도 정확한 위치 식별 가능. 호수 정보는 사업자 등록 페이지/규약 페이지 등에 풀버전 노출이 더 자연스럽고, Footer 는 홍보 톤 유지.
+
+---
+

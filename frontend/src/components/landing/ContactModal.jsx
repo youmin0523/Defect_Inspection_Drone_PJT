@@ -124,13 +124,13 @@ export default function ContactModal({ isOpen, onClose }) {
         onClick={onClose}
       />
 
-      {/* 모달 본체 */}
+      {/* 모달 본체 — overflow-hidden 으로 자식 모서리 clip (라운드 안티앨리어싱 영역 흰색 노출 방지) */}
       <div
         ref={dialogRef}
-        className="relative w-full max-w-2xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl shadow-2xl"
+        className="relative w-full max-w-2xl max-h-[92vh] bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col"
       >
-        {/* 헤더 */}
-        <div className="bg-slate-900 text-white py-5 px-6 text-center rounded-t-2xl relative">
+        {/* 헤더 — 부모 overflow-hidden 으로 자동 라운드 clip되므로 rounded-t-2xl 불필요 */}
+        <div className="bg-slate-900 text-white py-5 px-6 text-center relative shrink-0">
           <button
             type="button"
             onClick={onClose}
@@ -147,8 +147,8 @@ export default function ContactModal({ isOpen, onClose }) {
           </p>
         </div>
 
-        {/* 폼 */}
-        <form onSubmit={handleSubmit} className="p-6 md:p-7 space-y-4">
+        {/* 폼 — 헤더는 sticky, 폼만 스크롤 */}
+        <form onSubmit={handleSubmit} className="p-6 md:p-7 space-y-4 overflow-y-auto">
           {/* 고객 유형 */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">
