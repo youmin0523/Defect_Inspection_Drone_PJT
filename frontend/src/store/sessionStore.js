@@ -210,7 +210,7 @@ const useSessionStore = create(
           level: 3,
           modelStatus: 'ready',
           modelProgress: 100,
-          modelStage: '현장 점검',
+          modelStage: 'TEST MODE',
           modelSource: 'test',
           loadedPreModelId: null,
           uploadedFileName: null,

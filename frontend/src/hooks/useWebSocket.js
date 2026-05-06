@@ -16,7 +16,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import useDefectStore from '../store/defectStore.js'
 import useDroneStore from '../store/droneStore.js'
-import useSessionStore from '../store/sessionStore.js'
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/v1/ws'
 const INITIAL_RETRY_DELAY = 300    // 0.3초
@@ -25,17 +24,7 @@ const MAX_RETRY_DELAY = 2000       // 2초
 // 채널별 메시지 핸들러 (모듈 레벨 — 리렌더링과 무관)
 const messageHandlers = {
   'defect.new': (data) => {
-    const sess = useSessionStore.getState()
-    const defectStore = useDefectStore.getState()
-
-    // 게이트 미오픈이면 큐 (첫 프레임 onLoad 시 또는 5s fallback에서 flush).
-    // mode/STOP 가드는 너무 엄격해서 실제 흐름을 막고 있었음 → 제거.
-    if (sess.isTestMode && !defectStore.testMediaReady) {
-      defectStore.queueTestDefect(data)
-      return
-    }
-
-    defectStore.addDefect(data)
+    useDefectStore.getState().addDefect(data)
   },
   'telemetry.update': (data) => {
     useDroneStore.getState().updateTelemetry(data)

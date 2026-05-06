@@ -47,11 +47,9 @@ export default {
         },
       },
       fontFamily: {
-        // 전역 기본 sans — Pretendard 로 통일 (한글·영문 일관성)
-        sans: ['Pretendard Variable', 'Pretendard', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'Roboto', '"Helvetica Neue"', '"Apple SD Gothic Neo"', '"Noto Sans KR"', 'sans-serif'],
-        // 코드/숫자 정렬용 — 의도적으로 monospace 유지
+        sans: ['Inter', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
-        // 하위 호환 — 기존 font-pretendard 클래스 사용처 유지
+        // 한글·영문 일관성용 — 시간/숫자/라벨 등 폰트가 섞이는 위치에서 사용
         pretendard: ['Pretendard Variable', 'Pretendard', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'Roboto', '"Helvetica Neue"', '"Apple SD Gothic Neo"', '"Noto Sans KR"', 'sans-serif'],
       },
       animation: {},
