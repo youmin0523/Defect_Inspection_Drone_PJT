@@ -105,3 +105,6 @@ runs/
 .taskmaster/
 # 분리 backend repo의 자체 워크플로우 (통합 repo는 추적 X)
 backend/.github/workflows/fly-deploy.yml
+
+# 학습 산출물 (체크포인트·로그 등 대용량, 재생성 가능)
+training_artifacts/
