@@ -108,3 +108,12 @@ backend/.github/workflows/fly-deploy.yml
 
 # 학습 산출물 (체크포인트·로그 등 대용량, 재생성 가능)
 training_artifacts/
+
+# Gemini/Playwright 자동 캡처 디버깅 산출물 (1회성, 사용자 PC 절대경로 박혀있음)
+# 스크립트 자체는 사용자 환경 의존, 결과물은 노션 동기화용 별도 저장.
+capture_screenshots.py
+test_nav*.py
+*_html.txt
+login_test_output.html
+test_dashboard.html
+test_dashboard.png
