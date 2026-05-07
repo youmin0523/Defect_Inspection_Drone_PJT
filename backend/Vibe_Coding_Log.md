@@ -2476,3 +2476,33 @@ R30 + R31 결합 효과: 사용자가 하자 카드 클릭 시 **(1) 항상 정�
 - **bcrypt asyncio 오프로드 — 이벤트 루프 보호**: bcrypt 4.x 직접 사용(rounds=12)은 ~250ms 동기 CPU 작업. async 함수 안에서 직접 호출하면 그 시간 동안 이벤트 루프가 다른 요청을 처리 못함. `asyncio.to_thread(...)` 로 별도 스레드에 던져 이벤트 루프는 즉시 다음 작업으로 이동.
 - **콜드 스타트 완화 정책 — 워밍 핑 + bcrypt 오프로드 만 적용**: Fly.io `min_machines_running=1` 변경은 1GB 머신이 무료 한도 초과 가능성 → 비용 발생 우려로 보류. 워밍 핑(frontend Landing/Login mount) 만으로도 사용자 ID/PW 입력하는 동안 머신 부팅이 진행되어 첫 로그인 체감속도 5~10초 단축 예상. 비용 결정은 사용자 명시 시점.
 - **README 단순화 의도**: 1차 배포 후 본 repo 가 "3-모델 추론 파이프라인 + 인증/사이트/보고서/채팅" 의 운영 백엔드로 자리잡음. 자율비행은 통합 repo R&D 영역. 분리 repo README 는 운영 관점에 집중하여 신규 합류자가 즉시 setup·배포할 수 있게 정리.
+
+---
+
+## 🎯 R-postdeploy.5 — 검출 파이프라인 정합성 사고 5건 일괄 수정 (2026-05-07 18:00)
+
+> 사용자 피드백 (배포 후 실사용 중): bbox/객체 검출 위치 부정확, 클래스 라벨이 엉뚱(균열 사진을 "C-02 도배지 기포·들뜸"으로, 풀밭에 "B-03 코킹 누락" FP), 일부 케이스는 검출 자체가 안 되어 화면 빈 상태. 시스템 audit 결과 **학습-추론 동기화 누락 사고 5건 동시 발견**.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R-pd.5 | 2026-05-07 18:00 | **mock 폴백 4곳 모두 제거** — `_detect()`/`_detect_real()`이 모델 미로드, 검출 0건, bbox 비어있음, 추론 예외 시 mock 라벨을 만들지 않고 `None` 반환. 디렉토리명 기반 가짜 라벨이 실제 추론 자리를 가로채 입주자 신뢰 직결 사고. mock 함수 자체는 dead code로 보존(시연 분기 부활 여지). | app/services/test_stream.py |
+| R-pd.6 | 2026-05-07 18:00 | **PatchCore 입력 차원 자동 감지** — `ONNXPatchCoreDetector.__init__`이 모델 그래프(`session.get_inputs()[0].shape`)에서 입력 H/W 자동 추출. 하드코딩 256은 모델이 224 fixed로 export된 상태에서 매 frame `INVALID_ARGUMENT` 예외 → `_detect_real` try/except에 잡혀 모든 검출 None. 향후 backbone 교체에도 자동 적응. | app/services/onnx_inference.py |
+| R-pd.7 | 2026-05-07 18:00 | **M2-ResNet 5→2 클래스 매핑 동기화** — 학습 스크립트(`train_m2_resnet_surface.py:30-32`)는 `NUM_CLASSES=2` (`baseboard_damage`, `surface_defect`)인데 추론 코드는 옛 5-class 매핑 유지. 모델 인덱스 1 → `wallpaper_bubble`로 잘못 매핑되어 모든 표면 결함이 "C-02 도배지 기포·들뜸"으로 표시. ImageFolder 알파벳순 2-class로 동기화. | app/services/inference_pipeline_20.py |
+| R-pd.8 | 2026-05-07 18:00 | **M4-Context 클래스 순서 수정** — `m4_context_refined/data.yaml`은 `0=wall, 1=ceiling, 2=floor, 3=window, 4=door`인데 추론 코드는 알파벳 순 `[ceiling, door, floor, wall, window]`. wall↔ceiling↔window↔door 라벨 뒤섞여 `geometric_gate`가 사실상 무작위 통과 판정 — 풀밭 위 검출이 통과한 핵심 원인. data.yaml 순서로 정렬. | app/services/inference_pipeline_20.py |
+| R-pd.9 | 2026-05-07 18:00 | **taxonomy 9개 raw 클래스 등록** — M1-ResNet 출력 4종(`caulking_indicator`, `crack_indicator`, `moisture_indicator`, `structural_damage`), M2 출력 2종(`surface_defect`, `surface_defect_wall`), M3 출력 3종(`floor_defect`, `glass_defect`, `frame_defect`)이 미등록 → `("X-00", raw_name, ...)` 폴백으로 화면에 영문 raw 라벨 노출 가능성. 의미 정렬된 정식 코드(A-02/A-03/B-03/B-04/C-04/D-03/E-01/E-02)로 매핑. | app/services/defect_taxonomy.py |
+| R-pd.10 | 2026-05-07 18:00 | **0-detection 진단 트레이스** — `pipeline20.detect`에 단계별 카운트(M1/M2/M3 raw → geometric_gate → furniture_gate → NMS) 캡처 후 검출 0건 시 한 줄 로그 출력. 정상 흐름은 침묵, 0건일 때만 손실 지점 즉시 식별. | app/services/inference_pipeline_20.py |
+
+### 📐 설계 결정 / 진단 패턴
+
+- **5건 모두 동일 패턴 — 학습-추론 동기화 누락**: 학습 스크립트/data.yaml은 갱신됐는데 추론 코드와 taxonomy가 그에 맞춰 갱신되지 않음. 단일 사고가 아니라 시스템 전반의 정합성 검증 부재. 재발 방지용 메모리(`feedback_onnx_class_mapping_audit`) 추가 — ONNX dim ↔ data.yaml/CLASS_NAMES ↔ inference 매핑 ↔ taxonomy 4-way cross-check를 표준 절차로.
+- **mock 폴백 정책 — 안전 직결 우선**: 데모용 mock이 실제 추론 자리를 가로채는 것 자체가 가장 큰 사고. "검출 못함"이 정직한 답. mock 함수는 dead code로 보존(시연 분기 부활 여지)하되 호출 경로는 차단.
+- **PatchCore 자동 감지의 일반성**: 향후 backbone 교체로 input shape이 바뀌어도 코드 수정 불필요 — 같은 사고 재발 차단.
+- **남은 학습 차원 이슈 (v1.1 사이클)**: M1-YOLO `caulking_defect` precision 부족 (풀밭/배경 위 FP), M2/M3 ResNet sub-분류 부재 (도배 vs 도색 vs 스크래치 구분 불가). 후처리로 가리지 않고 학습 차원에서 처리 — `feedback_pure_training_mAP`, `feedback_training_first_no_postprocess_default` 정책 준수.
+
+### 🚨 안전성 영향
+
+- 거짓 라벨 노출 차단(가장 큰 신뢰 사고 원인) → 입주자 안전 직결 정책에 부합.
+- `geometric_gate` 정상화로 배경/풀밭/실외 환경에서의 FP 차단 정확도 회복.
+- 검출이 없을 때 가짜 표시 안 함 — 미탐(false negative)은 학습 차원에서 해결, 화면은 항상 모델의 정직한 출력만.
