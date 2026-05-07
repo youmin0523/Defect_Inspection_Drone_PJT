@@ -2601,3 +2601,44 @@ S500 / Cinelog35 외곽 비 ≈ 2.55배. BuildingMesh 10m 가로의 1/55(Cinelog
 
 - 거짓 응답 가속화 사고 없음 — 모든 변경이 시각화/네트워크 워밍 영역. 검출/추론 결과 정확도엔 영향 0.
 - 워밍 핑 자체는 backend 부하 미미(빈 GET 응답). 12 retry × 5s 도 머신이 살아있으면 200 한 번씩만 응답.
+
+---
+
+## 🎯 R35 — 체감 속도 측정 도구 + delayed spinner + 클라이언트 압축 + upload progress (2026-05-07 20:00)
+
+> 사용자 피드백: "구글/네이버/쿠팡은 '로그인 중' 문구가 뜨기도 전에 로그인이 완료된다. 영상 업로드도 사용자 대기 최소화. 도구 붙여서 테스트 진행하자."
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R35.1 | 2026-05-07 20:00 | **perfTimer 유틸** — `perfStart/perfEnd(label)` 패턴 + sessionStorage 누적 + window 이벤트 발화. Performance API 기반 ms 단위. 핵심 사용자 액션의 정확한 시간 측정. | utils/perfTimer.js |
+| R35.2 | 2026-05-07 20:00 | **PerfTimerWidget** — 화면 우하단 측정 표시 (`?perf=1` 또는 localStorage.perfWidget='1' 활성). 구글/네이버 비교용 시각 검증. 운영에 박혀 있어도 일반 사용자엔 안 보임. | components/dev/PerfTimerWidget.jsx, App.jsx |
+| R35.3 | 2026-05-07 20:00 | **Login delayed spinner (300ms)** — `loading=true` 후 300ms 이내 응답이면 "로그인 중..." 문구 자체를 안 띄움. 머신 깨어있는 정상 케이스(~100-200ms)에선 사용자 체감 = 즉시 로그인 완료. 구글/네이버 패턴. | Login.jsx |
+| R35.4 | 2026-05-07 20:00 | **클라이언트 이미지 다운샘플 (4K → 1280)** — canvas drawImage 리사이즈 + JPEG 0.85 인코딩. 이미지 사이즈 80~95% 절감. 영상은 그대로(ffmpeg.wasm은 ~30MB 다운로드 + 초기 로딩 무거워 단발 ROI 낮음). long-edge ≤ 1280이면 원본 그대로(불필요 변환 회피). | utils/imageDownsample.js |
+| R35.5 | 2026-05-07 20:00 | **uploadWithProgress 유틸** — XHR 기반 multipart 업로드 + progress callback. fetch API는 upload progress 표준 미지원이라 XMLHttpRequest 사용. percent/speedKbps/etaSeconds 실시간 제공. | utils/uploadWithProgress.js |
+| R35.6 | 2026-05-07 20:00 | **Dashboard 드래그앤드랍 강화** — drop 시 (0) 다운샘플 → (1) source 전환 → (2) progress 추적 업로드 → (3) 자동 START. dropzone 오버레이에 진행률 바 + 속도(KB/s) + ETA + 압축 효과(MB 절감) 실시간 표시. 각 단계 perf 측정. | Dashboard.jsx |
+| R35.7 | 2026-05-07 20:00 | **TestModeBar 파일첨부 강화** — 동일 패턴(다운샘플 + progress + perf). 버튼 라벨에 "업로드 중 75%" 형태로 진행률 인라인 표시. | TestModeBar.jsx |
+
+### 📐 설계 결정
+
+- **Delayed spinner — 구글/네이버 패턴**: 사용자 체감 속도의 본질은 응답 시간이 아니라 "기다림 인지 시간". 300ms 이내 응답이면 spinner 자체를 안 띄워서 인지 시간 0. 응답이 느릴 때만 시각적 피드백. macOS/iOS의 progress indicator도 같은 패턴.
+- **이미지만 다운샘플 / 영상은 그대로**: ffmpeg.wasm은 단발 ROI 낮음. 이미지는 canvas 네이티브 리사이즈로 가볍고 빠름. 4K 콘크리트 이미지 → 1280으로 줄여도 균열 검출 정확도엔 영향 미미(M1-YOLO imgsz 640~1024 기준). 사이즈는 80~95% 절감.
+- **XHR vs fetch — upload progress**: fetch는 ReadableStream 우회로 upload 측 progress 가능하지만 호환성 X (Safari, 일부 모바일 브라우저). XHR `.upload.onprogress`는 표준 + 호환성 100% — 단순함이 ROI.
+- **perf 위젯 활성화 — query param + localStorage**: 운영 배포에 박혀 있어도 일반 사용자엔 안 보이게 + 개발자/QA는 `?perf=1`로 즉시 활성화. 노션 동기화용 스크린샷에 측정값 그대로 첨부 가능.
+
+### 🚨 안전성 영향
+
+- 검출 정확도 영향 0 — 이미지 다운샘플은 클라이언트 측 시각 자료에만 적용. backend는 받은 그대로 ONNX 추론.
+- 1280 long-edge는 M1/M2/M3 YOLO 학습 imgsz(640~1024) 대비 충분 — 모델 입력 단계에서 다시 letterbox.
+- delayed spinner는 시각적 변경뿐 — 실제 응답 시간이 1.5초 넘어가면 정상적으로 "로그인 중..." 표시되어 사용자 인지 보장.
+- 압축 후 SVG/HEIC/손상 파일은 원본 그대로 통과 (createImageBitmap 실패 시 fallback) — 데이터 손실 없음.
+
+### 📊 측정 라벨 (`?perf=1` 위젯 또는 sessionStorage `perfTimer_records`)
+
+- `login` — 로그인 API 응답 시간 (목표: <300ms로 spinner 안 뜨기)
+- `dashboard-warm-root` — `/` 워밍 핑 응답 시간 (콜드 스타트 진단)
+- `dashboard-warm-init` — `/test/init` 모델 로드 시간 (목표: 첫 START 전까지 완료)
+- `upload-downsample` — 클라이언트 다운샘플 시간
+- `upload-network` — 실제 multipart 전송 시간
+- `upload-total` — 다운샘플 + 전송 + 자동 START 누적
