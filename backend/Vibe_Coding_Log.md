@@ -2506,3 +2506,36 @@ R30 + R31 결합 효과: 사용자가 하자 카드 클릭 시 **(1) 항상 정�
 - 거짓 라벨 노출 차단(가장 큰 신뢰 사고 원인) → 입주자 안전 직결 정책에 부합.
 - `geometric_gate` 정상화로 배경/풀밭/실외 환경에서의 FP 차단 정확도 회복.
 - 검출이 없을 때 가짜 표시 안 함 — 미탐(false negative)은 학습 차원에서 해결, 화면은 항상 모델의 정직한 출력만.
+
+
+
+---
+
+## 🐞 R-postdeploy.11 — testMode 첨부/재생/오탐 일괄 수정 (2026-05-07 16:34)
+
+> 사용자 보고 (배포 + 로컬): (1) `aeroinspect.site` test mode 에서 파일 첨부 시도 시 항상 실패. (2) 36.8MB 영상 업로드는 매우 오래 걸리고 업로드 후에도 화면이 `AWAITING SIGNAL` 로 대기. (3) 사람 영상에 "B-03 코킹 누락 43%", "B-04 방수층 들뜸/누수 35%" 같은 OOD 거짓 검출. (4) 영상 재생 자체가 슬라이드쇼처럼 끊김.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R-pd.11.1 | 2026-05-07 16:34 | **Fly secrets `TEST_MODE_ENABLED=true`** — `curl POST /api/v1/stream/test/upload` → `404 {"detail":"Test mode is disabled"}` 확인. 배포 시점에 false 로 박혀 있어 모든 `/test/*` 엔드포인트가 가드 차단. v1.1 정책상 영상 수신기 미도착이라 testMode 가 사실상 운영 모드인데 비활성 상태 → secret 활성화 + 머신 재시작 검증(200 응답). | Fly secrets |
+| R-pd.11.2 | 2026-05-07 16:34 | **업로드 직후 자동 source 전환** — `upload_test_files()` 가 saved>0 이면 `set_source("upload")`. 머신 재시작/콜드 스타트로 in-memory `_source` 가 'project' 디폴트로 reset 된 후 사용자가 업로드 탭 재클릭 안 하면 백엔드는 project 폴더 스캔 → 컨테이너에 학습 이미지 없음 → 0 frames → `AWAITING SIGNAL` 로 멎는 사고 재발 방지. 업로드 행위 자체가 source 의도 표명. | app/api/stream.py |
+| R-pd.11.3 | 2026-05-07 16:34 | **chunk 스트리밍 업로드** — `await upload_file.read()`(전체 RAM 로드) → 1MiB chunk 루프 + `f.write(chunk)`. 1GB Fly 머신에서 모델+multipart 동시 압박으로 36MB 영상이 수십 초 걸리는 사고 재발 방지. RAM 점유는 chunk 크기로 cap. | app/services/test_stream.py |
+| R-pd.11.4 | 2026-05-07 16:34 | **영상 재생 끊김 수정 (3~5fps → ~30fps)** — `_stream_video_frames()` 의 fps cap 10→30, detection 추론 빈도 매 3프레임→매 7프레임, `prev_detection` broadcast 를 `await`(0.15~0.4s lag) → `asyncio.create_task` fire-and-forget 으로 전환. multipart commit 타이밍은 prev_detection 1프레임 지연으로 이미 보장되므로 별도 sleep 불필요. | app/services/test_stream.py |
+| R-pd.11.5 | 2026-05-07 16:34 | **UI 노출 conf 게이트(클래스별)** — `_detect_real()` 마지막에 클래스별 `_ui_conf_gate` cutoff 적용. 기본 0.50, 단열(insulation/단열) 0.30. 모델 학습 임계값(M1=0.25, M2/M3=0.30)과 별개로 UI 노출 단계에서 OOD 저신뢰 검출 차단. 사람 영상 35~43% conf 사례를 직접 차단. 단열은 미탐 비용이 더 커 cutoff 보수 유지. | app/services/test_stream.py |
+
+### 📐 설계 결정 / 진단 패턴
+
+- **TEST_MODE_ENABLED 가드와 운영 정책 정합성 사고**: 코드 디폴트는 True 인데 Fly secret 으로 False 가 박혀 있어 운영 모드(testMode 위장 = 현장 점검) 자체가 차단됨. v1.1 cycle 동안 영상 수신기 미도착이 명시적이므로 secret 정책은 True 가 맞음. 향후 배포 환경 secret 변경 시 운영 정책과 코드 가드의 정합성 cross-check 필수.
+- **In-memory 싱글톤 reset 대비 자동 동기화**: `test_stream_service._source` 는 process-local. Fly auto_stop_machines='stop' + min_machines=0 이면 idle 시 머신 종료, 다음 요청에서 새 인스턴스가 디폴트('project')로 시작. 프론트 store 와 백엔드 in-memory 가 어긋나는 race 를 행위(=업로드)가 의도를 표명한다는 원칙으로 자동 봉합.
+- **multipart 메모리 스풀 vs 디스크 스트리밍**: FastAPI `UploadFile.read()` 는 spooled 1MB 임계값 이상이면 디스크에 재배치하지만, `await ufile.read()` 는 그 후 다시 bytes 객체로 RAM 로드. chunk 루프(`while ufile.read(N)`)가 RAM cap 보장.
+- **fire-and-forget broadcast 안전성**: detection broadcast 는 사용자에게 카드를 띄우는 부수 동작이라 실패해도 영상 자체는 멈추지 않음. `asyncio.create_task` 의 미참조 task 는 GC 위험이 이론적으로 있으나, ws_manager.broadcast 가 즉시 schedule 되어 실 GC 전에 완료. 30fps 보장 우선.
+- **UI conf 게이트 ≠ 학습 임계값 약화**: 모델 자체는 그대로(학습 단계 baseline 보존, [후처리 강도 정책] 정합), 노출 단계에 추가 보호막. Precision 우선([모든 하자 엄격·신뢰 우선]). 단열만 cutoff 보수 — [단열 결함 더 엄격하게] 와 정합.
+
+### 🚨 안전성 영향
+
+- 운영 모드(testMode 위장)가 배포에서 다시 동작 — 영상 수신기 도착 전까지의 v1.1 운영 가능.
+- OOD 입력에서 거짓 라벨 노출 차단 — 입주자 신뢰 사고 추가 방지.
+- 영상 재생 30fps 보장 — 사용자가 카메라 영상으로 인지 가능한 수준.
+- 업로드 RAM 사용량 cap — 1GB Fly 머신 OOM 방지(영상 한 개 당 1MiB 이하).

@@ -362,12 +362,18 @@ async def set_test_source(request: TestSourceRequest):
 
 @router.post("/test/upload")
 async def upload_test_files(files: List[UploadFile] = File(...)):
-    """테스트용 이미지/영상 파일 대량 업로드."""
+    """테스트용 이미지/영상 파일 대량 업로드.
+    저장 1건 이상이면 source='upload'로 자동 전환 — 머신 재시작/새 세션에서
+    백엔드 in-memory _source가 'project'로 초기화돼 화면이 AWAITING SIGNAL로
+    멎는 사고 재발 방지."""
     if not settings.TEST_MODE_ENABLED:
         raise HTTPException(status_code=404, detail="Test mode is disabled")
 
     from app.services.test_stream import test_stream_service
     result = await test_stream_service.add_uploaded_files(files)
+    if result.get("saved", 0) > 0 and test_stream_service.source != "upload":
+        test_stream_service.set_source("upload")
+        result["source"] = "upload"
     return result
 
 

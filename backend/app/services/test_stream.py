@@ -296,22 +296,34 @@ class TestStreamService:
 
     # ── 파일 업로드 ────────────────────────────
     async def add_uploaded_files(self, files) -> dict:
+        """대용량 파일을 chunk 스트리밍으로 디스크 저장.
+        `await upload_file.read()` 는 전체 바이트를 RAM에 올려 1GB Fly 머신에서
+        모델+multipart 동시 로드 시 OOM/스왑으로 36MB 영상이 수십 초 걸리는 사고 발생.
+        1MiB chunk 단위로 흘려 보내 RAM 점유는 chunk 크기로 cap.
+        """
         upload_dir = settings.TEST_UPLOAD_DIR
         os.makedirs(upload_dir, exist_ok=True)
         saved = 0
         total_size = 0
+        chunk_size = 1024 * 1024  # 1 MiB
+        import shutil
         for upload_file in files:
-            ext = Path(upload_file.filename).suffix.lower()
+            ext = Path(upload_file.filename or "").suffix.lower()
             if ext not in ALL_EXTENSIONS:
                 continue
             safe_name = f"{uuid.uuid4().hex[:8]}_{upload_file.filename}"
             dest = os.path.join(upload_dir, safe_name)
-            content = await upload_file.read()
+            written = 0
             with open(dest, "wb") as f:
-                f.write(content)
+                while True:
+                    chunk = await upload_file.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    written += len(chunk)
             self._uploaded_files.append(dest)
             saved += 1
-            total_size += len(content)
+            total_size += written
         return {
             "saved": saved,
             "total_size_mb": round(total_size / 1024 / 1024, 2),
@@ -763,10 +775,18 @@ class TestStreamService:
     # ── 영상 프레임 스트리밍 ────────────────────
     async def _stream_video_frames(self, filepath: str):
         """영상 케이스도 RGB와 동일 정책: 다음 yield 직후 이전 detection broadcast.
-        multipart commit 타이밍 때문에 매 frame yield가 *직전* frame의 paint 신호."""
+        multipart commit 타이밍 때문에 매 frame yield가 *직전* frame의 paint 신호.
+
+        성능 정책:
+          - fps cap 30 (이전 10 → 슬라이드쇼처럼 끊김)
+          - detection 추론은 매 7프레임 (~0.23s 마다 1회) — 30fps 유지하면서 부하 절감
+          - broadcast는 fire-and-forget(create_task)로 발사해 await 차단을 제거.
+            카드가 영상보다 먼저 보이는 race는 prev_detection 1프레임 지연으로
+            이미 보장되므로 별도 sleep lag 불필요.
+        """
         cap = cv2.VideoCapture(filepath)
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        frame_interval = 1.0 / min(fps, 10.0)
+        frame_interval = 1.0 / min(fps, 30.0)
 
         prev_detection: Optional[dict] = None
 
@@ -787,7 +807,7 @@ class TestStreamService:
             self._frame_counter += 1
 
             detection = None
-            if self._frame_counter % 3 == 0:
+            if self._frame_counter % 7 == 0:
                 detection = await self._detect(frame, filepath)
                 # RAW frame 스냅샷을 detection에 굳혀둠 — broadcast 지연 동안 다음 프레임이
                 # _current_rgb_jpeg를 덮어쓰는 것을 방지 (프레임 드리프트 방지).
@@ -803,20 +823,16 @@ class TestStreamService:
             # 새 boundary → 직전 프레임 commit
             yield self._mjpeg_boundary(rgb_jpeg)
 
-            # 직전 프레임의 detection을 paint 여유 후 broadcast
-            waited = 0.0
+            # 직전 프레임의 detection을 fire-and-forget broadcast.
+            # await 차단 없이 다음 프레임 루프로 즉시 진입 → 30fps 유지.
             if prev_detection is not None:
-                # frame_interval이 짧으면 그에 맞춰 더 적게 대기
-                lag = min(0.4, max(0.15, frame_interval * 0.5))
-                await asyncio.sleep(lag)
-                waited = lag
-                await self._broadcast_detection(prev_detection)
+                asyncio.create_task(self._broadcast_detection(prev_detection))
 
             # 이번 frame에 detection이 있을 때만 prev로 승격(없는 frame은 건너뜀)
             if detection is not None:
                 prev_detection = detection
 
-            await asyncio.sleep(max(0.0, frame_interval - waited))
+            await asyncio.sleep(frame_interval)
 
         # 영상 종료 후 마지막 detection은 같은 generator의 다음 RGB 프레임이 yield될 때 broadcast됨
 
@@ -862,8 +878,24 @@ class TestStreamService:
             "source": "test_mock",
         }
 
+    # ── UI 노출 conf 게이트 ─────────────────
+    # 모델 학습 conf threshold(M1~M3=0.25~0.30) 와 별개로, 사용자에게 카드를 띄울 때
+    # 적용하는 UI 노출 임계값. OOD 입력(사람/외부 객체 등)에서 35~43% 저신뢰 검출이
+    # "방수층 들뜸/코킹 누락" 같은 거짓 라벨로 노출되어 입주자 신뢰 사고 유발 가능.
+    # Precision 우선([모든 하자 엄격·신뢰 우선] 정책) — 학습 자체는 안 건드림.
+    # 단열은 미탐 비용이 더 크므로([단열 결함 더 엄격하게]) 더 낮은 cutoff 유지.
+    _UI_CONF_GATE_DEFAULT = 0.50
+    _UI_CONF_GATE_INSULATION = 0.30
+
+    @classmethod
+    def _ui_conf_gate(cls, class_: Optional[str], class_ko: Optional[str]) -> float:
+        s = f"{class_ or ''} {class_ko or ''}".lower()
+        if "insulation" in s or "단열" in s:
+            return cls._UI_CONF_GATE_INSULATION
+        return cls._UI_CONF_GATE_DEFAULT
+
     async def _detect_real(self, frame: np.ndarray, filepath: str) -> Optional[dict]:
-        """실제 ONNX 추론. 첫 번째 검출 결과를 반환. 0건/미로드/예외 → None.
+        """실제 ONNX 추론. 첫 번째 검출 결과를 반환. 0건/미로드/예외/저신뢰 → None.
         Why: 0건일 때 mock 폴백을 쓰면 모델이 못 본 곳에 가짜 bbox + 디렉토리명 라벨이
         그려져 사용자에게 거짓 검출이 노출됨. 안전 직결 — None이 정직한 답이다."""
         try:
@@ -880,6 +912,11 @@ class TestStreamService:
             # 그려져 거짓 위치 표시가 되므로 안전 직결 위반.
             if not det.bbox_xyxy:
                 print(f"[TestStream] 검출됐으나 bbox 없음 — 노출 차단 (filepath={filepath})")
+                return None
+
+            # UI 노출 conf 게이트(클래스별) — 학습 임계값과 무관하게 사용자 노출 보호.
+            ui_gate = self._ui_conf_gate(det.class_, det.class_display_ko)
+            if det.conf < ui_gate:
                 return None
             x1, y1, x2, y2 = [int(v) for v in det.bbox_xyxy]
             bbox_dict = {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
