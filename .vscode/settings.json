@@ -1,0 +1,27 @@
+{
+  // ── Pyrefly type checker 가상 in-memory 진단 차단 ─────────────
+  // Pyrefly 가 코드 단편을 가상 파일(`_pyrefly_virtual_/inmemory/`)로 만들어
+  // 분석한 결과 (parse error, "Could not find name `page`" 등) 를 Problems 패널에
+  // 띄워 실제 코드와 무관한 노이즈가 수백 건 누적되는 사고. 가능한 키 조합으로 차단.
+  "pyrefly.disable": true,
+  "pyrefly.enable": false,
+  "pyrefly.disableLanguageServices": true,
+  "pyrefly.languageServerEnabled": false,
+
+  // ── Python language server 명시 — Pylance 만 사용 ────────────
+  "python.languageServer": "Pylance",
+  "python.analysis.diagnosticMode": "workspace",
+
+  // ── 가상 인메모리 경로 자체를 파일 트리/검색에서 숨김 ───────
+  "files.exclude": {
+    "**/_pyrefly_virtual_": true,
+    "**/_pyrefly_virtual_/**": true
+  },
+  "search.exclude": {
+    "**/_pyrefly_virtual_": true,
+    "**/_pyrefly_virtual_/**": true
+  },
+  "files.watcherExclude": {
+    "**/_pyrefly_virtual_/**": true
+  }
+}

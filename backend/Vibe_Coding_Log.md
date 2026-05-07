@@ -2539,3 +2539,28 @@ R30 + R31 결합 효과: 사용자가 하자 카드 클릭 시 **(1) 항상 정�
 - OOD 입력에서 거짓 라벨 노출 차단 — 입주자 신뢰 사고 추가 방지.
 - 영상 재생 30fps 보장 — 사용자가 카메라 영상으로 인지 가능한 수준.
 - 업로드 RAM 사용량 cap — 1GB Fly 머신 OOM 방지(영상 한 개 당 1MiB 이하).
+
+---
+
+## 🎯 R-postdeploy.12 — 체감 속도 + TEST MODE 녹화 지원 (2026-05-07 19:00)
+
+> 사용자 피드백 (배포 후 실사용 중): "전체적인 체감 속도가 너무 느리다. 로그인 최초 10초+, 업로드/재생도 마찬가지. 다른 플랫폼 가면 된다는 생각이 드는 순간 망한 거다. 사용자 기다림 최소화. 드래그앤드랍도 가능하게. 녹화는 R2 보류 상태에서 로컬에라도 저장되길 희망."
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R-pd.12.1 | 2026-05-07 19:00 | **`/test/start` 모델 로드 비동기화** — `await load_models()` → `asyncio.create_task(...)` 백그라운드. 즉시 응답해서 `_playing=True` 만 켜놓고 모델은 뒤따라 준비. 모델 미로드 시 `_detect`가 None 반환하므로 검출 없이도 영상은 흐름. Fly.io 콜드 스타트 + 11모델 로드(~25-40초) 동안 frontend `<img>` 가 first-boundary 오기 전 edge timeout으로 onError 발화 → '스트림 대기 중' 영구 표시 사고 차단. | app/api/stream.py |
+| R-pd.12.2 | 2026-05-07 19:00 | **TEST MODE 녹화 지원 — `_TestStreamRecorder`** — RecordingService 가 실제 카메라(`CameraService`) 만 구독해 test mode 에선 녹화 불가 사고. test_stream._current_*_jpeg 폴링 → cv2.imdecode → cv2.VideoWriter mp4 저장. RecordingService.start() 자동 분기 (test_stream._playing 체크). 로컬 ./recordings 디스크 우선 (R2 보류). 사용자 다운로드는 `GET /api/v1/stream/record/{filename}` 그대로 활용. | app/services/recording.py |
+
+### 📐 설계 결정
+
+- **모델 로드 비동기화 — frontend 영상 흐름 즉시 보장**: 모델 미로드 시 `_detect` 가 None 반환하는 R32 mock 폴백 제거가 부수 효과로 활용됨. 영상은 ONNX 추론 없이도 raw frame 그대로 yield → 사용자 체감 "재생 시작" 시간 ~25초 → 즉시.
+- **TEST MODE 녹화 — 폴링 vs 콜백**: test_stream 에 콜백 등록 메커니즘 추가는 침습적. 대신 `_frame_version` 카운터 polling(50ms) — 추가 변경 0, 동시성 안전. 첫 frame 기준으로 VideoWriter 해상도 고정 + 후속 frame 리사이즈로 다양한 소스 mix(이미지 + 동영상 혼합) 대응.
+- **R2 보류 + 로컬 우선 정책**: 메모리 룰 [project_file_storage_r2] 상 R2 연동은 정식 점검 세션용. test mode 녹화는 데모/검증/QA 영역이라 로컬 디스크로 충분. ephemeral storage 한계는 사용자가 녹화 직후 다운로드로 회피.
+
+### 🚨 안전성 영향
+
+- 거짓 응답 가속화 사고 없음 — 모델 로드 비동기화는 검출 정확도엔 영향 0. 검출 카드는 모델 준비 완료 후에만 등장.
+- TEST MODE 녹화 mp4 는 backend burned-in bbox/라벨 그대로 포함 — 검출 결과 그대로 보존.
+- 운영 환경 ephemeral storage 한계 그대로(머신 stop 시 ./recordings 사라짐). 사용자가 녹화 직후 다운로드해야 영구 보관.
