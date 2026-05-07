@@ -2437,3 +2437,42 @@ R30 + R31 결합 효과: 사용자가 하자 카드 클릭 시 **(1) 항상 정�
 - INAV SITL 환경 검증 (`bash tools/inav-sitl/run.sh up` + pytest --integration)
 - 실기 단계적 검증 — 04_field_ops.md Stage C-1 ~ C-7
 - 분리 repo 동기화 — 사용자 명시 시점
+
+
+
+---
+
+## 🎯 R-postdeploy.1 — 객체감지 raw 모드 (frame snapshot 굳히기) (2026-05-07 10:05)
+
+> 사용자 피드백 (1차 배포 후 실사용 중): "bbox·객체 감지의 위치가 정확하지 않은데". 백엔드 측 진단 — broadcast 0.4s 디레이 동안 _current_*_jpeg 가 다음 프레임으로 갱신되어 bbox(N 시점 좌표)와 JPEG(N+1 시점) 페어링 어긋남(frame drift).
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R-pd.1 | 2026-05-07 10:05 | **stream.py — `?mode=raw` 분기 지원** — frontend SVG 오버레이 모션을 위해 오버레이 없는 원본 JPEG 반환 모드 추가. `mode in ('bbox','detection','raw')` 검증. | app/api/stream.py |
+| R-pd.2 | 2026-05-07 10:05 | **test_stream.py — frame snapshot 굳히기** — detection 발생 시점에 raw RGB/Thermal JPEG 를 detection dict 의 `_rgb_snapshot/_thermal_snapshot` 으로 굳혀두고 store_defect_frame 호출 시 명시 전달. broadcast 가 0.4s 후 호출되는 사이 `_current_*_jpeg` 가 다음 프레임으로 갱신되어 bbox/이미지 짝이 어긋나는 프레임 드리프트 버그 방지. | app/services/test_stream.py |
+
+### 📐 설계 결정
+
+- **raw 모드 분리 — 단일 박스 원칙**: detection 모드 진입 시 backend 가 burned-in 박스를 제거하고 raw JPEG 반환 → frontend SVG 가 박스 일체 렌더. burned-in box + SVG box 두 겹이면 미세 어긋남 + 시각 노이즈. 책임 분리: backend = 추론·raw, frontend = 시각화.
+- **frame snapshot 굳히기 — 드리프트 방지**: broadcast 는 정확도/UX 균형상 ~0.4s 디레이를 두는데 그 사이 `_current_rgb_jpeg` 는 다음 프레임으로 이미 갱신됨. detection dict 에 raw 스냅샷을 굳혀두고 store_defect_frame 에 명시 전달.
+
+---
+
+## 🎯 R-postdeploy.2 — 콜드 스타트 완화 (bcrypt asyncio + README 단순화) (2026-05-07 17:00)
+
+> 사용자 피드백: "로그인할 때 '로그인중...' 이 생각보다 오래 걸려" → Fly.io `auto_stop_machines='stop'` + `min_machines_running=0` 설정으로 idle 후 머신이 완전 정지 → 첫 요청이 콜드 스타트(컨테이너 + Python + FastAPI + DB 풀 부팅) 비용 다 먹음. 두 번째부터 빠르다는 사용자 확인으로 콜드 스타트 100% 확정.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R-pd.3 | 2026-05-07 17:00 | **auth.py — bcrypt verify_password 를 asyncio.to_thread 로 오프로드** — bcrypt(rounds=12) 검증은 ~250ms 동기 CPU 작업으로 이벤트 루프 블로킹 → 동시 요청 처리 안정성 저하. 스레드로 오프로드해 단일 로그인 응답성 + 동시 요청 처리량 개선. | app/api/auth.py |
+| R-pd.4 | 2026-05-07 (오후) | **README.md 단순화** — 자율비행 강조 제거하고 3-모델 추론 파이프라인 (YOLOv8 × 2 + ResNet50) 설정·엔드포인트·마이그레이션 절차 중심으로 재구성. 인증/사이트/보고서 등 도메인 모듈 세부는 코드 참고로 명시. | README.md |
+
+### 📐 설계 결정
+
+- **bcrypt asyncio 오프로드 — 이벤트 루프 보호**: bcrypt 4.x 직접 사용(rounds=12)은 ~250ms 동기 CPU 작업. async 함수 안에서 직접 호출하면 그 시간 동안 이벤트 루프가 다른 요청을 처리 못함. `asyncio.to_thread(...)` 로 별도 스레드에 던져 이벤트 루프는 즉시 다음 작업으로 이동.
+- **콜드 스타트 완화 정책 — 워밍 핑 + bcrypt 오프로드 만 적용**: Fly.io `min_machines_running=1` 변경은 1GB 머신이 무료 한도 초과 가능성 → 비용 발생 우려로 보류. 워밍 핑(frontend Landing/Login mount) 만으로도 사용자 ID/PW 입력하는 동안 머신 부팅이 진행되어 첫 로그인 체감속도 5~10초 단축 예상. 비용 결정은 사용자 명시 시점.
+- **README 단순화 의도**: 1차 배포 후 본 repo 가 "3-모델 추론 파이프라인 + 인증/사이트/보고서/채팅" 의 운영 백엔드로 자리잡음. 자율비행은 통합 repo R&D 영역. 분리 repo README 는 운영 관점에 집중하여 신규 합류자가 즉시 setup·배포할 수 있게 정리.
