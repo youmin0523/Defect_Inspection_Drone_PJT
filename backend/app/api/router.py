@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook, sites, notifications, chat, organization, detect, ws_stream, coverage, employee, admin_gpu
+from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook, sites, notifications, chat, organization, detect, ws_stream, coverage, employee, admin_gpu, mission
 from app.schemas.common import PROTECTED_RESPONSES, PUBLIC_RESPONSES, WEBHOOK_RESPONSES
 
 api_router = APIRouter()
@@ -157,5 +157,13 @@ api_router.include_router(
     admin_gpu.router,
     prefix="/admin/gpu",
     tags=["Admin"],
+    responses=PROTECTED_RESPONSES,
+)
+
+# 자율비행 미션 제어 (REST + Pi fc-bridge WebSocket)
+api_router.include_router(
+    mission.router,
+    prefix="/mission",
+    tags=["Mission"],
     responses=PROTECTED_RESPONSES,
 )

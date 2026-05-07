@@ -2204,3 +2204,236 @@ GitHub Actions Fly Deploy 가 `fly.toml` 미커밋으로 'missing app name' 실�
 - **start/stop 비용 위험 vs 운영 편의**: 직원 누구나 START 호출 가능 → 의도치 않은 가동 시 시간당 ~$0.71 과금 우려. 다만 (1) 인증된 직원만 가능, (2) UI 에 비용 가이드 명시, (3) 누적 사용량 카드로 가동 사실 즉시 가시화 → 1차 배포에선 운영 편의 우선. 사고 발생 시 누적치로 추적 가능.
 - **module docstring 권한 정책 표 갱신**: 라우터 헤더 주석에 새 권한 매트릭스를 표로 명시 → 다른 개발자/AI 가 이 파일을 처음 열었을 때 의도 즉시 파악 가능. plan 의 "1차 배포 임시 정책" 흔적을 코드에 남겨 향후 복구 시 참조점 제공.
 
+---
+
+## 🐞 R30 — 테스트 모드 하자 조회 시 bbox/객체감지 위치 어긋남 (프레임 드리프트) 수정 (2026-05-07 10:05)
+
+> 사용자 보고 (1차 배포 후 실사용 검증): "bbox·객체 감지의 위치가 정확하지 않은데 이 부분은 딥러닝을 해야 되는 거니?", "전체 모델이 다 그런데 들인 시간에 비해 표시되는 게...". 통합 mAP 0.9 학습이 진행됐음에도 모든 모델에서 일관되게 박스가 어긋나 보이는 현상. 1차 배포에서 TEST MODE 를 '현장 점검' 으로 위장해 직원 전체 노출 중이라 사용자 신뢰에 직결된 critical issue.
+
+### 🔍 진단
+
+**버그는 학습/좌표변환이 아닌 파이프라인 프레임 페어링 결함.** Ultralytics `result.boxes.xyxy` 는 원본 이미지 좌표로 정확히 반환되며, 라이브 오버레이(`_apply_live_overlay`) 는 같은 프레임에 같은 bbox 를 그리므로 라이브 영상은 정확. 그러나 사용자가 하자 카드를 클릭해 호출되는 `/api/v1/stream/test/defect/{id}/{channel}?mode=bbox|detection` 경로에서 박스가 명백히 다른 위치 / 다른 이미지 위에 그려지는 현상 발생.
+
+데이터 플로우 추적:
+
+```
+Iteration N (image_A.jpg 로드, test 모드는 매 iteration 새 파일):
+  detection_A = _detect(image_A)            # bbox = image_A 좌표
+  _current_rgb_jpeg = encode(image_A)
+  yield image_A
+  prev_detection = detection_A
+
+Iteration N+1 (image_B.jpg, 완전히 다른 사진!):
+  detection_B = _detect(image_B)
+  _current_rgb_jpeg = encode(image_B)        # ← 이미 image_B 로 갱신됨
+  yield image_B
+  await sleep(0.4)                           # ← 이 사이 ↑ 갱신 끝남
+  broadcast(prev_detection_A)
+    → store_defect_frame(id_A, bbox=bbox_A)
+       └─ "rgb"  ← self._current_rgb_jpeg = image_B  ❌ 다른 이미지
+       └─ "bbox" ← bbox_A (image_A 좌표)              ❌ 짝 어긋남
+```
+
+사용자 클릭 시점: `_defect_frames[id_A]` 조회 → image_B JPEG 위에 image_A 의 bbox 좌표로 사각형 그림 → "전혀 다른 사진에 엉뚱한 위치에 박스" 가 나옴. **모든 모델에서 동일하게 보이는 이유** = 모델 출력은 정상, 출력을 저장하는 파이프라인이 jpeg ↔ bbox 짝을 한 프레임 어긋나게 맞춤. `bbox` 모드와 `detection` 모드 모두 같은 `_defect_frames[id]` 데이터를 읽어 그리므로 두 모드 동시 영향.
+
+비디오 스트림(`_stream_video_frames`) 도 동일 패턴 — 더 심각: 추론은 매 3프레임마다(`if self._frame_counter % 3 == 0`) 만 돌고 brodcast 까지 0.15~0.4s 지연이 추가돼 카메라가 연속 이동하는 동안 bbox 가 실제 객체에서 떨어져 그려짐.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R30.1 | 2026-05-07 10:05 | **`_prepare_thermal_frame` 리팩터** — 반환 타입을 `None` → `Optional[bytes]` 로 변경, 오버레이 적용 *전* 의 raw thermal JPEG 를 반환. `self._current_thermal_jpeg` 는 라이브 스트림용으로 오버레이된 버전 유지. raw 버전을 호출자가 detection 에 굳혀둘 수 있도록 노출. | `app/services/test_stream.py` |
+| R30.2 | 2026-05-07 10:05 | **`store_defect_frame` 시그니처 확장** — `rgb_jpeg`, `thermal_jpeg` optional 인자 추가. 주어지면 사용, 없으면 `_current_*_jpeg` 폴백. 폴백은 드리프트 위험이 있다는 docstring 경고 명시. | 같음 |
+| R30.3 | 2026-05-07 10:05 | **`_run_loop` 에서 raw 스냅샷 첨부** — `_detect` 직후 `detection["_rgb_snapshot"] = encode(frame)`, `_prepare_thermal_frame` 반환값을 `detection["_thermal_snapshot"]` 으로 첨부. detection 이 다음 iteration 의 prev_detection 이 되어도 자기 짝 jpeg 를 들고 다님. | 같음 |
+| R30.4 | 2026-05-07 10:05 | **`_stream_video_frames` 에도 동일 패턴 적용** — 3프레임마다 detection 발생 시점에 raw RGB snapshot 첨부. 비디오는 thermal 페어 없으므로 thermal_snapshot 생략. | 같음 |
+| R30.5 | 2026-05-07 10:05 | **`_broadcast_detection` 배선** — `store_defect_frame` 호출에 `rgb_jpeg=detection.get("_rgb_snapshot")`, `thermal_jpeg=detection.get("_thermal_snapshot")` 명시 전달. | 같음 |
+
+### 📐 설계 결정 사항
+
+- **raw frame snapshot 을 detection 딕셔너리에 굳혀두기**: prev_detection 가 다음 iteration 으로 넘어가도 자기 발생 시점의 jpeg 를 함께 운반. broadcast 의 0.4s 지연 동안 `_current_*_jpeg` 가 다음 프레임으로 갱신돼도 영향 없음. 메모리 비용은 jpeg 1장 × `_MAX_DEFECT_FRAMES` 한도 내라 무시 가능.
+- **annotated 가 아닌 raw 를 스냅샷**: defect 조회 모드(`bbox`/`detection`)가 자체적으로 박스를 그림. annotated(이미 박스 burned-in) 위에 또 그리면 박스가 두 번 겹쳐 보임(같은 좌표라도 두께/색이 미세 다름). raw 로 굳혀두면 선택한 모드가 한 번만 깔끔하게 그림.
+- **객체감지 모드 보너스 수정**: `_draw_bbox_on_jpeg` 와 `_draw_detection_on_jpeg` 둘 다 `_defect_frames[id]` 의 `(jpeg, bbox)` 를 읽어 쓴다. 버그가 두 함수가 아니라 데이터 저장 단(`store_defect_frame`)에 있었으므로 한 패치로 두 모드 동시 정상화. 사용자 즉시 검증 가능.
+- **폴백을 제거하지 않은 이유**: `store_defect_frame` 의 `_current_*_jpeg` 폴백을 유지한 건 외부 직접 호출(테스트/디버그) 호환성. 내부 정상 경로(`_broadcast_detection`)는 항상 명시 전달하므로 폴백은 안전망.
+- **검증 — 학습 책임 분리**: 이 수정은 모델 가중치를 일절 건드리지 않는다. 통합 mAP 학습은 그대로 유효하며, 사용자가 "표시되는 게..." 라고 본 어긋남은 모델 품질이 아니라 디스플레이 파이프라인의 결함이었음을 코드로 증명. 기존 학습 시간 무손실.
+
+### 🚨 안전성 영향
+
+1차 배포에서 TEST MODE 가 '현장 점검'(파란/Camera) 으로 위장돼 모든 직원에게 노출 중. 박스가 어긋난 채로 보이면 (1) 검출된 하자 위치를 직원이 잘못 인식 → 잘못된 보고/현장 점검 누락, (2) 시스템 신뢰도 즉시 추락 → "AI 가 엉뚱한 곳을 잡는다" 로 회사·솔루션 평가에 직격탄. 이번 수정으로 사용자 클릭 시 항상 (해당 detection 발생 시점의) 정확한 frame + 정확히 정렬된 bbox/detection 표시 보장.
+
+---
+
+## 🎯 R31 — 객체감지 모드 UX 본질화 ('도장' → 'AI 스캔→탐지' 시퀀스) (2026-05-07 10:05)
+
+> 사용자 피드백 (R30 직후): "아무리 데이터가 정적인 사진 데이터였지만 객체감지모드에서 객체가 감지되는 것보다 그냥 하자부위에 도장을 찍어놓은 듯한 느낌이었어서.. 이미지 혹은 영상이 나오면 스캔을 통한 하자가 객체감지모드에서 걸러져야되는 게 맞지 않나 싶은데 .." → 추가 요청: "현재 진행 중인건 TEST MODE와 현장점검 모두에 적용이 되어야하는게 맞겠지" / "배포는 어제부로 완료해서 제출했고 이제 1.1v 시작이니까 두개 다 적용해". UX 결정: 1+2단계 (스캔 sweep + SVG bbox 모션 + naturalWidth 보정 + confidence 카운트업) 풀 구현.
+
+### 🔍 진단 — 왜 '도장' 으로 느껴졌는가
+
+R30 수정으로 좌표 정확도는 회복됐으나, 사용자가 하자 카드를 클릭하면 **이미 박스가 burned-in 된 정지 JPEG 1장**이 즉시 표시되는 구조라 "AI 가 작업 중" 의 시각적 신호가 0. 사용자 인식 = "그냥 위치 표시" / "도장". 객체감지 모드의 가치(반투명 마스크/윤곽/코너마커) 가 정적이라 "감지되는 과정" 의 임팩트 없음. 1차 배포의 '현장 점검' 위장 노출 맥락에서 시스템 신뢰도 형성에 부정적.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R31.1 | 2026-05-07 10:05 | **백엔드 `mode='raw'` 분기 신설** — `get_defect_frame()` 에 raw 분기 추가 (오버레이 미적용 원본 JPEG 반환). `app/api/stream.py` 의 `get_test_defect_frame` 핸들러에 `("bbox","detection","raw")` 화이트리스트 확장. | `app/services/test_stream.py`, `app/api/stream.py` |
+| R31.2 | 2026-05-07 10:05 | **real 현장점검 경로 패턴 가이드** — 영상 수신기 도착 후 `RealStreamService` 가 동일 시그니처 `GET /api/v1/stream/defect/{id}/{channel}?mode=...` 를 노출해야 한다는 패턴 (drift 방지 3원칙 포함) 을 `app/api/stream.py` docstring 에 명시. 향후 작업자(개발자/AI)가 파일을 처음 열었을 때 즉시 따라할 수 있도록 코드 옆 문서화. | `app/api/stream.py` |
+
+### 📐 설계 결정 사항 (백엔드)
+
+- **base 클래스 추출 미실시**: 시스템 프롬프트 원칙 — "hypothetical future requirements 위한 추상화 금지". `RealStreamService` 가 미존재(영상 수신기 미도착) 인 상태에서 `BaseDefectFrameService` 를 추출하면 인터페이스 추측 게임이 됨. 패턴 가이드(주석 + R30 referenced) 만 남겨두고, 진짜 코드는 real 경로 구현 시점에 작성. 추출 대상의 사용처가 1개(test_stream) 인 동안은 inline 유지가 정답.
+- **frontend source-agnostic 설계 보장**: `LiveVideoFeed.jsx` 의 `defectFrameUrl` 분기를 `isTestMode` 로 명시 분리하면서, `isDefectView` (`!!defectFrameUrl`) 만 보고 모든 UX 가 발화하도록 작성. real 경로 backend 만 구현되면 `isTestMode === false` 분기에 URL 한 줄만 추가하면 즉시 동작 (프론트 수정 0).
+- **1차 배포 경로 자동 적용 검증**: 1차 배포 임시 정책상 "현장 점검" 카드 = `setIsTestMode(true)` 위장 → `isTestMode = true` → R31 UX 가 그대로 발화. 별도 분기/플래그 없이 사용자 노출 즉시.
+
+### 🎨 프론트엔드 — 시퀀스 페이즈 머신
+
+| 페이즈 | 시간 | 화면 |
+|-------|------|------|
+| `raw` | 0 ~ 1.0s | raw 이미지 (오버레이 0) — "AI 가 막 화면을 받았다" |
+| `scan` | 1.0 ~ 2.2s | raw + 시안색 격자 그리드 (pulse) + 위→아래 sweep 라인 (glow shadow 24px) + 우상단 "SCANNING · AI DETECT" 라벨 (ping dot) |
+| `detected` | 2.2s ~ | raw + SVG bbox (반투명 fill 12% + stroke pulse + glow filter 페이드) + 4코너 브래킷 마커 (stroke-dashoffset in) + 카테고리 라벨 박스 (translate-y in) + confidence chip (0 → conf% 700ms ease-out cubic 카운트업) |
+
+### 🎨 프론트엔드 — 핵심 구현 결정
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R31.3 | 2026-05-07 10:05 | **CSS 키프레임 6종 전역 등록** — `scanSweep`(top -4% → 104%), `scanGridPulse`(opacity 0.06 ↔ 0.18), `detectPulse`(stroke-opacity 0.65 ↔ 1), `detectGlow`(drop-shadow 6px ↔ 14px), `detectLabelIn`(opacity + translate-y + scale), `detectCornerIn`(stroke-dashoffset 60 → 0). 컴포넌트 인라인 `<style>` 회피 → 재렌더 비용 0. | `frontend/src/index.css` |
+| R31.4 | 2026-05-07 10:05 | **LiveVideoFeed 페이즈 머신** — `detectionPhase` state ∈ {idle, raw, scan, detected}. `selectedDefect.id` 또는 `isDefectView`/`isDetectionMode` 변경 시 `setTimeout` 2개로 raw(1.0s) → scan(1.2s) → detected 로 전이. cleanup 으로 timer 회수. confidence 카운트업은 별도 `requestAnimationFrame` (cubic ease-out 700ms). | `frontend/src/components/video/LiveVideoFeed.jsx` |
+| R31.5 | 2026-05-07 10:05 | **naturalWidth viewBox SVG 오버레이** — `imgRef` + `onLoad` 에서 `naturalWidth/Height` 캡처. SVG `viewBox="0 0 W H"` 로 두면 bbox 픽셀 좌표가 그대로 매핑. `preserveAspectRatio` 를 img 의 `object-cover/contain` (fill prop) 과 일치(`xMidYMid slice/meet`) → 풀스크린/16:9 모두 정확 정렬. | 같음 |
+| R31.6 | 2026-05-07 10:05 | **심각도 컬러링 + 코너 브래킷** — HIGH=red-500, MED=orange-500, LOW=yellow-500. SVG `currentColor` + `color: severityHex` 로 stroke/fill/glow 일관 적용. 4 코너 브래킷은 `stroke-dasharray=cm*2` + `detectCornerIn` 으로 dashoffset in. 라벨 폰트 크기 `imgNatural.w * 0.018` (해상도 비례) → 1080p/4K 모두 자연. | 같음 |
+| R31.7 | 2026-05-07 10:05 | **confidence 카운트업 chip** — `requestAnimationFrame` 으로 0 → conf% 700ms cubic. fill 모드(=대시보드 풀스크린) 에서 좌상단 DEFECT VIEW 배지 옆에 emerald chip 으로 표시. tabular-nums 로 자릿수 흔들림 방지. | 같음 |
+
+### 📐 설계 결정 사항 (프론트엔드)
+
+- **detection 모드만 시퀀스 적용, bbox 모드는 그대로**: bbox 모드는 의도가 "단순 위치 표시" — 빠른 확인용. 시퀀스를 양쪽 다 걸면 "빠른 확인" 의도가 망가짐. 사용자 원본 피드백도 정확히 detection 모드 한정 ("객체감지모드에서 객체가 감지되는 것보다"). 의도 보존.
+- **백엔드 raw 모드 vs 프론트 라이브 오버레이의 분리**: detection 모드 진입 시 backend 로 `?mode=raw` 요청 → JPEG 자체에 박스 없음 → SVG 가 박스/마스크/코너/라벨 일체를 그림. burned-in 박스 위에 SVG 박스를 또 그리면 두 겹 = 미세 어긋남 + 시각적 노이즈. raw 분리로 단일 박스, 단일 책임.
+- **viewBox 기반 좌표계 고정**: `viewBox="0 0 naturalW naturalH"` + `preserveAspectRatio` 매칭 → 사용자가 윈도우 리사이즈/풀스크린 토글해도 bbox 가 자동 정렬. canvas/JS 수동 비율 계산 금지 (DOM 리사이즈 이벤트 listener 필요해지고 race condition 발생). SVG 가 무료로 처리해주는 영역.
+- **CSS 키프레임 전역 등록**: 컴포넌트 안 `<style>` 태그는 매 렌더마다 텍스트가 DOM 에 다시 들어가는 비효율 + 키프레임 중복 정의 경고. `index.css` 로 한 번 등록, 컴포넌트는 `style={{ animation: '...' }}` 로 참조만. 표준 패턴.
+- **SVG `currentColor` 사용**: `<svg style={{ color: severityHex }}>` 로 부모에 색을 정하고 자식 요소들에 `stroke="currentColor"` / `fill="currentColor"`. 심각도가 바뀌어도 한 곳만 갱신. drop-shadow filter 도 `currentColor` 인식.
+- **확률 chip 의 카운트업 ease**: cubic ease-out (`1 - (1-p)^3`) → 빠르게 시작해 점근적으로 도달. 사용자 인지에 "AI 가 즉시 반응했다 → 정확한 값에 수렴" 의 신뢰감 부여. 700ms 는 너무 빠르지도(못 본다) 너무 느리지도(짜증) 않은 sweet spot.
+- **timer cleanup 보장**: useEffect cleanup 에서 `clearTimeout` 모두 — 사용자가 1초 이내에 다른 하자를 클릭하면 이전 timer 가 그대로 작동해 페이즈가 꼬이는 버그 방지. confidence rAF 도 `cancelAnimationFrame` 으로 회수.
+- **fill prop 분기 보존**: 풀스크린 dashboard(fill=true, object-cover) 와 16:9 카드(fill=false, object-contain) 의 시각 정책 차이를 SVG `preserveAspectRatio` 도 동기화. 두 모드 모두 픽셀 정렬 유지.
+
+### 🚨 안전성 영향 / 사용자 가치
+
+R30 + R31 결합 효과: 사용자가 하자 카드 클릭 시 **(1) 항상 정확한 시점의 정확히 정렬된 박스 + (2) AI 가 방금 스캔해서 발견한 모션** 둘 다 충족. 1차 배포 '현장 점검' 위장 노출 맥락에서 (a) 좌표 어긋남으로 인한 위치 오인 위험 0, (b) "그냥 도장 찍은 거" → "AI 가 검출했다" 로 인지 전환 → 시스템 신뢰도 형성. 사용자가 직접 화면 검증 후 즉시 v1.1 출하 가능 수준.
+
+### 🔮 v1.1 후속 (영상 수신기 도착 시)
+
+`RealStreamService` 구현 시 R30 frame drift 방지 패턴(snapshot 굳히기 + store_defect_frame 명시 전달 + raw mode) 그대로 복제. `GET /api/v1/stream/defect/{id}/{channel}?mode=...` 노출만 하면 프론트 LiveVideoFeed 의 `isTestMode === false` 분기에 URL 한 줄 추가로 즉시 동일 UX 가동. 별도 React 작업 0.
+
+
+
+---
+
+## 🎯 R32 — Indoor Autonomous Inspection v1.1 통합 구현 + 다중 패스 검증 (2026-05-07 13:00)
+
+> 사용자 요청: "이제 드론이 자율비행을 할 수 있는 프로세스를 만들거야 — LiDAR 스캔 → 3D 렌더링 → 자율 경로 + 4면 정밀 그리드(천장/벽/바닥/창호) + 공간 자동 전환 + 도면 ↔ SLAM 재검증 + 점검 면적 자동 산출 + 천장/바닥은 nose-tilt 자율주행으로 보강". 사용자 정책: "v1.1 = 최종, 처음부터 풀 스코프 고려, 양보·타협 금지, 안전 직결 상업 플랫폼 마인드". 본 R32 는 자율비행 시스템의 백엔드/Pi/프론트/문서/테스트/git hook 을 한 commit 으로 통합.
+
+### 🔍 진단 — 왜 자율비행이 별도 통합이었나
+
+기존 시스템은 텔레메트리 수신/MJPEG 스트림/실시간 추론은 성숙했으나 드론 능동 제어 계층은 0 (`pymavlink` 의존성만 명시). 사용자 BOM 변경(Holybro S500 → cinewhoop + Kakute H7 Mini + INAV/Betaflight + Pi Zero 2 W + Skydroid OTG) 으로 PX4/MAVSDK 표준 자율비행 스택과 결이 달라 갭을 코드로 메워야 했음. + 사전 도면 ↔ SLAM 재검증, 4면 정밀 스캔, 천장/바닥 nose-tilt, 검사 면적 산출, ORB-SLAM3 빌드 부담 회피(Docker), commit 정책(MS 브랜치 + Vibe 로그 + Conventional Commits) 강제.
+
+### 🛠 변경 — 데이터 모델 (4종 + 마이그레이션)
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R32.1 | 2026-05-07 13:00 | ORM 4종: mission_plan(FSM 상태+plan_json), slam_pointcloud(키프레임 점군 메타+6DoF pose), coverage_grid(룸별 3D 셀 captured + face_kind/face_idx/cam_pitch_rad), room_topology(nodes/edges JSONB) | app/models/{mission_plan,slam_pointcloud,coverage_grid,room_topology}.py |
+| R32.2 | 2026-05-07 13:00 | Alembic 마이그레이션 1건: mission_status_enum + mission_phase_enum(11단계 — verification 포함) + 4 테이블 + UNIQUE/INDEX | alembic/versions/j3d4e5f6a7b8_add_autonomous_mission_tables.py |
+
+### 🛠 변경 — services 9종 본 구현
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R32.3 | 2026-05-07 13:00 | path_planner — 4면(벽×N+천장+바닥+창호) 보스트로페돈, PCA 회전, shapely 클리핑, FoV 산식, 차이영역 보조 WP, 천장/바닥 1.5× spacing | app/services/path_planner.py |
+| R32.4 | 2026-05-07 13:00 | room_segmenter — cv2 erosion + connectedComponents + distanceTransform ridge 도어웨이 검출(0.7~1.0m) | app/services/room_segmenter.py |
+| R32.5 | 2026-05-07 13:00 | obstacle_avoider — voxel(0.1m) + 시간 감쇠 + DWA + 무특징 정책(SLAM<0.4 hover) + 속도 상한 | app/services/obstacle_avoider.py |
+| R32.6 | 2026-05-07 13:00 | floorplan_verifier — phaseCorrelate + yaw sweep ±10°/1° → IoU 정합 + 차이영역 폴리곤 + 3-tier verdict | app/services/floorplan_verifier.py |
+| R32.7 | 2026-05-07 13:00 | inspection_area — Shoelace + 둘레×층높 + 창호 차감 + 면별/룸별/전체 커버리지 + 분양면적 비율 | app/services/inspection_area.py |
+| R32.8 | 2026-05-07 13:00 | safety_monitor — E-stop / battery RTL(35%, 셀당 3.55V) / comm-loss(2s) / SLAM pos_var(0.5m) / tilt(60°) / geofence / 장애물(35cm) — 단일 진입점 | app/services/safety_monitor.py |
+| R32.9 | 2026-05-07 13:00 | fc_bridge — Pi reverse-WS, MspCommand 7종, heartbeat 200ms, broadcast→broadcast_all 전환 | app/services/fc_bridge.py |
+| R32.10 | 2026-05-07 13:00 | slam_runner — Strategy(ORB-SLAM3 docker subprocess + RTAB-Map + Pseudo) + CaptureAdapter(Skydroid OTG OS별 자동 분기) + colored point cloud + occupancy fetch | app/services/slam_runner.py |
+| R32.11 | 2026-05-07 13:00 | mission_orchestrator — 11단계 FSM + nose-tilt sweep(±30°+yaw 360°4-step) + 안전 가드 100ms + DB 영속화 + WS broadcast + prior_polygons 폴백 | app/services/mission_orchestrator.py |
+
+### 🛠 변경 — API + 기존 모듈 확장
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R32.12 | 2026-05-07 13:00 | mission API: POST /start /abort /estop /rtl /pause + GET /state /{id}/state + WS /fc-bridge + floorplan/공급면적 자동 조회 | app/api/mission.py, app/api/router.py |
+| R32.13 | 2026-05-07 13:00 | coverage API 확장: GET /coverage/mission/{id}/grid + /summary | app/api/coverage.py |
+| R32.14 | 2026-05-07 13:00 | slam API 확장: PATCH /slam/pointcloud (Visual SLAM 키프레임 등록 + WS broadcast) | app/api/slam.py |
+| R32.15 | 2026-05-07 13:00 | ws_manager 확장: broadcast_all() 신설 (단일 WS 클라이언트가 mission/coverage/pointcloud 모두 수신) | app/core/ws_manager.py |
+| R32.16 | 2026-05-07 13:00 | config 확장: SLAM_BACKEND/SLAM_CAPTURE_DEVICE/SLAM_POINTCLOUD_DIR/AEROINSPECT_PI_TOKEN/RGB+THERMAL_RTSP_URL | app/config.py |
+| R32.17 | 2026-05-07 13:00 | main lifespan: mission_orchestrator WS 매니저 결선 (lifespan 시작부) | app/main.py |
+| R32.18 | 2026-05-07 13:00 | requirements: scipy + shapely + msgpack 추가 (networkx 미사용 정리) | requirements.txt |
+
+### 🛠 변경 — Pi 펌웨어 + INAV (분리 컴퓨터)
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R32.19 | 2026-05-07 13:00 | pi/fc_bridge.py: WS↔MSP V2 UART 펌프(CRC8 DVB-S2) + RC 채널 캐시(8채널 전체 빌드) + battery 8byte 정확 파서 + set_attitude(angle 모드 RC 환산) | pi/fc_bridge.py |
+| R32.20 | 2026-05-07 13:00 | pi/thermal_relay.sh: IRC-256CA → V4L2 → ffmpeg(h264_v4l2m2m hw 우선) → RTSP | pi/thermal_relay.sh |
+| R32.21 | 2026-05-07 13:00 | systemd 유닛 2종 + Pi README (배선/배포/환경변수/안전 가이드) | pi/systemd/*, pi/README.md |
+| R32.22 | 2026-05-07 13:00 | INAV CLI 프로파일: feature OPFLOW + rangefinder + failsafe LAND + AUX 매핑 + cinewhoop 보수 PID | tools/inav/aeroinspect_profile.txt |
+
+### 🛠 변경 — Docker 자동화 + SITL + 단위 테스트
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R32.23 | 2026-05-07 13:00 | ORB-SLAM3 Docker: docker-compose + Dockerfile + JSONL adapter + run.sh — 사용자 직접 빌드 부담 회피 | tools/slam/* |
+| R32.24 | 2026-05-07 13:00 | INAV SITL Docker: docker-compose + Dockerfile.sitl + run.sh + socat 가상 PTY — 실기 없이 MSP 루프 검증 | tools/inav-sitl/* |
+| R32.25 | 2026-05-07 13:00 | SITL 통합 테스트 스위트: pytest --integration 마커 + conftest fixture + MSP 라운드트립/battery/ARM AUX/FSM 풀플로우 | app/tests/integration/* |
+| R32.26 | 2026-05-07 13:00 | 단위 테스트 7개: path_planner / room_segmenter / obstacle_avoider / floorplan_verifier / inspection_area / safety_monitor / mission_orchestrator FSM(mock) | app/tests/test_*.py |
+
+### 🛠 변경 — 운영 가이드 + git hook
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R32.27 | 2026-05-07 13:00 | 운영 가이드 4종: 01 조립(BOM+배선) / 02 INAV 플래싱 / 03 캘리브레이션(RGB/광학흐름/ToF/IMU/열화상) / 04 필드 절차(Stage A~D + fail-safe + 트러블슈팅) | docs/operations/01~04.md |
+| R32.28 | 2026-05-07 13:00 | git hook 활성화: pre-commit(Vibe_Coding_Log 강제 — 통합/분리 repo 자동 탐지) + commit-msg(Conventional Commits, type 12종) + setup 스크립트(sh+ps1) + 가이드 + core.hooksPath=.githooks 활성 | .githooks/*, tools/setup-githooks.{sh,ps1}, docs/git-hooks.md |
+
+### 📐 설계 결정 사항 (백엔드 핵심)
+
+- PX4/MAVSDK 표준 vs Kakute H7 Mini 현실: cinewhoop FC 가 INAV 메인스트림이라 PX4 OFFBOARD 패턴 사용 불가. MSP V2 over UART + Pi reverse-WS 펌프로 우회. INAV OFFBOARD 정밀도(0.3~0.5m) 는 그리드 overlap 30%+ 와 셀 captured 허용반경 0.4m 로 흡수.
+- occupancy 갱신 책임 — 백엔드 단일 소스: SlamBackend.get_latest_occupancy() 인터페이스로 Strategy 별 산출 방식 흡수. PseudoSlam 합성 occupancy(개발 검증), ORB-SLAM3 keyframe 합성, RTAB-Map GridMap 직접. mission_orchestrator 는 fetch 만.
+- prior_polygons 폴백: SLAM occupancy 가 없어도 사전 도면만으로 미션 진행 가능. 도면 + SLAM 둘 다 있으면 verifier 가 정합 비교 + 차이영역 PATH_PLAN 가중. 둘 다 없으면 미션 거부(soft-fail).
+- discrepancy 보조 WP의 cell_idx 충돌 방지: 일반 WP 와 동일 cell_idx + _seed_coverage_grids 가 보조 WP 시드 X + _capture_cell 가 보조 WP 캡처는 하되 captured set 진입 X.
+- face_kind cell_z 인코딩으로 unique constraint 통과: floor=0, walls=1..N(face_idx), ceiling=N+1, windows=N+2.. 로 인코딩.
+- nose-tilt 한계와 안전 클램프: cinewhoop fixed-forward 카메라는 천장/바닥 직접 캡처 불가 → 자세 ±30° 기울임. SafetyMonitor TILT_LIMIT_DEG=60° 의 절반에서 캡처. 매 step 후 0° 복귀. pos_var > 0.4m 시 즉시 abort.
+- WS broadcast → broadcast_all 전환: 채널별 broadcast 는 프론트 단일 WS 연결이 다른 채널 메시지를 못 받는 한계. broadcast_all 로 type 부착 송신 → 프론트 messageHandlers 가 dispatch.
+- mission status enum vs phase enum 분리: status = 미션 전체(running/paused/completed/aborted/failsafe), phase = FSM 단계. _persist_phase 가 phase 기반 매핑.
+
+### 🔬 다중 패스 검증 — 발견·수정한 11건
+
+사용자가 "여러번 검수해서 버그 없도록 해" 명시 후 다중 패스 검증으로 발견:
+
+| # | 위치 | 증상 | 수정 |
+|---|---|---|---|
+| 1 | mission_orchestrator._do_room_transition | vertical_layers_m[1] 옛 필드 → AttributeError | (floor_z+ceiling_z)/2 |
+| 2 | _persist_phase | IDLE 도 status=running → 모순 | phase별 매핑 신설 |
+| 3 | ws_manager.broadcast | 채널별 분리 → 프론트 단일 WS 미수신 | broadcast_all() 신설 |
+| 4 | mission API StateResponse | verification 필드 누락 → 422 | dict 필드 추가 |
+| 5 | mission.path WS payload | cell_idx/face_kind/face_idx/cam_pitch_rad 누락 | 필드 보강 |
+| 6 | AutonomousMissionControl | PATH_PLAN 진입 시 coverage GET 자동 호출 X | useEffect(missionId, phase) |
+| 7 | pi/fc_bridge.parse_battery_state | struct format 사이즈 미스매치 | "<BHBHH" 8byte 정정 |
+| 8 | pause() | DB status=paused 갱신 X | UPDATE 추가 |
+| 9 | path_planner _plan_horizontal_plane / _plan_walls | discrepancy 보조 WP 누락 + _capture_cell 분기 누락 | 본 구현 추가 |
+| 10 | (치명적) pi/fc_bridge.cmd_set_raw_rc | 매번 ARM AUX NEUTRAL → 즉시 disarm | RC 채널 캐시(8채널 전체 빌드) |
+| 11 | (치명적) mission_orchestrator._do_path_plan | _latest_occupancy 갱신 누락 → PATH_PLAN skip | get_latest_occupancy() + prior fallback |
+
+검증: py_compile 18개 파일 통과 + 단위 테스트 7개 collect 통과 + 프론트 9개 파일 존재 + git hook(잘못된 메시지 차단 ✓, 올바른 메시지 통과 ✓).
+
+### 🚨 안전성 영향
+
+다층 fail-safe — 단일 의존 없음:
+- RC 끊김 → INAV 자체 LAND
+- Pi heartbeat 2초 누락 → INAV GCS_FAILSAFE LAND
+- 배터리 35% / 셀당 3.55V → 백엔드 RTL
+- SLAM 무특징 1.5초 → LAND
+- 자세 60°+ → LAND
+- 장애물 35cm 침입 → hover
+
+### 🔮 v1.1 후속 (외부 환경 단계, 사용자 명시 시점)
+
+- ORB-SLAM3 Docker 빌드 (`bash tools/slam/run.sh build`) — 초기 30~60분
+- INAV SITL 환경 검증 (`bash tools/inav-sitl/run.sh up` + pytest --integration)
+- 실기 단계적 검증 — 04_field_ops.md Stage C-1 ~ C-7
+- 분리 repo 동기화 — 사용자 명시 시점

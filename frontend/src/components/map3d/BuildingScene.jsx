@@ -13,8 +13,13 @@ import { Suspense } from 'react'
 import BuildingMesh from './BuildingMesh.jsx'
 import DefectMarker from './DefectMarker.jsx'
 import DroneMarker from './DroneMarker.jsx'
+import PointCloudLayer from './PointCloudLayer.jsx'
+import MissionPathLayer from './MissionPathLayer.jsx'
+import CoverageHeatmapLayer from './CoverageHeatmapLayer.jsx'
+import DiscrepancyOverlay from './DiscrepancyOverlay.jsx'
 import useDefectStore from '../../store/defectStore.js'
 import useSessionStore from '../../store/sessionStore.js'
+import useMissionStore from '../../store/missionStore.js'
 
 export default function BuildingScene() {
   const defects = useDefectStore((s) => s.defects)
@@ -28,6 +33,9 @@ export default function BuildingScene() {
   const mappedDefects = defects.filter(
     (d) => d.lidar_x != null && d.lidar_y != null && d.lidar_z != null
   )
+  // 자율비행 활성화 — phase 가 idle/complete 가 아니거나 점군이 누적되어 있으면 L3 레이어 표시
+  const missionPhase = useMissionStore((s) => s.phase)
+  const showAutonomousLayers = level === 3 || (missionPhase && missionPhase !== 'idle')
 
   return (
     // //* [Modified Code] relative 부여 — 범례 absolute 기준 + 풀스크린 HUD 레이아웃에서 안전 배치
@@ -58,6 +66,16 @@ export default function BuildingScene() {
 
           {/* //* [Modified Code] 드론 실시간 위치 마커 */}
           <DroneMarker />
+
+          {/* //* [Autonomous v1.1] 자율비행 라이브 레이어 — 점군 / 미션 경로 / 커버리지 / 차이영역 */}
+          {showAutonomousLayers && (
+            <>
+              <PointCloudLayer />
+              <MissionPathLayer />
+              <CoverageHeatmapLayer />
+              <DiscrepancyOverlay />
+            </>
+          )}
         </Suspense>
       </Canvas>
 

@@ -8,14 +8,17 @@
 #       - DELETE /slam/{id}     → 맵 삭제
 # =============================================
 
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, get_ws_manager
 from app.models.slam_map import SlamMap
+from app.models.slam_pointcloud import SlamPointcloud
 from app.schemas.slam_map import (
     SlamMapCreate,
     SlamMapUpdate,
@@ -146,3 +149,64 @@ async def delete_slam_map(
     if not slam_map:
         raise HTTPException(status_code=404, detail="SLAM 맵을 찾을 수 없습니다.")
     await db.delete(slam_map)
+
+
+# ── 자율비행 점군(키프레임) ──────────────────
+class PointcloudPatch(BaseModel):
+    """slam_runner 가 키프레임마다 호출. mission_id 단위 점군 누적."""
+    mission_id: UUID
+    frame_idx: int = Field(ge=0)
+    file_path: str = Field(min_length=1, max_length=512)
+    point_count: int = Field(ge=0)
+    pose_x: Optional[float] = None
+    pose_y: Optional[float] = None
+    pose_z: Optional[float] = None
+    pose_qw: Optional[float] = None
+    pose_qx: Optional[float] = None
+    pose_qy: Optional[float] = None
+    pose_qz: Optional[float] = None
+    slam_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    extra: Optional[dict] = None
+
+
+@router.patch("/pointcloud", status_code=201)
+async def add_slam_pointcloud(
+    payload: PointcloudPatch,
+    db: AsyncSession = Depends(get_db),
+    manager: ConnectionManager = Depends(get_ws_manager),
+    _user=Depends(get_current_user),
+):
+    """
+    Visual-Inertial SLAM 키프레임 1건 등록.
+    실제 점군 데이터(PLY/PCD blob)는 file_path 가 가리키는 파일시스템에 저장.
+    본 엔드포인트는 메타+pose 만 영속화 + WS broadcast(pointcloud.delta).
+    """
+    row = SlamPointcloud(
+        mission_id=payload.mission_id,
+        frame_idx=payload.frame_idx,
+        file_path=payload.file_path,
+        point_count=payload.point_count,
+        pose_x=payload.pose_x, pose_y=payload.pose_y, pose_z=payload.pose_z,
+        pose_qw=payload.pose_qw, pose_qx=payload.pose_qx,
+        pose_qy=payload.pose_qy, pose_qz=payload.pose_qz,
+        slam_confidence=payload.slam_confidence,
+        extra=payload.extra,
+    )
+    db.add(row)
+    try:
+        await db.flush()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="duplicate_frame_idx_or_invalid_mission",
+        )
+
+    await manager.broadcast("pointcloud.delta", {
+        "mission_id": str(payload.mission_id),
+        "frame_idx": payload.frame_idx,
+        "point_count": payload.point_count,
+        "pose": [payload.pose_x, payload.pose_y, payload.pose_z],
+        "slam_confidence": payload.slam_confidence,
+    })
+    return {"id": str(row.id)}

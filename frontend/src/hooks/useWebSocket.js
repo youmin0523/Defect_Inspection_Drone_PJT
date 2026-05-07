@@ -17,6 +17,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import useDefectStore from '../store/defectStore.js'
 import useDroneStore from '../store/droneStore.js'
 import useSessionStore from '../store/sessionStore.js'
+import useMissionStore from '../store/missionStore.js'
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/v1/ws'
 const INITIAL_RETRY_DELAY = 300    // 0.3초
@@ -47,6 +48,29 @@ const messageHandlers = {
     console.log(`[WS] ${data.message}`)
   },
   'ping': null, // pong 응답은 아래 handleMessage에서 처리
+
+  // ── 자율비행 (Indoor Autonomous Inspection v1.1) ──
+  'mission.phase': (data) => {
+    useMissionStore.getState().ingestMissionPhase(data)
+  },
+  'mission.path': (data) => {
+    useMissionStore.getState().ingestPath(data)
+  },
+  'mission.verification_result': (data) => {
+    useMissionStore.getState().ingestVerificationResult(data)
+  },
+  'mission.verification_alert': (data) => {
+    useMissionStore.getState().ingestVerificationAlert(data)
+  },
+  'coverage.cell': (data) => {
+    useMissionStore.getState().ingestCellCaptured(data)
+  },
+  'coverage.summary': (data) => {
+    useMissionStore.getState().ingestAreaSummary(data)
+  },
+  'pointcloud.delta': (data) => {
+    useMissionStore.getState().ingestPointcloudDelta(data)
+  },
 }
 
 export default function useWebSocket() {

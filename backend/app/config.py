@@ -65,10 +65,24 @@ class Settings(BaseSettings):
     # ── Camera ───────────────────────────────
     RGB_CAMERA_INDEX: int = 0
     THERMAL_CAMERA_INDEX: int = 1
+    # 빈 문자열이 아니면 RTSP URL 사용 (Pi → 백엔드 송출). 우선순위: RTSP > USB index.
+    THERMAL_RTSP_URL: str = ""
+    RGB_RTSP_URL: str = ""
 
     # ── LiDAR ────────────────────────────────
     LIDAR_SERIAL_PORT: str = "COM3"
     LIDAR_BAUD_RATE: int = 115200
+
+    # ── 자율비행 (Indoor Autonomous Inspection v1.1) ──
+    # Skydroid FUAV 5.8G OTG 동글의 캡처 디바이스 식별자.
+    # 정수면 cv2.VideoCapture index, 문자열이면 RTSP/file URI.
+    SLAM_CAPTURE_DEVICE: str = "0"
+    # Pi reverse-WS attach 시 검증 토큰 (mission/fc-bridge 엔드포인트)
+    AEROINSPECT_PI_TOKEN: str = ""
+    # Visual-Inertial SLAM 백엔드 선택 (orbslam3 | rtabmap | dummy)
+    SLAM_BACKEND: str = "dummy"
+    # SLAM 출력 점군 디렉터리 (PLY/PCD blob 저장 위치)
+    SLAM_POINTCLOUD_DIR: str = "./data/pointclouds"
 
     # ── AI Model (3-모델 파이프라인) ──────────
     # 가중치 디렉토리 + 개별 파일명 분리 → 배포 환경별로 경로만 바꾸면 됨

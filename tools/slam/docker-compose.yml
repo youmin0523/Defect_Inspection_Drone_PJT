@@ -1,0 +1,51 @@
+# =============================================
+# tools/slam/docker-compose.yml
+# 역할: Visual-Inertial SLAM 컨테이너 (ORB-SLAM3 또는 RTAB-Map)
+#       app/services/slam_runner.py 의 OrbSlam3Backend 가 docker compose up/stop 으로 호출.
+#
+# 사용:
+#   bash tools/slam/run.sh up        # SLAM 컨테이너 기동
+#   bash tools/slam/run.sh down      # 정지
+#   bash tools/slam/run.sh logs      # 로그
+#
+# 환경변수(.env 또는 export):
+#   AEROINSPECT_SLAM_DEVICE  /dev/video0     (Linux) — 호스트 카메라 디바이스
+#   AEROINSPECT_SLAM_BACKEND orbslam3 | rtabmap
+# =============================================
+services:
+  # ── 1) ORB-SLAM3 (직접 빌드, Mono 모드 가정) ──
+  aeroinspect-orbslam3:
+    profiles: ["orbslam3"]
+    build:
+      context: .
+      dockerfile: Dockerfile.orbslam3
+    image: aeroinspect/orbslam3:0.1
+    container_name: aeroinspect-orbslam3
+    restart: unless-stopped
+    network_mode: host                # 백엔드와 동일 호스트 가정 (TCP 통신용 옵션)
+    devices:
+      - "${AEROINSPECT_SLAM_DEVICE:-/dev/video0}:/dev/video0"
+    volumes:
+      - ../../data/pointclouds:/data/pointclouds
+      - ./vocabulary:/opt/orbslam3/vocabulary:ro
+      - ./config:/opt/orbslam3/config:ro
+    environment:
+      - SLAM_MODE=mono
+      - VOCAB=/opt/orbslam3/vocabulary/ORBvoc.txt
+      - CALIB=/opt/orbslam3/config/skydroid_otg.yaml
+    # stdout 으로 JSONL 형식의 pose / keyframe pointcloud 를 emit
+    # (slam_runner.py 의 _read_stdout_loop 가 docker compose logs -f 로 attach)
+
+  # ── 2) RTAB-Map standalone (참고 — 사용 시 profiles 전환) ──
+  aeroinspect-rtabmap:
+    profiles: ["rtabmap"]
+    image: introlab3it/rtabmap:latest
+    container_name: aeroinspect-rtabmap
+    restart: unless-stopped
+    network_mode: host
+    devices:
+      - "${AEROINSPECT_SLAM_DEVICE:-/dev/video0}:/dev/video0"
+    volumes:
+      - ../../data/pointclouds:/root/.ros/rtabmap.db
+    command: >-
+      rtabmap-camera --device 0 --rate 30

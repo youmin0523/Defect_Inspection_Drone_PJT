@@ -1,0 +1,98 @@
+# =============================================
+# tools/inav/aeroinspect_profile.txt
+# 역할: AeroInspect v1.1 자율비행을 위한 INAV CLI 프로파일
+# 적용:
+#   1) Betaflight Configurator 또는 INAV Configurator → CLI 탭 진입
+#   2) 본 파일 내용 한 번에 붙여넣기 (위에서 아래로)
+#   3) `save`
+# 검증:
+#   - INAV 7.x, Holybro Kakute H7 Mini 2020 기준
+#   - PMW3901 광학흐름 + VL53L0X(또는 VL53L1X) ToF
+#   - Skydroid FUAV 5.8G 영상 수신과는 무관 (영상은 별도 시스템)
+# =============================================
+
+# ─── feature ──────────────────────────────
+feature -GPS
+feature OPFLOW
+feature TELEMETRY
+feature MOTOR_STOP
+feature -CURRENT_METER
+feature VBAT
+feature DYNAMIC_FILTER
+feature AIRMODE
+feature OSD
+
+# ─── Serial port mapping ──────────────────
+# UART2: MSP (Pi Zero 2 W 와 연결)
+serial 1 64 115200 57600 0 115200
+# UART4: 광학흐름/거리센서 (PMW3901 + ToF)
+serial 3 524288 115200 57600 0 115200
+
+# ─── Optical flow / Rangefinder ────────────
+set opflow_hardware = MATEKF405
+set rangefinder_hardware = VL53L1X
+
+# ─── Position estimator ───────────────────
+set inav_use_gps_velned = OFF
+set inav_use_gps_no_baro = OFF
+set inav_w_xy_flow_p = 1.0
+set inav_w_xy_flow_v = 2.0
+set inav_w_z_baro_p = 0.35
+set inav_w_z_surface_p = 3.5
+set inav_w_z_surface_v = 6.1
+set inav_max_eph_epv = 1000
+
+# ─── NAV 설정 (실내, GPS 없음) ─────────────
+set nav_extra_arming_safety = OFF
+set nav_use_midthr_for_althold = ON
+set nav_rth_allow_landing = ALWAYS
+set nav_rth_climb_first = OFF
+set nav_rth_alt_mode = AT_LEAST
+set nav_rth_altitude = 100
+set nav_manual_speed = 80
+set nav_manual_climb_rate = 80
+set nav_auto_speed = 80
+set nav_auto_climb_rate = 80
+set nav_landing_speed = 60
+
+# ─── Failsafe ─────────────────────────────
+set failsafe_procedure = LAND
+set failsafe_recovery_delay = 5
+set failsafe_off_delay = 200
+set failsafe_throttle = 1000
+set failsafe_throttle_low_delay = 100
+
+# ─── Mode / AUX assignments ───────────────
+# CH5 (AUX1) = ARM,                 high  >= 1750
+# CH6 (AUX2) = NAV mode (POSHOLD/WP/RTH/LAND)
+aux 0 0 0 1750 2100   # ARM   ch5 high
+aux 1 1 1 1300 1700   # ANGLE ch6 low (POSHOLD 영역)
+aux 2 11 1 1675 1750  # NAV POSHOLD ch6 mid-low
+aux 3 36 1 1850 2100  # NAV WP      ch6 high
+aux 4 10 1 1450 1500  # NAV RTH     ch6 mid
+aux 5 9  1 1250 1350  # NAV LAND    ch6 lowest band
+
+# ─── 안전 마진 / 회피 ─────────────────────
+set fw_min_throttle_down_pitch = 0
+set deadband = 5
+set yaw_deadband = 5
+set throttle_idle = 15
+set max_angle_inclination_rll = 300
+set max_angle_inclination_pit = 300
+
+# ─── PIDs (cinewhoop 1804/3450KV 보수적 시작값. 실기에서 튠) ──
+set mc_p_pitch = 50
+set mc_i_pitch = 80
+set mc_d_pitch = 30
+set mc_p_roll = 50
+set mc_i_roll = 80
+set mc_d_roll = 30
+set mc_p_yaw = 60
+set mc_i_yaw = 50
+set mc_d_yaw = 0
+
+# ─── TPA ──────────────────────────────────
+set tpa_rate = 30
+set tpa_breakpoint = 1500
+
+save

@@ -1,0 +1,40 @@
+# =============================================
+# tools/inav-sitl/docker-compose.yml
+# 역할: INAV SITL(Software-In-The-Loop) + socat 가상 시리얼 브릿지
+#       fc_bridge.py 가 호스트의 가상 시리얼(/tmp/aeroinspect-fc-uart) 에 연결하면,
+#       socat 이 SITL 컨테이너의 TCP 5760 으로 중계 → 실기 없이 MSP 루프 검증.
+#
+# 사용:
+#   bash tools/inav-sitl/run.sh up
+#   AEROINSPECT_FC_UART=/tmp/aeroinspect-fc-uart \
+#   AEROINSPECT_BACKEND_WS_URL=ws://localhost:8000/api/v1/mission/fc-bridge \
+#   python3 pi/fc_bridge.py
+# =============================================
+services:
+  # 1) INAV SITL — TCP 5760 으로 MSP 노출
+  inav-sitl:
+    image: ghcr.io/inavflight/inav-sitl:7.x   # community 이미지 (없으면 Dockerfile.sitl 빌드)
+    build:
+      context: .
+      dockerfile: Dockerfile.sitl
+    container_name: aeroinspect-inav-sitl
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - SITL_TCP_PORT=5760
+      - SITL_GROUND_TRUTH=1                # 가상 IMU/광학흐름 신호 주입 옵션
+    # SITL 은 stdout 으로 MSP 텔레메트리를 출력. fc_bridge 는 socat 통해 받음.
+
+  # 2) socat — TCP(5760) ↔ 호스트 PTY 가상 시리얼 페어
+  fc-uart-bridge:
+    image: alpine/socat:latest
+    container_name: aeroinspect-sitl-uart
+    restart: unless-stopped
+    depends_on: [inav-sitl]
+    network_mode: host
+    volumes:
+      - /tmp:/tmp
+    command: >-
+      -d -d
+      pty,link=/tmp/aeroinspect-fc-uart,raw,echo=0,mode=666
+      tcp:127.0.0.1:5760

@@ -14,7 +14,7 @@ if echo "$MSG" | grep -qE "^Merge pull request"; then
 fi
 
 # 정규표현식 검사 (Conventional Commits)
-if ! echo "$MSG" | grep -qE "^(feat|fix|docs|style|refactor|test|chore|perf)(\(.+\))?:|^\[(feat|fix|docs|style|refactor|test|chore|perf)\]"; then
+if ! echo "$MSG" | grep -qE "^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|release|hotfix)(\(.+\))?:|^\[(feat|fix|docs|style|refactor|test|chore|perf|ci|build|release|hotfix)\]"; then
     echo ""
     echo "🚨 [Commit Rejected] 잘못된 커밋 메시지 형식입니다!"
     echo "================================================================"

@@ -19,6 +19,12 @@ from app.models.defect import DefectLog  # noqa: F401
 from app.models.telemetry import TelemetryLog  # noqa: F401
 from app.models.slam_map import SlamMap  # noqa: F401
 
+# ── 자율비행 미션 ───────────────────────────
+from app.models.mission_plan import MissionPlan  # noqa: F401
+from app.models.slam_pointcloud import SlamPointcloud  # noqa: F401
+from app.models.coverage_grid import CoverageGrid  # noqa: F401
+from app.models.room_topology import RoomTopology  # noqa: F401
+
 # ── 평면도 / 환경 생성 ───────────────────────
 from app.models.floorplan import Floorplan  # noqa: F401
 
@@ -53,6 +59,11 @@ __all__ = [
     # 드론 / 센서
     "TelemetryLog",
     "SlamMap",
+    # 자율비행 미션
+    "MissionPlan",
+    "SlamPointcloud",
+    "CoverageGrid",
+    "RoomTopology",
     # 평면도
     "Floorplan",
     # 현장 관리

@@ -86,6 +86,15 @@ async def lifespan(app: FastAPI):
     # ── 시작 ─────────────────────────────────
     print("[AeroInspect] 서버 시작 중...")
 
+    # 자율비행 mission_orchestrator 에 단일 WS 매니저 주입
+    try:
+        from app.core.ws_manager import ws_manager as _wsmgr
+        from app.services.mission_orchestrator import set_ws_manager as _set_ws
+        _set_ws(_wsmgr)
+        print("[AeroInspect] mission_orchestrator WS 매니저 결선 완료")
+    except Exception as _e:
+        print(f"[AeroInspect] mission_orchestrator WS 매니저 결선 실패(무시): {_e}")
+
     # DB 테이블 생성 (처음 실행 시)
     try:
         await init_db()

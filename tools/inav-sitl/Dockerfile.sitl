@@ -1,0 +1,24 @@
+# =============================================
+# tools/inav-sitl/Dockerfile.sitl
+# 역할: INAV SITL 빌드 (community 이미지 미가용 시 폴백).
+# 빌드:
+#   docker compose -f tools/inav-sitl/docker-compose.yml build
+# =============================================
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git build-essential cmake ninja-build python3 ruby \
+    libusb-1.0-0-dev libudev-dev curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt
+RUN git clone --depth 1 --branch master https://github.com/iNavFlight/inav.git
+WORKDIR /opt/inav
+# SITL 타겟 빌드 (INAV 공식 SITL 빌드 절차)
+RUN make -C src/main -j$(nproc) TARGET=SITL
+
+EXPOSE 5760
+
+ENTRYPOINT ["/opt/inav/obj/main/inav_SITL"]
+CMD ["--simulator"]

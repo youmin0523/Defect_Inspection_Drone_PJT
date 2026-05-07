@@ -1,0 +1,24 @@
+[Unit]
+Description=AeroInspect FC Bridge (WS <-> MSP UART)
+Documentation=https://github.com/youminsu0523/AeroInspect_backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+EnvironmentFile=/etc/aeroinspect.env
+WorkingDirectory=/opt/aeroinspect
+ExecStart=/usr/bin/python3 /opt/aeroinspect/fc_bridge.py
+Restart=always
+RestartSec=3
+TimeoutStopSec=5
+StandardOutput=journal
+StandardError=journal
+
+# 메모리 제약 — Pi Zero 2 W (512MB)
+MemoryMax=128M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

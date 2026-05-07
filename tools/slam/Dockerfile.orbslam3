@@ -1,0 +1,51 @@
+# =============================================
+# tools/slam/Dockerfile.orbslam3
+# 역할: ORB-SLAM3 빌드 + JSONL stdout adapter 포함 컨테이너 이미지
+#
+# 빌드:
+#   docker compose -f tools/slam/docker-compose.yml --profile orbslam3 build
+#
+# 빌드 시간:
+#   - Pangolin/Eigen3/OpenCV/g2o/DBoW2 의존성 + ORB-SLAM3 컴파일 → 30~60분 (CPU 따라)
+#   - 한 번 빌드 후 캐시 — 이후 재빌드 ~수 분
+# =============================================
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-c"]
+
+# 1) 빌드 의존성
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git wget curl ca-certificates build-essential cmake pkg-config \
+    libeigen3-dev libboost-all-dev libssl-dev \
+    libgl1-mesa-dev libglew-dev libglfw3-dev \
+    libopencv-dev python3 python3-pip \
+    libsuitesparse-dev libcholmod3 libxkbcommon-dev libwayland-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt
+
+# 2) Pangolin
+RUN git clone --depth 1 https://github.com/stevenlovegrove/Pangolin.git \
+ && cd Pangolin && cmake -B build -DBUILD_PANGOLIN_PYTHON=OFF \
+ && cmake --build build -j$(nproc) && cmake --install build && ldconfig
+
+# 3) ORB-SLAM3
+RUN git clone --depth 1 https://github.com/UZ-SLAMLab/ORB_SLAM3.git \
+ && cd ORB_SLAM3 \
+ && bash build.sh
+
+# 4) JSONL adapter — frame 처리 + pose/keyframe 을 stdout JSONL 로 emit
+COPY orbslam3_adapter.cc /opt/orbslam3_adapter.cc
+RUN cd /opt && g++ -O2 -std=c++17 -o orbslam3_adapter orbslam3_adapter.cc \
+    -I/opt/ORB_SLAM3/include -I/opt/ORB_SLAM3/include/CameraModels \
+    -I/opt/ORB_SLAM3/Thirdparty/Sophus -I/usr/include/eigen3 \
+    -L/opt/ORB_SLAM3/lib -lORB_SLAM3 -lopencv_core -lopencv_videoio -lopencv_imgproc \
+    -Wl,-rpath,/opt/ORB_SLAM3/lib
+
+ENV LD_LIBRARY_PATH=/opt/ORB_SLAM3/lib:/usr/local/lib:$LD_LIBRARY_PATH
+WORKDIR /opt
+ENTRYPOINT ["/opt/orbslam3_adapter"]
+CMD ["--vocab", "/opt/orbslam3/vocabulary/ORBvoc.txt", \
+     "--calib", "/opt/orbslam3/config/skydroid_otg.yaml", \
+     "--device", "/dev/video0", "--mode", "mono"]

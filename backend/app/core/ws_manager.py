@@ -87,6 +87,30 @@ class ConnectionManager:
         """전체 채널별 연결 수 반환"""
         return {ch: len(sockets) for ch, sockets in self._connections.items()}
 
+    async def broadcast_all(self, payload: dict) -> None:
+        """
+        모든 활성 연결(채널 무관) 에 동일 payload 송신.
+        자율비행처럼 단일 클라이언트가 여러 도메인(mission/coverage/pointcloud) 메시지를
+        하나의 WS 연결로 받아야 할 때 사용. 프론트는 payload['type'] 으로 디스패치.
+        """
+        message = json.dumps(payload, ensure_ascii=False, default=str)
+        dead: List[tuple] = []   # [(ws, channel)]
+
+        async def send_to(ws, channel):
+            try:
+                await ws.send_text(message)
+            except (WebSocketDisconnect, RuntimeError):
+                dead.append((ws, channel))
+
+        snapshot = []
+        for channel, sockets in list(self._connections.items()):
+            for ws in list(sockets):
+                snapshot.append((ws, channel))
+
+        await asyncio.gather(*[send_to(ws, ch) for ws, ch in snapshot])
+        for ws, ch in dead:
+            self.disconnect(ws, ch)
+
 
 # ── 모듈 레벨 싱글톤 ─────────────────────────
 # 앱 전체에서 단 하나의 인스턴스를 공유 (멀티 프로세스 불가)

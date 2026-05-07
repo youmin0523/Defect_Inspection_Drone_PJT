@@ -1,0 +1,22 @@
+[Unit]
+Description=AeroInspect Thermal RTSP Relay (IRC-256CA -> RTSP)
+After=network-online.target aeroinspect-fc-bridge.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+EnvironmentFile=/etc/aeroinspect.env
+ExecStart=/opt/aeroinspect/thermal_relay.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Pi Zero 2 W 메모리 보호
+MemoryMax=180M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

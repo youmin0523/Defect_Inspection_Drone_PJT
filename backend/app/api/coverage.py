@@ -21,6 +21,8 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_org_member, get_db
+from app.models.coverage_grid import CoverageGrid
+from app.models.mission_plan import MissionPlan
 from app.models.site import Site
 from app.models.telemetry import TelemetryLog
 from app.schemas.monitoring import CoverageResponse
@@ -172,3 +174,72 @@ async def get_site_coverage(
         hull=[[round(x, 3), round(y, 3)] for x, y in hull],
         note=fallback_note,
     )
+
+
+# ── 자율비행 미션 단위 커버리지 ──────────────────
+@router.get("/mission/{mission_id}/grid")
+async def get_mission_coverage_grid(
+    mission_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_org_member),
+) -> dict:
+    """
+    자율비행 미션의 셀 단위 커버리지(captured 여부 + 면 메타).
+    프론트 R3F CoverageHeatmapLayer / DiscrepancyOverlay 입력.
+    """
+    mission = await db.scalar(select(MissionPlan).where(MissionPlan.id == mission_id))
+    if mission is None:
+        raise HTTPException(status_code=404, detail="mission_not_found")
+
+    rows = await db.execute(
+        select(CoverageGrid).where(CoverageGrid.mission_id == mission_id)
+    )
+    cells = rows.scalars().all()
+    captured = sum(1 for c in cells if c.captured)
+    total = len(cells)
+
+    return {
+        "mission_id": str(mission_id),
+        "phase": str(mission.current_phase),
+        "captured": captured,
+        "total": total,
+        "ratio": round(captured / total, 4) if total else 0.0,
+        "cells": [
+            {
+                "room_idx": c.room_idx,
+                "cell": [c.cell_x, c.cell_y, c.cell_z],
+                "world": [c.world_x, c.world_y, c.world_z],
+                "captured": c.captured,
+                "face_kind": c.face_kind,
+                "face_idx": c.face_idx,
+                "cam_pitch_rad": c.cam_pitch_rad,
+                "captured_at": (c.captured_at.isoformat() if c.captured_at else None),
+            }
+            for c in cells
+        ],
+    }
+
+
+@router.get("/mission/{mission_id}/summary")
+async def get_mission_coverage_summary(
+    mission_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_org_member),
+) -> dict:
+    """
+    플랜 §1 의 5번 — 면적/커버리지 요약(바닥+천장+벽+창호) 조회.
+    mission_plans.plan_json["area_summary"] 에 inspection_area 가 저장한 데이터를 그대로 반환.
+    """
+    mission = await db.scalar(select(MissionPlan).where(MissionPlan.id == mission_id))
+    if mission is None:
+        raise HTTPException(status_code=404, detail="mission_not_found")
+    plan_json = mission.plan_json or {}
+    summary = plan_json.get("area_summary")
+    if summary is None:
+        return {"mission_id": str(mission_id), "available": False}
+    return {
+        "mission_id": str(mission_id),
+        "available": True,
+        "phase": str(mission.current_phase),
+        "summary": summary,
+    }
