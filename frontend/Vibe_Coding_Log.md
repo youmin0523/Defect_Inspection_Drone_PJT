@@ -2434,33 +2434,6 @@ LandingHeader: `fixed top-0 ... z-50`. 기존 ContactModal: `fixed inset-0 z-[10
 - **/employee 가 아닌 /employee/dashboard 등으로 가지 않은 이유**: `EmployeeLanding.jsx` 가 `/employee` 의 진입 페이지로 사무실 허브 역할(스케줄/KPI/활동/관리). 이게 가장 "허브" 의미에 부합. 추후 사용자가 "더 구체적인 페이지로" 를 원하면 별도 round.
 - **모바일 hover 클래스의 의미**: 터치 디바이스에서 `hover:` 가 발화되지 않지만, `cursor-pointer` 와 `transition` 은 데스크탑/태블릿 마우스 사용자에게 클릭 가능 어포던스 제공. 모바일은 어차피 탭 시 즉시 동작하므로 시각적 피드백 부재가 UX 손상 아님.
 
-### R30 — 객체감지 모드 시퀀스 UX (스캔→탐지) + SVG bbox 오버레이 (2026-05-07 10:05)
-
-> 사용자 피드백 (1차 배포 후 실사용 중): "bbox·객체 감지의 위치가 정확하지 않은데", "전체 모델이 다 그런데 들인 시간에 비해 표시되는 게..", 그리고 R30 백엔드 수정 직후 "객체감지모드에서 객체가 감지되는 것보다 그냥 하자부위에 도장을 찍어놓은 듯한 느낌이었어서.. 스캔을 통한 하자가 객체감지모드에서 걸러져야되는 게 맞지 않나 싶은데". 추가: "두개 다 적용해" (TEST MODE + 현장점검). 사용자 선택: 1+2단계 풀 구현 (스캔 sweep + SVG bbox 모션 + naturalWidth 보정 + confidence 카운트업).
-
-진단 (백엔드 측): 사용자가 본 좌표 어긋남은 backend test_stream 의 프레임 드리프트 버그 (다음 프레임 JPEG 에 이전 프레임 bbox 페어링) — 백엔드 R30 에서 수정 (snapshot 굳히기). 프론트 측 추가 작업은 정확도 회복 후 "AI 작업 중" 인지 신호 부재 → 정적 도장 → AI 스캔 시퀀스로 시각 본질화.
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R30.1 | 2026-05-07 10:05 | **CSS 키프레임 6종 전역 등록** — `scanSweep`, `scanGridPulse`, `detectPulse`, `detectGlow`, `detectLabelIn`, `detectCornerIn`. 컴포넌트 인라인 `<style>` 회피해서 재렌더 비용 0. | `frontend/src/index.css` |
-| R30.2 | 2026-05-07 10:05 | **LiveVideoFeed 페이즈 머신** — `detectionPhase` ∈ {idle, raw(0–1.0s), scan(1.0–2.2s), detected(보존)}. selectedDefect 변경 시 `setTimeout` 2개로 전이 + cleanup 으로 timer 회수. backend 에 `?mode=raw` 요청 (오버레이 없는 원본) → SVG 가 박스 일체 그림. | `frontend/src/components/video/LiveVideoFeed.jsx` |
-| R30.3 | 2026-05-07 10:05 | **naturalWidth viewBox SVG 오버레이** — `imgRef` + `onLoad` 에서 naturalWidth/Height 캡처. SVG `viewBox=`naturalW/H + `preserveAspectRatio` 를 img 의 `object-cover/contain` 과 일치 → 풀스크린/16:9/리사이즈 모두 자동 정렬. bbox 픽셀 좌표가 viewBox 와 1:1 매핑. | 같음 |
-| R30.4 | 2026-05-07 10:05 | **시각 자산 — 격자/sweep/box/마스크/코너/라벨** — scan 페이즈: 시안 격자 pulse + 위→아래 sweep 라인(glow shadow 24px) + SCANNING ping dot. detected 페이즈: 반투명 fill 12% + stroke pulse + glow filter + 4코너 브래킷 in + 카테고리 라벨 박스 translate-y in. | 같음 |
-| R30.5 | 2026-05-07 10:05 | **심각도 컬러링** — HIGH=red-500 / MED=orange-500 / LOW=yellow-500. SVG `currentColor` 패턴으로 stroke/fill/glow 일관 적용. 폰트 크기 = `imgNatural.w * 0.018` 로 1080p/4K 모두 자연. | 같음 |
-| R30.6 | 2026-05-07 10:05 | **confidence 카운트업 chip** — `requestAnimationFrame` 으로 0 → conf% 700ms cubic ease-out. fill 모드 좌상단 DEFECT VIEW 배지 옆 emerald chip. tabular-nums 로 자릿수 흔들림 방지. cleanup 으로 rAF 회수. | 같음 |
-| R30.7 | 2026-05-07 10:05 | **source-agnostic URL 분기** — `defectFrameUrl` 을 `isTestMode` 분기로 명시 분리하면서, 모든 UX 발화는 `isDefectView`/`isDetectionMode` 만 보고 결정. 영상 수신기 도착 후 RealStream backend 가 `/api/v1/stream/defect/{id}/{channel}?mode=...` 만 노출하면 한 줄 추가로 동일 UX 가동 (React 수정 0). | 같음 |
-
-### 📐 설계 결정 사항
-
-- **detection 모드만 시퀀스 적용, bbox 모드는 그대로**: 사용자 원본 피드백 정확히 detection 모드 한정 ("객체감지모드에서"). bbox 모드는 "단순 위치 표시 — 빠른 확인" 의도라 시퀀스를 걸면 의도 손상. 모드별 책임 분리.
-- **백엔드 raw 분기 vs 프론트 SVG 분리**: detection 모드 진입 시 backend `?mode=raw` → 박스 없는 JPEG → SVG 가 박스 일체 렌더. burned-in box + SVG box 두 겹이면 미세 어긋남 + 시각 노이즈. raw 분리로 단일 박스, 단일 책임.
-- **viewBox 기반 좌표 자동 정렬**: SVG `viewBox` + `preserveAspectRatio` 를 img 와 일치 → DOM 리사이즈/풀스크린 토글 시 자동 재정렬. JS 로 `naturalWidth/displayWidth` 비율 계산 + ResizeObserver listener 안 써도 됨. SVG 표준이 무료로 처리.
-- **CSS 키프레임 전역 등록**: `index.css` 한 곳에 정의, 컴포넌트는 `style={{ animation: '...' }}` 참조만. 컴포넌트 인라인 `<style>` 패턴 회피 — 매 렌더마다 텍스트 재삽입 / 키프레임 중복 정의 경고 발생.
-- **timer cleanup 의 중요성**: 사용자가 1초 이내에 다른 하자 클릭 시 이전 timer 가 살아있으면 페이즈 꼬임. useEffect cleanup 에서 `clearTimeout` 2개 + confidence rAF `cancelAnimationFrame`. 지속적 안전성.
-- **두 modes 모두 적용 보장 (테스트/현장점검)**: 1차 배포 임시 정책상 "현장 점검" = `setIsTestMode(true)` 위장 → R30 UX 가 자동으로 발화. real backend 도착 후엔 위 R30.7 source-agnostic 설계로 즉시 호환. v1.1 사이클 동안 frontend 추가 작업 불필요.
-
-
-
 ### R32 — 자율비행 v1.1 — missionStore + R3F 4개 레이어 + AutonomousMissionControl + 면적/커버리지 UI (2026-05-07 13:00)
 
 > 백엔드 R32(자율비행 통합 구현)와 동시 진행. 프론트 측은 (a) WS 채널 7종 흡수(missionStore), (b) BuildingScene L3 에 4개 R3F 레이어(점군/경로/커버리지/차이영역) 통합, (c) AutonomousMissionControl 컨트롤+VERIFICATION+면적 요약 UI.
@@ -2492,3 +2465,23 @@ LandingHeader: `fixed top-0 ... z-50`. 기존 ContactModal: `fixed inset-0 z-[10
 - E-STOP UI 직결 → 백엔드 safety_monitor.trigger_estop → INAV LAND 강제. 사용자 1클릭 즉시 안전 회피.
 - 라이브 커버리지율 표시 → 검사 누락 즉시 인지 + 비행 중 보강 결정 가능.
 - VERIFICATION divergent 알람 → 도면 ↔ 실측 큰 차이 발생 시 사용자 PAUSE 후 재검토 가능.
+
+### R-hooks — git hook 활성화 (Vibe 로그 강제 + Conventional Commits) (2026-05-07 13:30)
+
+> 통합 repo 의 R32 작업 후, 분리 repo 에도 동일 정책을 적용하기 위한 hook 도입.
+> 각 repo 의 .githooks/ 는 독립 working tree 라 중복처럼 보여도 git 표준 패턴 (husky / lefthook / pre-commit 도 동일).
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R-hooks.1 | 2026-05-07 13:30 | .githooks/pre-commit — 코드 변경 시 Vibe_Coding_Log.md 갱신 강제 | .githooks/pre-commit |
+| R-hooks.2 | 2026-05-07 13:30 | .githooks/commit-msg — Conventional Commits 강제 (12 types, 한국어 가이드) | .githooks/commit-msg |
+| R-hooks.3 | 2026-05-07 13:30 | tools/setup-githooks.sh + .ps1 — core.hooksPath=.githooks 활성화 + 다른 repo 배포 옵션 | tools/setup-githooks.{sh,ps1} |
+| R-hooks.4 | 2026-05-07 13:30 | docs/git-hooks.md — 사용법/우회/트러블슈팅 가이드 | docs/git-hooks.md |
+| R-hooks.5 | 2026-05-07 13:30 | core.hooksPath = .githooks 활성화 | (.git/config) |
+
+### 📐 설계 결정
+
+- 각 repo .githooks/ 중복은 git 표준 패턴. submodule / 사내 패키지 / home 공용 hooks 는 모두 무거움.
+- 통합 repo → 분리 repo 동기화: tools/setup-githooks.sh 가 분리 repo 경로를 인자로 받아 자동 복사 + 활성화.
+- 우회: SKIP_VIBE_LOG_CHECK=1 / SKIP_COMMIT_MSG_CHECK=1 (긴급용, 사후 보강).
+- MS 브랜치까지만 작업 commit. develop / main / 배포는 사용자 명시 시점.
