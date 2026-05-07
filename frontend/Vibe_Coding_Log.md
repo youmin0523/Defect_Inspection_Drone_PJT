@@ -2530,3 +2530,46 @@ LandingHeader: `fixed top-0 ... z-50`. 기존 ContactModal: `fixed inset-0 z-[10
 - fire-and-forget: `.catch(() => {})` 로 실패해도 무시 — 워밍 목적이라 응답 결과 사용 안 함. 콘솔 노이즈/UX 영향 0.
 - min_machines_running=1 안 건드림: Fly 1GB 머신은 무료 한도 초과 가능성 → 비용 발생 우려. 사용자 명시 결정 필요.
 
+
+
+
+---
+
+### R33 — 3D 드론 모델 실측 비율 적용 (Cinelog35 V3 + HolyBro S500) (2026-05-07 18:00)
+
+> 사용자 명시: "3D 모델링 되는 상황에서의 드론의 형태 및 사이즈 표시는 (1) GEPRC GEP-CL35 V3 / Cinelog35 V3 / O4 Pro RC FPV (Cinewhoop 프리스타일 레이싱용), (2) HolyBro S500 으로 적용. 드론 사이즈와 모델링된 사이즈 비율이 정확하게 맞도록".
+> 추가: "drone-01=Cinelog35 실내, drone-02=S500 외부. 이건 dashboard 의 drone1 RGB / drone2 THERMAL 매핑과는 별개 차원".
+
+**기존 상태**: DroneMarker 가 cone(0.18 radius, 0.5 height) + 4 cylinder propeller(±0.35) 추상 형태. 외곽 ~1m → 어떤 실드론보다도 큰 비현실적 사이즈. BuildingMesh 단위계가 미터(WIDTH=10, HEIGHT=3 → "m" 라벨)인데 드론은 단위 무관 추상. 사용자가 비율 확인 시 명확한 위화감.
+
+**진단**: 사이즈 환산 표(미터 단위) ─
+
+| 모델 | wheelbase | 외곽 | 두께/높이 | 프로펠러 직경 |
+|------|-----------|-----|----------|---------------|
+| Cinelog35 V3 | 0.142 | 0.188 | ~0.07 | 0.0889 (3.5") |
+| HolyBro S500 | 0.480 | 0.480 | 0.196 (다리 포함) | 0.254 (10") |
+
+S500 / Cinelog35 외곽 비 ≈ 2.55배. BuildingMesh 10m 가로의 1/55(Cinelog) ~ 1/21(S500) 사이즈 — 실내(10×8m) 공간 대비 자연스러움.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R33.1 | 2026-05-07 18:00 | **DRONE_MODEL_MAP 추가** — drone-01→cinelog35, drone-02→s500. 카메라 매핑(DRONE_CAMERA_MAP)과 별 차원으로 분리 명시 (페이로드 ≠ 기체). | DroneMarker.jsx |
+| R33.2 | 2026-05-07 18:00 | **SPECS 표 — 미터 단위 실측 사양** — wheelbase/outerSize/frameHeight/propRadius/labelOffsetY 등 모델별 상수. 추후 사양 변경 시 한 곳만 수정. | 같음 |
+| R33.3 | 2026-05-07 18:00 | **Cinelog35Body 컴포넌트** — 4 덕트 hoop(torus, ductOuterRadius=0.048) + 내부 propeller disc + 모터 + 중앙 frame stack(0.05×0.025×0.05) + O4 Pro RC 카메라 박스 + 렌즈(emissive accent) + VTX 안테나(빨강). wheelbase 0.142m 정확. | 같음 |
+| R33.4 | 2026-05-07 18:00 | **HolyBroS500Body 컴포넌트** — 4 X-arm 박스(rotation 으로 비스듬히) + 모터(cylinder 0.018r) + 모터 캡(emissive) + 10" 프로펠러 disc(0.127r) + frame plate 샌드위치(top/bottom) + 중앙 stack + GPS 마운트+dome(시안) + 짐벌 카메라 + 4 landing gear + 가로 스키드. 480mm 정확. | 같음 |
+| R33.5 | 2026-05-07 18:00 | **labelOffsetY 모델별 분리** — Cinelog35 0.18m / S500 0.45m. 사이즈 비례 라벨 위치로 두 기체 모두 가독성 유지. ID 라벨에 모델명 부제 (CINELOG35 V3 / HOLYBRO S500) 추가. | 같음 |
+| R33.6 | 2026-05-07 18:00 | **카메라 vs 모델 매핑 별 차원 주석** — DRONE_MODEL_MAP 위에 "기체 모델 = 사이즈/용도, 카메라 매핑 = 페이로드. 두 매핑은 우연히 같은 selectedDroneId 키 공유할 뿐 인과 무" 명시. 추후 페이로드 가변 시 분리 가이드. | 같음 |
+
+### 📐 설계 결정 사항
+
+- **미터 단위 정확 적용**: BuildingMesh 가 이미 미터 단위(WIDTH=10, "m" 라벨). R3F 1 unit = 1m. 드론 사양도 mm → m 환산해서 그대로 적용 → 실내(10×8m) 공간에 들어갔을 때 Cinelog35 가 시각적으로 "탁구공 정도", S500 이 "농구공 정도"로 자연 스케일.
+- **모델 매핑과 카메라 매핑 차원 분리**: 사용자 명시 — "drone-01=Cinelog35, drone-02=S500" 은 기체. "drone-01=RGB, drone-02=THERMAL" 은 카메라. 우연히 selectedDroneId 키 공유. 추후 같은 S500에 RGB 페이로드 교체 같은 가변 시점에 카메라 매핑만 분리 이관, 기체 매핑은 그대로.
+- **실모델 디테일 vs 성능 균형**: torus + cylinder + box 같은 primitive 만 사용 (GLB 로드 X). 실드론 인지 가능한 핵심 시각 자산만 (Cinewhoop 의 4 덕트, S500 의 X-arm + 다리 + GPS dome). 텍스처 0, vertex 수 최소화 — 비행 중 60fps 유지.
+- **emissive accent 사용**: 미션 phase(idle gray vs flying emerald) 가 카메라 렌즈/모터 캡 같은 작은 액센트로 발화 → 멀리서 봐도 비행 상태 즉시 인지. 본체는 다크(#0f172a)로 두어 액센트 강조.
+- **랜딩 기어/안테나 등 비대칭 디테일**: S500 은 GPS 가 뒤(-X), 짐벌 카메라가 앞(+X). 이 비대칭이 yaw 회전 시 "전후 방향" 시각 인지 도움 → 사용자가 드론이 어디 보고 있는지 즉시 파악.
+- **고도 라인 + 경로 폴리라인 보존**: 기존 R3F 자산(고도 점선, 비행 경로, 그림자 투영)은 그대로 유지 — 드론 형태만 교체. 텔레메트리 흐름 무손상.
+
+### 🚨 안전성 영향
+
+- **사이즈 정확성 = 충돌 회피 시뮬 정확성**: Cinelog35 외곽 188mm 가 정확히 표시되어야 좁은 복도/문틀 통과 가능 여부를 사용자가 시각적으로 판단 가능. S500 480mm 도 동일. 추상 1m 표시 시 실드론보다 더 큰 위험 인지로 잘못된 PAUSE 발생 가능성 — 정확한 비율로 해소.
+- **모델 매핑 명확화 = 잘못된 기체 출동 방지**: 외부 점검 미션에 실내용 Cinelog35 가 표시되면 사용자가 "이 미션엔 S500" 이라고 즉시 인지 가능. 드론 선택 실수 사고 예방.
