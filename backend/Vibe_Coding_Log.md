@@ -2563,4 +2563,27 @@ R30 + R31 결합 효과: 사용자가 하자 카드 클릭 시 **(1) 항상 정�
 
 - 거짓 응답 가속화 사고 없음 — 모델 로드 비동기화는 검출 정확도엔 영향 0. 검출 카드는 모델 준비 완료 후에만 등장.
 - TEST MODE 녹화 mp4 는 backend burned-in bbox/라벨 그대로 포함 — 검출 결과 그대로 보존.
+
+---
+
+## 🎯 R-postdeploy.13 — Fly cold start 근본 완화 (auto_stop_machines suspend) (2026-05-12 13:35)
+
+> 사용자 피드백: "처음 브라우저 접속해서 로그인까지 15초가 걸리는데 .. 맞는거야? 너무 오래 걸리는데" — R-pd.12에서 다층 워밍 핑(Login.jsx t=0/5s/12s + input focus)으로 완화 시도했지만, 사용자가 랜딩 거치지 않고 직접 /login 깊은 링크 진입 시 SPA 번들 로드 후 첫 ping 자체가 cold boot 트리거 → 같은 부팅 큐에 사용자 요청이 합류해 콜드 비용을 그대로 흡수. 워밍 핑은 보완책일 뿐 근본 해결 아님.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R-pd.13.1 | 2026-05-12 13:35 | **fly.toml `auto_stop_machines = 'stop'` → `'suspend'`** — `stop` 은 컨테이너 완전 종료 → 첫 요청 시 Python+Uvicorn+모델 import 비용을 사용자가 그대로 흡수(~10-15초). `suspend` 는 메모리 스냅샷 보존 → wake-up ~수백ms. 비용 영향 없음(`min_machines_running=0` 유지). | backend/fly.toml |
+
+### 📐 설계 결정
+
+- **suspend vs min_machines_running=1**: 후자는 0초 cold start지만 월 ~$5 추가 비용. 사용자가 "비용 들이지 않는 방법" 우선 요청 → suspend 채택. 상업 출시 기준에서 본격 트래픽 발생 시 min_machines_running=1 재검토 여지 남김.
+- **워밍 핑 코드는 유지**: suspend 모드에서도 첫 wake-up에는 ~수백ms 비용 발생. 워밍 핑이 사용자 입력 시점 이전에 wake를 걸어두면 체감 latency 추가 절감. 이중 안전장치.
+- **분리 backend repo 동기화**: 통합 repo + 분리 AeroInspect_backend repo 양쪽 fly.toml 동시 변경. CI(`.github/workflows/fly-deploy.yml`)는 main 브랜치 push 시에만 자동 deploy 트리거이므로 MS 푸시는 안전(production 미반영). 명시적 `fly deploy` 로만 적용.
+
+### 🚨 안전성 영향
+
+- suspend 모드는 Fly 공식 권장 기능 — 데이터 손실 위험 없음. 메모리 스냅샷 + 디스크 영속.
+- 첫 wake-up 응답 빨라짐 → 사용자 신뢰 회복 (R-pd.12 사용자 코멘트 "다른 플랫폼 가면 된다는 생각이 드는 순간 망한 거다" 직접 대응).
 - 운영 환경 ephemeral storage 한계 그대로(머신 stop 시 ./recordings 사라짐). 사용자가 녹화 직후 다운로드해야 영구 보관.
