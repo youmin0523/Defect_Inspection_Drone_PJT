@@ -2587,3 +2587,48 @@ R30 + R31 결합 효과: 사용자가 하자 카드 클릭 시 **(1) 항상 정�
 - suspend 모드는 Fly 공식 권장 기능 — 데이터 손실 위험 없음. 메모리 스냅샷 + 디스크 영속.
 - 첫 wake-up 응답 빨라짐 → 사용자 신뢰 회복 (R-pd.12 사용자 코멘트 "다른 플랫폼 가면 된다는 생각이 드는 순간 망한 거다" 직접 대응).
 - 운영 환경 ephemeral storage 한계 그대로(머신 stop 시 ./recordings 사라짐). 사용자가 녹화 직후 다운로드해야 영구 보관.
+
+---
+
+## 🎯 R-postdeploy.14 — 전체 프로세스 검증 + 보안·격리·인프라 일괄 보완 + Fly 운영 적용 (2026-05-13 14:30~18:30)
+
+> 사용자 피드백: "현재 프로젝트의 전체적인 프로세스 검증해줘. 로그인부터 시작해서 모든 기능들 전체 다. 누락된 부분이나 보완이 필요한 부분 정리해서 알려주면 순차적으로 진행하자." → 프론트/백 동시 audit → P0(보안)·P1(미구현)·P2(통합 미스매치)·P3(인프라) 정리 → 사용자 확인 후 순차 수정·검증·다음 단계 반복. 후속 사용자 지시: "다 진행", "PostgreSQL 연결 됨, Cloudflare만 별도", "Fly·로컬 .env 양쪽 동기화", "분리 repo AeroInspect_backend 변경을 통합 repo 에도 함께 업데이트". 본 라운드는 분리 repo R35 와 동일 변경의 통합 repo 미러.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .14.1 | 2026-05-13 14:30 | **WebSocket 다중 채널 (`?channels=a,b,c`) + register() 분리** — 기존 단일 채널 호환 유지. autonomous_flight_simulator 'defects' 채널 발행 미션 외에 telemetry/camera/thermal 분리 broadcast 가 프론트 미도달 사고 해결. | app/api/websocket.py, app/core/ws_manager.py |
+| .14.2 | 2026-05-13 14:35 | **WebSocket JWT 인증 (본인 채널 검증)** — `?token=` 쿼리, `_authorize_channel()`: user:/notifications: 는 토큰 sub 일치 필수, chat: 는 토큰 보유만, 정적 채널 공개. rejected[] 응답으로 디버깅. | app/api/websocket.py |
+| .14.3 | 2026-05-13 14:40 | **floorplan/upload `image/webp` MIME 허용** | app/api/floorplan.py |
+| .14.4 | 2026-05-13 14:55 | **floorplan/slam 조직 멤버 의존성** — get_current_user → get_current_org_member. 미소속자 차단. missions.py floorplan 조회도 동일. | app/api/floorplan.py, app/api/slam.py, app/api/missions.py |
+| .14.5 | 2026-05-13 15:00 | **telemetry/detect/stream 인증** — verify_ai_webhook (telemetry POST), verify_ai_webhook_or_user (detect), get_current_user (stream/mode·record·test 13개). GET MJPEG 공개 유지. | app/dependencies.py, app/api/telemetry.py, app/api/detect.py, app/api/stream.py |
+| .14.6 | 2026-05-13 15:05 | **Rate Limit 미들웨어** — IP+prefix 슬라이딩 윈도우. login=10/min, signup=5/min, oauth=20/min, detect=60/min, ai_webhook=600/min, 기본 120/min. 429 + Retry-After. | app/core/rate_limit.py (신규), app/main.py |
+| .14.7 | 2026-05-13 15:25 | **/contact 엔드포인트 + 슈퍼어드민 알림** — 비로그인 호출 허용. notification_service.create_for_many() 일괄 발송. metadata 보존. | app/api/contact.py (신규), app/api/router.py |
+| .14.8 | 2026-05-13 15:30 | **employee/kpi/monthly — average_flight_minutes 텔레메트리 기반** — TelemetryLog site 별 MAX-MIN AVG. 5건 미만 HAVING 제외. | app/api/employee.py |
+| .14.9 | 2026-05-13 15:45 | **Floorplan/SlamMap `organization_id` FK 컬럼** + nullable 인덱스. | app/models/floorplan.py, app/models/slam_map.py |
+| .14.10 | 2026-05-13 15:50 | **Alembic revision j3d4e5f6a7b8 (down=89b53c16de85)** — 두 테이블 organization_id + FK + idx. 백필 SQL 가이드. | alembic/versions/j3d4e5f6a7b8_*.py (신규) |
+| .14.11 | 2026-05-13 16:00 | **라우터 조직 격리 완성** — `_get_org_floorplan/_get_org_slam_map` 헬퍼. list base 필터 + count. upload/create org_id 자동 기록. missions 동일 패턴. | app/api/floorplan.py, app/api/slam.py, app/api/missions.py |
+| .14.12 | 2026-05-13 16:15 | **Redis psubscribe 동적 채널** — `notifications:*`/`user:*`/`chat:*` 패턴 구독. _subscriber_loop pmessage 처리. stop punsubscribe. | app/core/ws_manager_redis.py |
+| .14.13 | 2026-05-13 16:20 | **main.py lifespan Redis + get_ws_manager lazy** — WS_BACKEND==redis 시 RedisConnectionManager 교체 + start/stop. dependencies lazy 참조로 교체 효과 즉시 반영. | app/main.py, app/dependencies.py |
+| .14.14 | 2026-05-13 16:30 | **Fly 운영 DB 마이그레이션 적용** — `flyctl ssh console -C "alembic upgrade head"` → 89b53c16de85 → j3d4e5f6a7b8. | (운영 DB) |
+| .14.15 | 2026-05-13 17:00 | **Fly deploy 코드 반영** — `flyctl deploy --strategy=rolling`. deployment-01KRG4MEB17HTFFZEQGRZGQPZ3. | (Fly 운영) |
+| .14.16 | 2026-05-13 16:48 | **로컬 .env 작성 (운영 secret 미러)** — flyctl ssh env dump. SMTP·ODCLOUD/KAKAO_JS 는 통합 repo .env 에서 보강 (Fly 미설정). | (.env) |
+| .14.17 | 2026-05-13 18:10 | **통합 ↔ 분리 repo 양방향 동기** — 분리 repo 변경 18개 backend 파일을 통합 repo 에 복사. 통합 repo .env 에 분리 repo 신규 변수(APP_ENV/DATABASE_URL/AEROINSPECT_WEIGHTS_DIR/WALLPAPER_*/FRAME_SKIP/DEVICE/LOG_*/JWT_REFRESH_EXPIRE_DAYS/AI_WEBHOOK_SECRET/PUSH_PROVIDER/WS_BACKEND/REDIS_URL/DRONE_CONNECTED/TEST_MODE_ENABLED/USE_20DEFECT_PIPELINE/OAUTH_REDIRECT_BASE) append. | backend/, .env |
+
+### 📐 설계 결정 / 자가검토
+
+분리 repo R35 와 동일. 핵심 요점:
+- WS 다중 채널 + JWT 본인 채널 검증 = 알림 누설 차단 + 카메라 모드 sync 첫 동작.
+- B1 2단계 (의존성 강화 → 마이그레이션) — nullable=True 점진 마이그레이션이라 비파괴.
+- Redis psubscribe 패턴이 동적 subscribe 폭발 방지.
+- 운영 DB 직접 마이그레이션은 deploy 전 ssh stdin 으로 revision 만 업로드해 비파괴 ALTER 먼저 적용 후 deploy.
+- 로컬 .env 운영 secret 미러는 사용자 명시 요청 — `.gitignore` 포함 + 헤더 경고로 사고 위험 명시.
+
+### 🚨 안전성 영향
+
+- WS notifications:{타인 uid} 무단 구독 차단.
+- floorplan/slam 다조직 누설 차단 (organization_id strict 필터, NULL 로우 backfill 가이드 docstring).
+- 마이그레이션 무중단 (nullable add).
+- Rate limit 로 brute-force/DoS 표면 축소.
+- detect 무인증 GPU 추론 비용 누수 차단.

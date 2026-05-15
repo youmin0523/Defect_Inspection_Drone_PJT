@@ -228,6 +228,12 @@
 
 ## Revision History
 
+### v5.4_260512 (작성자: @youminsu0523 / branch: MS)
+- Phase 28 신설 (R28, v1.1) — **test_mode 영상 60fps 아키텍처**: MJPEG 재인코딩 폐기. backend는 mp4 를 HTTP Range(206)로 직접 서빙 + background inference만, frontend `<video>` 가 네이티브 디코드 + SVG bbox 오버레이. 추가 endpoint: `/test/upload/file/{name}` (Range), `/test/active` (메타). 신규 컴포넌트: `DetectionOverlay.jsx`, hook `useTestActiveMedia.js`, store `testDetectionsStore.js`. tier 파라미터 도입(영상 tier=2 — M4/M6 제외). 보안: traversal `realpath+commonpath`, 416 응답. 효과: Fly 1 vCPU 결정적 병목 제거, 로컬 60fps 가능, Fly 30fps 안정 목표. (3 PR 시퀀셜 적용, backend `ast.parse` OK, frontend `vite build` 13.12s OK.)
+
+### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
+- Phase 27 추가 완료 항목 (backend R27, v1.1 사이클): test_stream 영상 재생 끊김 + OOD 거짓 검출 동시 수정. `_stream_video_frames` 인-루프 추론 차단 제거(fire-and-forget background task + `_pending_video_detection` 슬롯, 주기 7→10프레임). `_ui_conf_gate` 에 OOD-취약 RGB 클래스(caulking·scratch·paint_stain·surface_defect·baseboard·pollution) 0.75 게이트 신설 — test_mode SNS 밈 영상에서 M1-YOLO "코킹 누락·불량" 52~64% 거짓 양성 카드 차단. 단열 0.30 / 기본 0.50 유지.
+
 ### v5.2_260506 (작성자: @youminsu0523 / branch: main)
 - Phase 27 추가 완료 항목: 브라우저 탭 favicon 자체 로고 적용 (frontend R19) — ico/PNG 다중 등록 + 알파 row 스캔으로 graphic/text 자동 분리 + 정사각 캔버스 가운데 배치. 배포 사이트 globe 기본 favicon 이슈 해소.
 - Phase 27 추가 완료 항목: favicon 흰 원 배경 + 로고 확대 (frontend R23, R19 후속) — 다크 탭/작은 사이즈에서 어두운 푸른빛이 묻히는 이슈 해결. 512×512 master 흰 원 fillEllipse + inscribed 사각형 92% 기준 로고 재배치.

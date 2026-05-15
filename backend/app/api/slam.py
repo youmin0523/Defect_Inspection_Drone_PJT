@@ -1,24 +1,21 @@
 # =============================================
 # app/api/slam.py
-# 역할: SLAM 맵 데이터 API
-#       - POST   /slam          → 새 맵 세션 생성
-#       - GET    /slam          → 맵 목록 조회 (메타데이터만)
+# 역할: SLAM 맵 데이터 API (조직 단위 격리)
+#       - POST   /slam          → 새 맵 세션 생성 (소유 조직 자동 기록)
+#       - GET    /slam          → 맵 목록 조회 (메타데이터만, 현재 조직 분만)
 #       - GET    /slam/{id}     → 맵 상세 조회 (이미지 포함)
 #       - PATCH  /slam/{id}     → 맵 업데이트 (실시간 매핑 중 갱신)
 #       - DELETE /slam/{id}     → 맵 삭제
 # =============================================
 
-from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_db, get_ws_manager
+from app.dependencies import get_current_org_member, get_db, get_ws_manager
 from app.models.slam_map import SlamMap
-from app.models.slam_pointcloud import SlamPointcloud
 from app.schemas.slam_map import (
     SlamMapCreate,
     SlamMapUpdate,
@@ -31,16 +28,31 @@ from app.core.ws_manager import ConnectionManager
 router = APIRouter()
 
 
+async def _get_org_slam_map(db: AsyncSession, org_id, map_id: UUID) -> SlamMap:
+    """현재 조직 소유의 SLAM 맵만 조회. 없거나 타 조직 것이면 404."""
+    result = await db.execute(
+        select(SlamMap)
+        .where(SlamMap.id == map_id)
+        .where(SlamMap.organization_id == org_id)
+    )
+    slam_map = result.scalar_one_or_none()
+    if not slam_map:
+        raise HTTPException(status_code=404, detail="SLAM 맵을 찾을 수 없습니다.")
+    return slam_map
+
+
 @router.get("", response_model=SlamMapListResponse)
 async def list_slam_maps(
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),  # TODO: 조직별 SLAM 분리 시 get_current_org_member로 교체
+    org_tuple=Depends(get_current_org_member),
 ):
-    """SLAM 맵 목록 조회 (이미지 제외, 메타데이터만)"""
-    query = select(SlamMap).order_by(desc(SlamMap.created_at))
-
-    total = await db.scalar(select(func.count()).select_from(SlamMap))
-    result = await db.execute(query)
+    """SLAM 맵 목록 조회 (이미지 제외, 현재 조직 소유분만)."""
+    _user, _member, org = org_tuple
+    base = select(SlamMap).where(SlamMap.organization_id == org.id)
+    total = await db.scalar(
+        select(func.count()).select_from(base.subquery())
+    )
+    result = await db.execute(base.order_by(desc(SlamMap.created_at)))
     items = result.scalars().all()
 
     return SlamMapListResponse(
@@ -53,13 +65,11 @@ async def list_slam_maps(
 async def get_slam_map(
     map_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    org_tuple=Depends(get_current_org_member),
 ):
-    """SLAM 맵 상세 조회 (이미지 포함)"""
-    result = await db.execute(select(SlamMap).where(SlamMap.id == map_id))
-    slam_map = result.scalar_one_or_none()
-    if not slam_map:
-        raise HTTPException(status_code=404, detail="SLAM 맵을 찾을 수 없습니다.")
+    """SLAM 맵 상세 조회 (이미지 포함, 현재 조직 소유분만)."""
+    _user, _member, org = org_tuple
+    slam_map = await _get_org_slam_map(db, org.id, map_id)
     return SlamMapResponse.model_validate(slam_map)
 
 
@@ -68,10 +78,12 @@ async def create_slam_map(
     payload: SlamMapCreate,
     db: AsyncSession = Depends(get_db),
     manager: ConnectionManager = Depends(get_ws_manager),
-    _user=Depends(get_current_user),
+    org_tuple=Depends(get_current_org_member),
 ):
-    """새 SLAM 맵 세션 생성"""
+    """새 SLAM 맵 세션 생성 (소유 조직 자동 기록)."""
+    _user, _member, org = org_tuple
     slam_map = SlamMap(
+        organization_id=org.id,
         name=payload.name,
         resolution=payload.resolution,
         width=payload.width,
@@ -104,16 +116,14 @@ async def update_slam_map(
     payload: SlamMapUpdate,
     db: AsyncSession = Depends(get_db),
     manager: ConnectionManager = Depends(get_ws_manager),
-    _user=Depends(get_current_user),
+    org_tuple=Depends(get_current_org_member),
 ):
     """
-    SLAM 맵 업데이트 (실시간 매핑 중 지도 이미지 갱신).
+    SLAM 맵 업데이트 (실시간 매핑 중 지도 이미지 갱신, 현재 조직 소유분만).
     SLAM 노드에서 주기적으로 호출하여 웹 미니맵에 반영.
     """
-    result = await db.execute(select(SlamMap).where(SlamMap.id == map_id))
-    slam_map = result.scalar_one_or_none()
-    if not slam_map:
-        raise HTTPException(status_code=404, detail="SLAM 맵을 찾을 수 없습니다.")
+    _user, _member, org = org_tuple
+    slam_map = await _get_org_slam_map(db, org.id, map_id)
 
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -141,72 +151,9 @@ async def update_slam_map(
 async def delete_slam_map(
     map_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    org_tuple=Depends(get_current_org_member),
 ):
-    """SLAM 맵 삭제"""
-    result = await db.execute(select(SlamMap).where(SlamMap.id == map_id))
-    slam_map = result.scalar_one_or_none()
-    if not slam_map:
-        raise HTTPException(status_code=404, detail="SLAM 맵을 찾을 수 없습니다.")
+    """SLAM 맵 삭제 (현재 조직 소유분만)."""
+    _user, _member, org = org_tuple
+    slam_map = await _get_org_slam_map(db, org.id, map_id)
     await db.delete(slam_map)
-
-
-# ── 자율비행 점군(키프레임) ──────────────────
-class PointcloudPatch(BaseModel):
-    """slam_runner 가 키프레임마다 호출. mission_id 단위 점군 누적."""
-    mission_id: UUID
-    frame_idx: int = Field(ge=0)
-    file_path: str = Field(min_length=1, max_length=512)
-    point_count: int = Field(ge=0)
-    pose_x: Optional[float] = None
-    pose_y: Optional[float] = None
-    pose_z: Optional[float] = None
-    pose_qw: Optional[float] = None
-    pose_qx: Optional[float] = None
-    pose_qy: Optional[float] = None
-    pose_qz: Optional[float] = None
-    slam_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    extra: Optional[dict] = None
-
-
-@router.patch("/pointcloud", status_code=201)
-async def add_slam_pointcloud(
-    payload: PointcloudPatch,
-    db: AsyncSession = Depends(get_db),
-    manager: ConnectionManager = Depends(get_ws_manager),
-    _user=Depends(get_current_user),
-):
-    """
-    Visual-Inertial SLAM 키프레임 1건 등록.
-    실제 점군 데이터(PLY/PCD blob)는 file_path 가 가리키는 파일시스템에 저장.
-    본 엔드포인트는 메타+pose 만 영속화 + WS broadcast(pointcloud.delta).
-    """
-    row = SlamPointcloud(
-        mission_id=payload.mission_id,
-        frame_idx=payload.frame_idx,
-        file_path=payload.file_path,
-        point_count=payload.point_count,
-        pose_x=payload.pose_x, pose_y=payload.pose_y, pose_z=payload.pose_z,
-        pose_qw=payload.pose_qw, pose_qx=payload.pose_qx,
-        pose_qy=payload.pose_qy, pose_qz=payload.pose_qz,
-        slam_confidence=payload.slam_confidence,
-        extra=payload.extra,
-    )
-    db.add(row)
-    try:
-        await db.flush()
-    except Exception:
-        await db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="duplicate_frame_idx_or_invalid_mission",
-        )
-
-    await manager.broadcast("pointcloud.delta", {
-        "mission_id": str(payload.mission_id),
-        "frame_idx": payload.frame_idx,
-        "point_count": payload.point_count,
-        "pose": [payload.pose_x, payload.pose_y, payload.pose_z],
-        "slam_confidence": payload.slam_confidence,
-    })
-    return {"id": str(row.id)}

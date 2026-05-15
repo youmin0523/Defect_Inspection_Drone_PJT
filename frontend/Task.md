@@ -235,6 +235,18 @@ frontend/src/
 
 ## Revision History
 
+### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
+- **(frontend R24) test_mode 영상 직접재생 + SVG bbox 오버레이 — 60fps 가능 아키텍처**:
+  - 신규 컴포넌트 `components/video/DetectionOverlay.jsx` — `<video>` 위 SVG bbox 레이어. testDetectionsStore detection을 `video.currentTime ± 0.4s` 윈도우로 필터해 표시. `requestAnimationFrame`(33ms) 으로 timeupdate(250ms) 보다 부드럽게 동기화. SVG viewBox = frame_w × frame_h 로 원본 좌표 1:1 매핑.
+  - 신규 hook `hooks/useTestActiveMedia.js` — `/api/v1/stream/test/active` 2초 폴링. `{kind, filename, fps, duration, frame_w, frame_h}` 반환. testDetectionsStore의 activeFilename 도 동기화(영상 교체 시 detection clear).
+  - 신규 store `store/testDetectionsStore.js` — video_timestamp_sec 키 detection 타임라인. `ingest()` 가 timestamp 정렬 + 중복 차단. defectStore와 분리(카드 패널과 오버레이 책임 분리).
+  - 변경 `components/video/LiveVideoFeed.jsx` — `useTestActiveMedia()` 로 `isDirectVideoMode` 판정. `active.kind==='video' && cameraMode==='rgb' && fill` 이면 early return으로 `<video src=/test/upload/file/{name}> + <DetectionOverlay>` 렌더. `testPlayState` (`playing/paused/stopped`) → `video.play() / pause() / seek(0)+pause()` 동기화. `onLoadedMetadata` 에서 `markTestMediaReady()`. 좌하단 `DIRECT · {fps}fps · {filename}` 디버그 뱃지.
+  - 변경 `hooks/useWebSocket.js` — `defect.new` 핸들러에서 `video_timestamp_sec` 가 있으면 `testDetectionsStore.ingest()` 로도 적재. 기존 defectStore 라우팅(카드 패널)은 그대로.
+  - 효과: backend MJPEG 병목 제거 + 브라우저 네이티브 디코드 → 원본 mp4 fps 그대로(30/60/120). SVG 오버레이는 GPU 컴포지트라 fps 추가 부하 없음.
+
+### v5.2_260512 (작성자: @youminsu0523 / branch: MS)
+- **(backend 동기화)** test_stream UI conf gate 강화 + 영상 끊김 수정 (backend Task v5.2 참조). 프론트엔드 변경 없음. DefectCard/DefectPanel/LiveVideoFeed 동작 자체는 그대로이며, test_mode에서 OOD 입력(SNS 밈 등) 시 backend가 caulking/scratch/paint_stain/surface_defect/baseboard/pollution 클래스를 0.75 conf 미만에서 노출 차단 → 거짓 양성 카드가 더 이상 화면에 뜨지 않음. 영상 30fps yield가 추론 지연에 끌리지 않아 끊김 체감도 함께 해소.
+
 ### v5.1_260506 (작성자: @youminsu0523 / branch: main)
 - **R19 (5/6)** 브라우저 탭 favicon = 자체 로고 그래픽만 적용. `frontend/public/`에 favicon.ico(16/32/48 다중 entry) + favicon-{16,32,192,512}.png + apple-touch-icon.png(180×180) 신규 생성. `index.html` 의 누락 자산 참조 `/drone-icon.svg` 1줄 → ico/PNG 5줄 명시 등록으로 교체. 로고 원본 `logo_transparent-removebg-preview.png`(677×369)에서 알파 row 자동 스캔으로 graphic 영역(rows 59–252, cols 235–441) 검출 → 정사각 캔버스 가운데 배치(텍스트 "DRONE INSPECT / PRECISION DEFECT ANALYSIS" 제외). 배포 사이트 globe 기본 favicon 문제 해소.
 - **R23 (5/6, R19 후속)** favicon 시인성 보강 — 다크 탭/작은 사이즈에서 푸른빛 로고가 어둡게 묻히는 이슈 해결. 512×512 master 캔버스에 흰색 원 배경(`FillEllipse(0,0,512,512)`) + inscribed 정사각형 92% 기준(333×312) 가운데 로고 재배치(R19 의 239 master → 512 master 격상으로 안티앨리어싱 품질 향상). 모든 사이즈(ico 16/32/48 + PNG 16/32/192/512 + apple-touch 180) 흰 원 배경 버전으로 재생성. 픽셀 검증으로 흰 원/투명/로고 색상 모두 확인.

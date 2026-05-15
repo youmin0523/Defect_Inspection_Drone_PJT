@@ -200,6 +200,27 @@
 
 ## Revision History
 
+### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
+- **(backend R28) test_mode 영상 60fps 아키텍처 전환 — MJPEG 재인코딩 폐기**:
+  - 본질 분석: 1 vCPU Fly 머신에서 MJPEG = 매 프레임 cv2 decode + PIL overlay + JPEG re-encode → 30fps 자체가 불안정. 원본 mp4 가 이미 H.264 압축인데 풀 디코드/재인코드는 모순.
+  - 신규 endpoint: `GET /api/v1/stream/test/upload/file/{filename}` — HTTP Range(206 Partial Content) 지원 정적 서빙. `os.path.realpath + commonpath` 로 traversal 차단, 416 처리, Accept-Ranges/Content-Range/Content-Length 헤더. mp4/mov/mkv/avi/webm mime 매핑.
+  - 신규 endpoint: `GET /api/v1/stream/test/active` — `{kind, filename, fps, duration_sec, frame_w, frame_h}` 응답. 프론트가 `<video>` 분기에 사용.
+  - `services/test_stream.py`:
+    - 신규 필드: `_active_video_filename / _fps / _duration / _frame_w / _frame_h / _video_inference_task`.
+    - `activate_video_mode(filepath)` — cv2로 메타 peek + 백그라운드 `_video_inference_loop` task 발사.
+    - `_video_inference_loop` — 영상 1회 end-to-end로 읽으며 매 0.33초(30fps→매 10프레임, 60fps→매 20프레임) 1회 추론. detection 각각에 `_video_timestamp_sec/_frame_w/_frame_h` 첨부.
+    - 기존 `_stream_video_frames` 제거. `rgb_mjpeg_generator` 의 영상 분기 → `activate_video_mode + DIRECT VIDEO MODE placeholder yield` 로 교체.
+    - `_broadcast_detection` payload 확장: `video_timestamp_sec`, `frame_w`, `frame_h` 조건부 첨부.
+    - `_detect/_detect_real` 에 `tier` 파라미터 추가. 영상 경로는 **tier=2** (M4 thermal U-Net + M6 PatchCore 제외 — RGB 영상에 무의미하고 무거움). 이미지 경로는 tier=3 유지.
+    - `stop_playback` 에서 `_cancel_video_inference + _clear_active_video` 호출.
+  - WS `defect.new` payload: `video_timestamp_sec/frame_w/frame_h` 신규 (영상 경로일 때만 채움). 이미지 경로 호환성 100% (선택 필드).
+
+### v5.2_260512 (작성자: @youminsu0523 / branch: MS)
+- **(backend R27) test_stream 영상 재생 끊김 + OOD 거짓 검출 동시 수정**:
+  - `services/test_stream.py::_stream_video_frames` — 기존 `await self._detect(...)` 가 yield 루프 안에서 500ms~수초 차단하여 7프레임 주기마다 영상이 끊기던 문제를 제거. 추론을 `asyncio.create_task(_infer_and_stash(...))` 로 fire-and-forget 발사 + 이전 task 종료 시에만 새로 발사(큐 적체 방지). 추론 주기 매 7→10프레임 완화. yield 루프는 `self._pending_video_detection` 에서 가장 최근 결과를 비차단으로 1회 소비.
+  - `TestStreamService.__init__` — `_pending_video_detection: Optional[dict] = None` 필드 신규.
+  - `_ui_conf_gate` — 클래스별 게이트 강화: 단열 0.30 / 기본 0.50 유지, 신규 `_UI_CONF_GATE_OOD_FRAGILE=0.75` 추가하고 키워드 매칭 8종(`caulking`/`코킹`, `scratch`/`찍힘`/`스크래치`, `paint_stain`/`도색`, `surface_defect`/`표면 결함`, `baseboard`/`걸레받이`, `pollution`/`오염`)으로 가시광 색·패턴 의존 클래스에 적용. test_mode 첨부 영상이 사람/SNS 밈 같은 OOD 입력일 때 M1-YOLO가 52~64% 신뢰도로 "코킹 누락·불량" 카드를 띄우던 회귀 사고 차단 (Precision 우선, [모든 하자 엄격·신뢰 우선] 정책).
+
 ### v5.1_260503 (작성자: @youminsu0523 / branch: MS)
 - **R26 후속 정정**: tasks 문서(API 명세서 v1.1→v1.2, ERD v1.0→v1.1) 부록을 본문 인라인 위치(4.17 Employee API / 2.1.5 Swagger securityScheme / 8.5 운영 가드 / 4.19 inspection_schedules / 5장 관계 / 6.1 인덱스 / 13장 결론)로 분산 + 파일명 rename + 팀명 `다마코더 → AeroInspect`. 가이드 3종 문서이력 위치 정정.
 - **DB 시드 실 적용**: `alembic merge` 로 분기 head 2개(`0003`, `i2c3d4e5f6a7`) → `89b53c16de85` 병합 → `upgrade head` 성공. `defect_logs` 의 alembic_version 과 실제 컬럼 inconsistent (image_crop_path/track_id/accumulated_conf/tier_executed/deviation_*/delta_temperature/ensemble_boosted/defect_class_display_*/) 10건 `ADD COLUMN IF NOT EXISTS` 일괄 보정. `seed_demo_data --reset` 결과: 1 org / 3 depts / 2 users(백승희·오희진) / 8 sites / **315 defects (HIGH 77)** / 12 reports / 3 today schedules (잠실 리센츠 14:00 KST 백승희 시드 검증).

@@ -236,6 +236,21 @@ core/stream_inference.py ──→ services/inference_pipeline.py
 
 ## Revision History
 
+### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
+- **Phase 23 신설 — test_mode 영상 60fps 아키텍처 (R28, v1.1 사이클)**:
+  - **결정**: MJPEG 재인코딩 폐기. 원본 mp4 를 HTTP Range 로 직접 서빙, 프론트가 `<video>` 로 네이티브 디코드. backend는 background inference만.
+  - 신규 endpoint 2종: `/test/upload/file/{name}` (Range 206) + `/test/active` (메타).
+  - test_stream.py: `_video_inference_loop` task — 매 0.33s 1회 추론, `video_timestamp_sec` 첨부 WS broadcast. `_stream_video_frames` 삭제. `_broadcast_detection` payload에 `video_timestamp_sec / frame_w / frame_h` 조건부 필드.
+  - tier 파라미터 도입 — 영상 경로 tier=2(M4 thermal/M6 PatchCore 제외 — RGB 영상에 무의미). 이미지 경로 tier=3 유지.
+  - 보안: traversal 차단(`realpath + commonpath`), 416 응답, mime 매핑.
+  - 효과: Fly 1 vCPU 결정적 병목(프레임 재인코딩) 제거. 로컬 60fps mp4 가능, Fly 30fps 안정 목표.
+
+### v5.2_260512 (작성자: @youminsu0523 / branch: MS)
+- **Phase 22 신설 — Test Stream 안정화 (R27, v1.1 사이클)**:
+  - `_stream_video_frames` 의 인-루프 `await self._detect(...)` 차단 제거. 추론을 background asyncio task로 fire-and-forget 발사하고, yield 루프는 `_pending_video_detection` 슬롯에서 가장 최근 결과만 1회 소비. 추론 주기 7→10프레임 완화. 30fps yield가 추론 지연(500ms~수초)에 끌려가지 않음.
+  - `_ui_conf_gate` 클래스별 게이트 강화: 신규 `_UI_CONF_GATE_OOD_FRAGILE=0.75` 라인 추가 + 키워드 매칭 8종(caulking/코킹/scratch/찍힘/스크래치/paint_stain/도색/surface_defect/표면 결함/baseboard/걸레받이/pollution/오염). RGB 가시광 색·패턴 의존 클래스가 test_mode OOD 입력(SNS 밈 영상)에서 52~64% 신뢰도로 거짓 양성 카드를 띄우던 회귀 차단. 단열 0.30 / 기본 0.50은 유지.
+  - 학습 자체는 v1.1 후속 사이클(드론 자율비행 페이즈)로 분리 — UI 노출 게이트로 Precision 우선 확보.
+
 ### v5.1_260503 (작성자: @youminsu0523 / branch: MS)
 - Phase 20 추가 완료(alembic 분기 head 병합 `89b53c16de85` + 누락 컬럼 10건 ALTER 보정 + seed_demo_data 실 적용 sites=8/defects=315/reports=12/schedules=3) + Phase 21 신설(tasks 문서 양식 정정 — 부록 → 인라인, 파일 rename, 팀명 일괄, 가이드 3종 문서이력 위치, CHANGES md 신설)
 

@@ -128,6 +128,15 @@
 
 ## Revision History
 
+### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
+- **(frontend R24) test_mode 영상 60fps 아키텍처 — `<video>` + SVG 오버레이**:
+  - 신규: `DetectionOverlay.jsx` (SVG bbox, rAF 33ms 동기화) / `useTestActiveMedia.js` (`/test/active` 폴링) / `testDetectionsStore.js` (timestamp 타임라인).
+  - 변경: `LiveVideoFeed.jsx` 영상 분기로 `<video src=/test/upload/file/{name}>` early return + testPlayState ↔ video.play()/pause() 동기화. `useWebSocket.js` 의 `defect.new` 가 video timestamp 가 있으면 testDetectionsStore 에도 적재.
+  - 효과: backend MJPEG 재인코딩 병목 제거 + 브라우저 네이티브 디코드 → 원본 mp4 fps(30/60/120) 그대로. Vite 빌드 OK (4.84MB chunk, 13.12s).
+
+### v5.2_260512 (작성자: @youminsu0523 / branch: MS)
+- **(backend 동기화)** test_stream 추론 fire-and-forget + UI conf gate 강화로 LiveVideoFeed / DefectCard 체감 품질 회귀 차단. 프론트 코드 변경 없음. 영상 30fps yield가 추론 지연에 끌리지 않아 끊김 해소되고, DefectPanel 에 caulking/scratch/paint_stain 등 OOD 거짓 양성 카드가 더 이상 노출되지 않음.
+
 ### v5.1_260506 (작성자: @youminsu0523 / branch: main)
 - **R19 (5/6)** Landing 탭 favicon 일원화 — 누락된 `/drone-icon.svg` 참조 제거 후 ico+PNG 다중 등록. PowerShell + System.Drawing 알파 row 스캔으로 로고 PNG의 graphic/text 자동 분리(graphic = rows 59–252, cols 235–441). 정사각 캔버스(239×239) 가운데 배치 + 양쪽 16px 패딩. ICO 직접 바이너리 작성(ICONDIR + ICONDIRENTRY × 3 + 16/32/48 PNG payload)으로 32bpp 알파 보존. 배포 환경 globe 기본 favicon 이슈 해소.
 - **R23 (5/6, R19 후속)** favicon 흰 원 배경 + 로고 확대 — 다크 탭/작은 사이즈에서 어두운 푸른빛 로고가 묻히는 이슈 해결. master 사이즈 239 → 512 격상(다운샘플 안티앨리어싱 품질 향상), `FillEllipse(0,0,512,512)` 흰 원 배경, inscribed 사각형(=512/√2) 92% 기준(333×312)에 로고 aspect 보존 fit. 모든 사이즈(ico 16/32/48 + PNG 16/32/192/512 + apple-touch 180) 갱신 + 픽셀 검증으로 흰 원/투명/로고 색상 확인.

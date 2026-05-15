@@ -183,6 +183,15 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""
 
+    # OpenAI 챗봇 (건축물·하자 도메인 어시스턴트)
+    # gpt-4o-mini 기본 — 저비용/저지연. 운영에서 품질 필요 시 OPENAI_MODEL 만 갱신.
+    # OPENAI_MAX_OUTPUT_TOKENS: 응답 한 회당 최대 출력 토큰 (비용/길이 가드).
+    # OPENAI_SUMMARY_MODEL: 컨텍스트 압축 요약 전용 모델. 비용 절감 위해 mini 동일.
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MAX_OUTPUT_TOKENS: int = 1200
+    OPENAI_SUMMARY_MODEL: str = "gpt-4o-mini"
+
     # ── JWT ──────────────────────────────────
     JWT_SECRET: str = "change-me-in-production"
     JWT_EXPIRE_MINUTES: int = 120

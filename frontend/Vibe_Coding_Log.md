@@ -2642,3 +2642,39 @@ S500 / Cinelog35 외곽 비 ≈ 2.55배. BuildingMesh 10m 가로의 1/55(Cinelog
 - `upload-downsample` — 클라이언트 다운샘플 시간
 - `upload-network` — 실제 multipart 전송 시간
 - `upload-total` — 다운샘플 + 전송 + 자동 START 누적
+
+---
+
+## 🎯 R36 — 전체 프로세스 검증 & 통합 미스매치 보완 (2026-05-13 16:00)
+
+> 사용자 피드백: "현재 프로젝트의 전체적인 프로세스 검증해줘. 로그인부터 시작해서 모든 기능들 전체 다. 누락된 부분이나 보완이 필요한 부분 정리해서 알려주면 순차적으로 진행하자." → 프론트/백 동시 audit 후 P0(보안)·P1(미구현)·P2(통합 미스매치) 정리, 사용자 확인 후 순차 수정·검증·다음 단계 반복. 분리 repo AeroInspect_frontend R32 와 동일 변경을 통합 repo 에 미러.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R36.1 | 2026-05-13 14:30 | **useWebSocket 다중 채널 구독** — `?channels=defects,telemetry,camera,thermal` 콤마 분리. 기존 단일 `?channel=defects` 단점(telemetry/camera/thermal 분리 broadcast 미수신) 해결. | src/hooks/useWebSocket.js |
+| R36.2 | 2026-05-13 14:35 | **WS JWT 토큰 attach + 본인 채널 자동 구독** — authStore.token/user.id 를 useCallback deps. `?token=...&channels=...,notifications:{uid},user:{uid}` 자동 갱신. 로그아웃/사용자 전환 시 close → 재연결. | src/hooks/useWebSocket.js |
+| R36.3 | 2026-05-13 14:35 | **defect.batch 핸들러** — `/ai/batch` 발행 이벤트 forEach pushDefect 로 단건 경로 합류. | src/hooks/useWebSocket.js |
+| R36.4 | 2026-05-13 14:40 | **thermalStore 신설 + useThermalData 셀렉터** — 컴포넌트 useState → Zustand 모듈 싱글톤. ThermalGraph 무수정. | src/store/thermalStore.js (신규), src/hooks/useThermalData.js |
+| R36.5 | 2026-05-13 14:45 | **WS thermal/slam 라우팅** — thermal.frame/analysis → thermalStore.pushReading. slam.created/updated console.log. rejected[] 워닝. | src/hooks/useWebSocket.js |
+| R36.6 | 2026-05-13 15:10 | **ThermalOverlay 실제 HUD** — max/avg/min 우상단 패널. Δ≥3°C 면 ALERT 펄스. LiveVideoFeed 통합 (thermal/blend 모드). | src/components/video/ThermalOverlay.jsx, src/components/video/LiveVideoFeed.jsx |
+| R36.7 | 2026-05-13 15:25 | **ContactModal → /api/v1/contact 연동** — submitContactInquiry axios POST → 슈퍼어드민 notification. submitting 상태 더블 제출 차단. | src/api/contactApi.js (신규), src/components/landing/ContactModal.jsx |
+| R36.8 | 2026-05-13 16:48 | **로컬 .env 작성** — VITE_ODCLOUD_SERVICE_KEY / VITE_KAKAO_JS_KEY 는 통합 repo TEAM_PROJECT_2 frontend/.env 에서 직접 동기. dev 기본값(API_BASE/WS_URL localhost) + OAuth client id. | (.env) |
+| R36.9 | 2026-05-13 18:10 | **분리 ↔ 통합 repo 양방향 동기** — 분리 repo 7개 변경 파일(useWebSocket/useThermalData/thermalStore/ThermalOverlay/LiveVideoFeed/ContactModal/contactApi) 을 통합 repo frontend/ 에 복사. | frontend/ |
+
+### 📐 설계 결정 / 자가검토
+
+분리 repo R32 와 동일. 핵심:
+- 다중 채널 단일 연결 (콤마 분리) — 채널당 소켓 X → 메모리/핸드셰이크 비용 절감.
+- JWT URL 쿼리 (wss + 단기 access token + 본인 채널 검증) — Subprotocol 우회보다 표준 친화.
+- deps token/userId → 로그아웃 즉시 채널 구독 해제 + 새 사용자 채널로 재연결.
+- defect.batch 가 단건 forEach — testMediaReady 게이트 로직 중복 없이 단일 pushDefect 통합.
+- thermalStore 슬라이딩 윈도우 120 샘플 — 1fps 2분 그래프, Recharts 부담 X.
+- ContactModal 비로그인 허용 — rate_limit 백엔드 미들웨어가 abuse 차단.
+
+### 🚨 안전성 영향
+
+- WS JWT 인증으로 로그아웃 후 옛 알림이 새 사용자에게 누설되던 잠재 사고 차단.
+- 카메라 모드 sync 가 처음으로 동작 (다른 사용자가 mode 변경 시 내 화면도 따라옴).
+- 빌드: `npm run build` 14.61s 통과 (×5 회 검증). 번들 크기 +0.3KB.

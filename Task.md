@@ -261,6 +261,18 @@
 
 ## Revision History
 
+### v5.4_260512 (작성자: @youminsu0523 / branch: MS)
+- **(R28 / v1.1) test_mode 영상 60fps 아키텍처 — MJPEG 폐기, `<video>` 직접재생**:
+  - **결정 배경**: Fly 1 vCPU 머신에서 MJPEG = 매 프레임 cv2 decode + PIL overlay + JPEG re-encode → 30fps 자체가 불안정. 원본 mp4 가 이미 H.264인데 풀 재인코딩하는 모순 제거.
+  - **PR1 (backend, 4파일)**: `services/test_stream.py` — `_video_inference_loop` background task + `activate_video_mode` 메타 peek + `_pending_video_detection / _active_video_*` 상태 + `_broadcast_detection` payload 에 `video_timestamp_sec / frame_w / frame_h` 조건부 첨부 + `_detect/_detect_real` tier 파라미터 도입(영상 tier=2). 기존 `_stream_video_frames` 삭제. `api/stream.py` — `GET /test/upload/file/{name}` HTTP Range(206) 정적 서빙 (traversal `realpath+commonpath` 차단, 416 처리, mp4/mov/mkv/avi/webm mime) + `GET /test/active` 메타 endpoint.
+  - **PR2 (frontend, 5파일)**: 신규 `components/video/DetectionOverlay.jsx` (SVG bbox, rAF 33ms) + `hooks/useTestActiveMedia.js` (`/test/active` 2초 폴링) + `store/testDetectionsStore.js` (timestamp 정렬 타임라인). 변경 `components/video/LiveVideoFeed.jsx` (영상 분기 early return `<video src=/test/upload/file/{name}>` + testPlayState ↔ video.play()/pause()/seek 동기화 + onLoadedMetadata 게이트 open) + `hooks/useWebSocket.js` (`defect.new`의 timestamp 있는 detection을 testDetectionsStore.ingest() 라우팅).
+  - **PR3 (backend, 같은 파일)**: 영상 inference tier 3→2 — M4 thermal U-Net + M6 PatchCore 제외(RGB 영상에 무의미, 무거움). 이미지 경로는 tier 3 유지.
+  - **수락 기준**: 로컬 RTX 5070 mp4 30/60fps 원본 그대로, Fly 1 vCPU 30fps 안정(추론 dip 1-2fps 이내). detection 타임라인 ±0.4s 윈도우.
+  - **검증**: backend `python -m ast` OK, frontend `vite build` 13.12s OK.
+
+### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
+- **(backend R27 / v1.1)** test_stream 영상 재생 끊김 + OOD 거짓 검출 동시 수정 — `services/test_stream.py::_stream_video_frames` 의 인-루프 `await self._detect(...)` 차단을 제거하고 추론을 background asyncio task로 fire-and-forget 발사. 추론 주기 7→10프레임. yield 30fps가 추론 지연에 끌려가지 않음. `_ui_conf_gate` 에 OOD-취약 RGB 클래스(caulking/코킹·scratch/스크래치·paint_stain/도색·surface_defect·baseboard/걸레받이·pollution/오염) 0.75 게이트 신설 — test mode 첨부 영상이 사람/SNS 밈 같은 OOD 입력일 때 M1-YOLO가 52~64% 신뢰도로 "코킹 누락·불량" 카드를 띄우던 회귀 사고 차단. 단열 0.30 / 기본 0.50 유지.
+
 ### v5.2_260506 (작성자: @youminsu0523 / branch: main)
 - **(frontend R19)** 브라우저 탭 favicon = 자체 로고 그래픽만 적용 — `frontend/public/`에 favicon.ico(16/32/48 다중 entry) + favicon-{16,32,192,512}.png + apple-touch-icon.png(180×180) 신규. `frontend/index.html` 의 누락 자산 참조 `/drone-icon.svg` 1줄 → ico/PNG 5줄 명시 등록으로 교체. PowerShell + System.Drawing 알파 row 스캔으로 로고 graphic/text 자동 분리(rows 59–252, cols 235–441), 정사각 캔버스 가운데 배치(텍스트 "DRONE INSPECT / PRECISION DEFECT ANALYSIS" 제외). 배포 사이트 globe 기본 favicon 이슈 해소.
 - **(frontend R23, R19 후속)** favicon 흰 원 배경 추가 + 로고 확대 — 다크 탭/작은 사이즈에서 어두운 푸른빛이 잘 안 보이는 이슈 해결(구글 G 스타일). 512×512 master 캔버스에 흰 원(`FillEllipse(0,0,512,512)`) + inscribed 사각형 92%(333×312) 기준 로고 가운데 fit + 모든 사이즈 재생성 + 픽셀 검증.

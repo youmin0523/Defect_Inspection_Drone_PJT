@@ -27,6 +27,7 @@ from app.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.core.metrics import PrometheusMiddleware, render_metrics
 from app.core.middleware import RequestIDMiddleware
+from app.core.rate_limit import RateLimitMiddleware
 from app.db.init_db import init_db
 from app.api.router import api_router
 from app.services.camera import rgb_camera_service, thermal_camera_service
@@ -86,14 +87,23 @@ async def lifespan(app: FastAPI):
     # ── 시작 ─────────────────────────────────
     print("[AeroInspect] 서버 시작 중...")
 
-    # 자율비행 mission_orchestrator 에 단일 WS 매니저 주입
-    try:
-        from app.core.ws_manager import ws_manager as _wsmgr
-        from app.services.mission_orchestrator import set_ws_manager as _set_ws
-        _set_ws(_wsmgr)
-        print("[AeroInspect] mission_orchestrator WS 매니저 결선 완료")
-    except Exception as _e:
-        print(f"[AeroInspect] mission_orchestrator WS 매니저 결선 실패(무시): {_e}")
+    # WebSocket 백엔드: Redis 모드면 매니저 교체 + pub/sub 구독 시작
+    if settings.WS_BACKEND.lower() == "redis":
+        try:
+            from app.core import ws_manager as wsmod
+            from app.core.ws_manager_redis import create_ws_manager
+
+            redis_mgr = create_ws_manager(
+                backend="redis",
+                redis_url=settings.REDIS_URL,
+            )
+            await redis_mgr.start()
+            wsmod.ws_manager = redis_mgr
+            print(f"[AeroInspect] WS 백엔드: Redis ({settings.REDIS_URL})")
+        except Exception as e:
+            print(f"[AeroInspect] Redis WS 백엔드 시작 실패 — 메모리 백엔드로 폴백: {e}")
+    else:
+        print("[AeroInspect] WS 백엔드: memory (단일 워커 한정)")
 
     # DB 테이블 생성 (처음 실행 시)
     try:
@@ -165,6 +175,17 @@ async def lifespan(app: FastAPI):
         print("[AeroInspect] 카메라 자원 해제 완료")
 
     telemetry_cache.clear()
+
+    # Redis WS 백엔드 정리
+    if settings.WS_BACKEND.lower() == "redis":
+        try:
+            from app.core import ws_manager as wsmod
+            from app.core.ws_manager_redis import RedisConnectionManager
+            mgr = wsmod.ws_manager
+            if isinstance(mgr, RedisConnectionManager):
+                await mgr.stop()
+        except Exception as e:
+            print(f"[AeroInspect] Redis WS 백엔드 종료 중 오류: {e}")
 
 
 # ── OpenAPI 메타데이터 ───────────────────────
@@ -279,6 +300,7 @@ app.add_middleware(
 )
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(PrometheusMiddleware)
+app.add_middleware(RateLimitMiddleware)
 
 # ── 라우터 마운트 ─────────────────────────────
 app.include_router(api_router, prefix="/api/v1")

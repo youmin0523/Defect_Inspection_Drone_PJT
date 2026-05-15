@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook, sites, notifications, chat, organization, detect, ws_stream, coverage, employee, admin_gpu, mission
+from app.api import auth, oauth, defects, stream, websocket, report, telemetry, slam, floorplan, ai_webhook, sites, notifications, chat, organization, detect, ws_stream, coverage, employee, admin_gpu, missions, contact, ai_chat
 from app.schemas.common import PROTECTED_RESPONSES, PUBLIC_RESPONSES, WEBHOOK_RESPONSES
 
 api_router = APIRouter()
@@ -160,10 +160,18 @@ api_router.include_router(
     responses=PROTECTED_RESPONSES,
 )
 
-# 자율비행 미션 제어 (REST + Pi fc-bridge WebSocket)
+# L3 자율비행 + LiDAR 스캔 미션 (Gazebo 시뮬레이터 또는 실제 ROS2 노드와 연동)
 api_router.include_router(
-    mission.router,
-    prefix="/mission",
-    tags=["Mission"],
+    missions.router,
+    prefix="/missions",
+    tags=["Missions"],
     responses=PROTECTED_RESPONSES,
+)
+
+# 랜딩 페이지 도입 문의 (비로그인 접근 허용)
+api_router.include_router(
+    contact.router,
+    prefix="/contact",
+    tags=["Contact"],
+    responses=PUBLIC_RESPONSES,
 )
