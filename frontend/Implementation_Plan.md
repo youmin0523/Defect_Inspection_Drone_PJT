@@ -128,6 +128,14 @@
 
 ## Revision History
 
+### v6.0_260515 (작성자: @youminsu0523 / branch: MS)
+- **(frontend R-v1.1.01) OpenAI 챗봇 UI 통합**:
+  - 신규 `src/api/aiChatApi.js` — REST(threads/messages CRUD) + SSE 스트리밍(fetch+ReadableStream 라인 파서). `EventSource` 미사용(GET-only + 헤더 한계).
+  - 신규 `src/store/aiChatStore.js` (Zustand) — `isOpen/view/threads/messagesByThread/streaming(+draft+AbortController)`. 액션: toggle/open/close, fetch/create/select/rename/delete Thread, fetchMessages, sendMessage(낙관적 user 메시지 + onDone 에서 thread 끌어올림), stopStreaming.
+  - 신규 `src/components/chatbot/` 8개: `FloatingChatbotButton`(violet FAB right-24) / `ChatbotPanel`(우측 sliding drawer + ESC) / `ChatbotPanelHeader`(뒤로/새 대화/삭제/닫기) / `ThreadList`(빈 상태 추천 질문 4) / `ChatbotMessageThread`(자동 스크롤, 스트리밍 중 임시 bubble, 에러 배너) / `ChatbotMessageBubble`(react-markdown raw HTML 비허용) / `ChatbotInput`(Enter 전송, 4000자 가드, 중단 버튼) / `GlobalFloatingChatbot`(/employee/* + 토큰 보유 시).
+  - `App.jsx` — `<GlobalFloatingChatbot />` 마운트 (기존 메신저 FAB 옆).
+  - `package.json` — `react-markdown` ^9.0.1 추가.
+
 ### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
 - **(frontend R24) test_mode 영상 60fps 아키텍처 — `<video>` + SVG 오버레이**:
   - 신규: `DetectionOverlay.jsx` (SVG bbox, rAF 33ms 동기화) / `useTestActiveMedia.js` (`/test/active` 폴링) / `testDetectionsStore.js` (timestamp 타임라인).

@@ -261,6 +261,13 @@
 
 ## Revision History
 
+### v6.0_260515 (작성자: @youminsu0523 / branch: MS)
+- **(R-v1.1.01 / v1.1) OpenAI 챗봇(건축물·하자 도메인 어시스턴트) 통합 — 통합/분리 repo 동시 적용**:
+  - **백엔드 (TEAM_PROJECT_2 + AeroInspect_backend)**: 모델 2(AiChatThread / AiChatMessage, user+org 격리, summary watermark), 마이그레이션 `m6a7b8c9d0e1` (FK 사이클 회피, down_revision 통합=`j3d4e5f6a7b8` / 분리=`k4e5f6a7b8c9`), `OpenAIChatService` (SYSTEM_PROMPT = `DEFECT_CATALOG` 20종 표 dump + 안전 가이드 + 인젝션 거절, SSE 스트리밍, light-RAG = 정규식 카테고리 코드/사이트 키워드 + organization_id 필수, 30턴 초과 시 BackgroundTasks 자동 요약), `/api/v1/ai-chat` 6 엔드포인트 (`get_current_org_member` + user_id·org_id 이중 검증 + 사용자별 분당 20 메시지 카운터). settings 4(OPENAI_API_KEY/MODEL=`gpt-4o-mini`/MAX_OUTPUT_TOKENS=1200/SUMMARY_MODEL), requirements `openai>=1.40.0`.
+  - **프론트엔드 (frontend + AeroInspect_frontend)**: `aiChatApi.js`(REST + SSE fetch+ReadableStream 파서), `aiChatStore.js`(Zustand, 낙관적 user 메시지 + onDone thread 끌어올림 + AbortController), 8 컴포넌트(`FloatingChatbotButton` violet right-24 / `ChatbotPanel` 우측 sliding drawer ESC / `Header` 뒤로·새 대화·삭제·닫기 / `ThreadList` 빈 상태 추천 질문 4 / `ChatbotMessageThread` 자동 스크롤 + 임시 스트리밍 bubble / `ChatbotMessageBubble` react-markdown raw HTML 비허용 / `ChatbotInput` Enter 전송 + 4000자 가드 + 중단 / `GlobalFloatingChatbot` /employee/* + 토큰 보유 시). `App.jsx` 마운트. `package.json` `react-markdown` ^9.0.1.
+  - **사용자 시나리오**: ChatGPT 스타일 세션별 대화방 수동 생성, 다음날 동일 thread 흐름 유지. "B-02 결함 보여줘" 같은 사용자 데이터 질문 시 자동 light-RAG.
+  - **보안·상업 수준 가이드**: 시스템 프롬프트/RAG 별도 system role 분리, 사용자 입력 system 격상 X, OPENAI_API_KEY 응답/스키마 미노출. B 영역(단열·방수·기밀) 더 엄격 평가 + "안전 직결" + "추측 금지" + "DIY 수준 X" 가이드를 시스템 프롬프트에 영구 주입(사용자 메모리 규칙 `feedback_strict_all_defects`, `feedback_insulation_strict`, `project_commercial_grade_target` 반영).
+
 ### v5.4_260512 (작성자: @youminsu0523 / branch: MS)
 - **(R28 / v1.1) test_mode 영상 60fps 아키텍처 — MJPEG 폐기, `<video>` 직접재생**:
   - **결정 배경**: Fly 1 vCPU 머신에서 MJPEG = 매 프레임 cv2 decode + PIL overlay + JPEG re-encode → 30fps 자체가 불안정. 원본 mp4 가 이미 H.264인데 풀 재인코딩하는 모순 제거.

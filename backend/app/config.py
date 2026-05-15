@@ -307,6 +307,9 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        # //* [Modified Code 2026-05-13] .env 의 추가 키(APP_ENV 등 도구용 변수)가
+        # 들어와도 부팅 차단하지 않음 — 알 수 없는 키는 무시.
+        extra = "ignore"
 
 
 # 전역 싱글톤: 애플리케이션 전체에서 공유

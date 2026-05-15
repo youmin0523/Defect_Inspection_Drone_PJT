@@ -235,6 +235,22 @@ frontend/src/
 
 ## Revision History
 
+### v6.0_260515 (작성자: @youminsu0523 / branch: MS)
+- **(frontend R-v1.1.01) OpenAI 챗봇 UI 통합**:
+  - 신규 `src/api/aiChatApi.js` — REST(threads/messages CRUD) + SSE 스트리밍(`sendMessageStream`). fetch+ReadableStream 라인 파서, `data: {json}\n\n` 추출.
+  - 신규 `src/store/aiChatStore.js` (Zustand) — `isOpen / view / threads / messagesByThread / streaming + streamingDraft + abortController`. 액션: toggle/open/close, fetch/create/select/rename/delete Thread, fetchMessages, sendMessage(낙관적 user 메시지 + onDone 에서 thread 끌어올림), stopStreaming.
+  - 신규 `src/components/chatbot/` 8개:
+    - `FloatingChatbotButton.jsx` — violet FAB, right-24(메신저 right-6 와 충돌 회피), Sparkles 아이콘.
+    - `ChatbotPanel.jsx` — 우측 sliding drawer(w-[480px]~[560px]), ESC 닫기, 반투명 오버레이.
+    - `ChatbotPanelHeader.jsx` — 뒤로(목록)/새 대화/대화 삭제/닫기.
+    - `ThreadList.jsx` — last_message_at desc 정렬. 빈 상태에 추천 질문 4개("B-02 벽체 단열 공백은 왜 위험한가요?" 등).
+    - `ChatbotMessageThread.jsx` — 자동 스크롤, 스트리밍 중 임시 assistant bubble, 에러 배너.
+    - `ChatbotMessageBubble.jsx` — react-markdown raw HTML 비허용. user 우측 violet / assistant 좌측 흰색 + 아바타.
+    - `ChatbotInput.jsx` — Enter 전송 / Shift+Enter 줄바꿈 / 4000자 카운터 / 스트리밍 중 disabled + 중단 버튼.
+    - `GlobalFloatingChatbot.jsx` — `/employee/*` + 토큰 보유 시에만 렌더.
+  - `App.jsx` — 기존 `<GlobalFloatingChat />` 옆에 `<GlobalFloatingChatbot />` 마운트.
+  - `package.json` — `react-markdown` ^9.0.1 dependencies 추가.
+
 ### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
 - **(frontend R24) test_mode 영상 직접재생 + SVG bbox 오버레이 — 60fps 가능 아키텍처**:
   - 신규 컴포넌트 `components/video/DetectionOverlay.jsx` — `<video>` 위 SVG bbox 레이어. testDetectionsStore detection을 `video.currentTime ± 0.4s` 윈도우로 필터해 표시. `requestAnimationFrame`(33ms) 으로 timeupdate(250ms) 보다 부드럽게 동기화. SVG viewBox = frame_w × frame_h 로 원본 좌표 1:1 매핑.

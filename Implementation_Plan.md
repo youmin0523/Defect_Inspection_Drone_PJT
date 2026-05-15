@@ -22,10 +22,11 @@
 │  └── REST API (axios) + WebSocket 연동                               │
 ├─────────────────────────────────────────────────────────────────────┤
 │  FastAPI Backend (Python 비동기)                                     │
-│  ├── api/ (17 라우터)     — REST 엔드포인트                          │
+│  ├── api/ (22 라우터)     — REST 엔드포인트                          │
 │  │   auth, oauth, chat, defects, detect, sites, report, telemetry,  │
 │  │   stream, organization, notifications, ai_webhook, coverage,     │
-│  │   floorplan, slam, websocket, ws_stream                          │
+│  │   floorplan, slam, websocket, ws_stream, employee, missions,     │
+│  │   admin_gpu, contact, ai_chat (OpenAI 챗봇 SSE)                  │
 │  ├── core/                — JWT, Security(bcrypt), Middleware(CORS/  │
 │  │                          RequestID), Metrics(Prometheus),         │
 │  │                          WebSocket Manager, Streaming,            │
@@ -227,6 +228,14 @@
 ---
 
 ## Revision History
+
+### v6.0_260515 (작성자: @youminsu0523 / branch: MS)
+- **Phase 29 신설 (R-v1.1.01, v1.1 사이클) — OpenAI 챗봇(건축물·하자 도메인 어시스턴트) 통합**:
+  - **백엔드**: 2 테이블(AiChatThread / AiChatMessage, user+org 격리), Alembic `m6a7b8c9d0e1` (down 통합=`j3d4e5f6a7b8` / 분리=`k4e5f6a7b8c9`). `OpenAIChatService` — SYSTEM_PROMPT(DEFECT_CATALOG 20종 표 + B영역 엄격 + 안전 직결 + 추측 금지 + 인젝션 거절), SSE 스트리밍(`chat.completions.create stream=True`), light-RAG(정규식 카테고리 코드 + 사이트 키워드, organization_id 필터), 30턴 초과 시 BackgroundTasks 자동 요약. `/api/v1/ai-chat` 6 엔드포인트(`get_current_org_member` + user_id·org_id 이중 검증 + 사용자별 분당 20 메시지). settings 4개(OPENAI_API_KEY/MODEL=`gpt-4o-mini`/MAX_OUTPUT_TOKENS=1200/SUMMARY_MODEL). requirements `openai>=1.40.0`.
+  - **프론트엔드**: `aiChatApi.js`(REST + SSE fetch+ReadableStream 파서), `aiChatStore.js`(Zustand, 낙관적 user 메시지 + onDone thread 끌어올림), 8 컴포넌트(`FloatingChatbotButton`/`ChatbotPanel`/`Header`/`ThreadList`/`ChatbotMessageThread`/`ChatbotMessageBubble`/`ChatbotInput`/`GlobalFloatingChatbot`). 패널은 우측 sliding drawer(w-[480px]~[560px]), FAB violet(`right-24`, 메신저 blue `right-6` 와 충돌 회피). 마크다운 `react-markdown` raw HTML 차단. App.jsx 마운트 `/employee/*` + 토큰 보유 시.
+  - **메모리·세션**: 사용자가 ChatGPT 처럼 세션별 대화방 수동 생성. 다음날 동일 thread 선택 시 서버 히스토리 + 요약 컨텍스트로 흐름 유지.
+  - **보안**: 시스템 프롬프트/RAG 는 별도 system role 분리. 사용자 입력 system 격상 X. OPENAI_API_KEY 서버 전용. 입력 4000자 / 출력 1200 토큰 / 분당 20 메시지/사용자. 다른 조직 thread_id 직접 요청 시 404.
+  - **양 repo 동기**: 통합 repo(TEAM_PROJECT_2) + 분리 repo(AeroInspect_backend / AeroInspect_frontend) 동일 구현, alembic down_revision 만 환경별 분기.
 
 ### v5.4_260512 (작성자: @youminsu0523 / branch: MS)
 - Phase 28 신설 (R28, v1.1) — **test_mode 영상 60fps 아키텍처**: MJPEG 재인코딩 폐기. backend는 mp4 를 HTTP Range(206)로 직접 서빙 + background inference만, frontend `<video>` 가 네이티브 디코드 + SVG bbox 오버레이. 추가 endpoint: `/test/upload/file/{name}` (Range), `/test/active` (메타). 신규 컴포넌트: `DetectionOverlay.jsx`, hook `useTestActiveMedia.js`, store `testDetectionsStore.js`. tier 파라미터 도입(영상 tier=2 — M4/M6 제외). 보안: traversal `realpath+commonpath`, 416 응답. 효과: Fly 1 vCPU 결정적 병목 제거, 로컬 60fps 가능, Fly 30fps 안정 목표. (3 PR 시퀀셜 적용, backend `ast.parse` OK, frontend `vite build` 13.12s OK.)

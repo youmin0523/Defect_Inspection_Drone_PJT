@@ -2689,3 +2689,40 @@ S500 / Cinelog35 외곽 비 ≈ 2.55배. BuildingMesh 10m 가로의 1/55(Cinelog
 | 라운드 | 시각 | 작업 | 산출물 |
 |-------|------|------|-------|
 | R38 | 2026-05-15 15:50 | chatbot 8 컴포넌트(ChatbotInput/Bubble/Thread/Panel/Header/FloatingBtn/Global/ThreadList) + App.jsx GlobalFloatingChatbot 와이어업 + aiChatApi/aiChatStore + react-markdown ^9.0.1 (package-lock 재생성). | frontend/* |
+
+
+---
+
+## 🎯 R-v1.1.01 — OpenAI 챗봇 UI 완전 통합 + 실제 코드 동기화 (2026-05-15 오후)
+
+> 사용자 요청: "open AI 를 활용한 chatbot — 건축물·하자 도메인 대화" + "memory 기능(다음날 흐름 유지)" + "세션별 대화방 수동 생성" + "TEAM_PROJECT_2/AeroInspect_frontend/AeroInspect_backend 모두 동일 반영". 이전 R38 로그가 분리 repo 만 일부 동기됐고 통합 repo 에는 컴포넌트/의존성/마운트가 실제 누락 상태였음 — 본 라운드는 두 repo 모두에 실제 코드 적용 + backend 의 R-v1.1.01 과 한 쌍.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .01.1 | 2026-05-15 오후 | **aiChatApi.js (REST + SSE)** — listThreads / createThread / renameThread / deleteThread / listMessages / sendMessageStream. SSE 는 fetch+ReadableStream 으로 `data: {json}\n\n` 라인 파싱. EventSource 미사용. | src/api/aiChatApi.js (신규) |
+| .01.2 | 2026-05-15 오후 | **aiChatStore (Zustand)** — isOpen / view / threads / messagesByThread / streaming(+draft+AbortController). 낙관적 user 메시지, onDone 에서 thread 목록 최상단 갱신. | src/store/aiChatStore.js (신규) |
+| .01.3 | 2026-05-15 오후 | **8개 chatbot 컴포넌트** — FloatingChatbotButton(violet, right-24) / ChatbotPanel(우측 sliding drawer + ESC) / Header(뒤로·새 대화·삭제·닫기) / ThreadList(빈 상태 추천 질문 4) / ChatbotMessageThread(자동 스크롤, 스트리밍 임시 bubble) / ChatbotMessageBubble(react-markdown raw HTML 비허용) / ChatbotInput(Enter 전송, 4000자 가드, 중단) / GlobalFloatingChatbot(/employee/* + 토큰). | src/components/chatbot/*.jsx |
+| .01.4 | 2026-05-15 오후 | **App.jsx 마운트** — 기존 `<GlobalFloatingChat />` 옆에 `<GlobalFloatingChatbot />` 추가. 시각 구분: blue right-6 / violet right-24. | src/App.jsx |
+| .01.5 | 2026-05-15 오후 | **react-markdown ^9.0.1** — package.json dependencies 명시. raw HTML/스크립트 차단 모드. | package.json |
+
+### 📐 설계 결정 / 자가검토
+
+- **별 트리(채팅 vs 챗봇)**: sender_id 기반 vs role 기반으로 분기 의미 다름 → 컴포넌트 분리가 깔끔.
+- **우측 sliding drawer**: 모달은 화면을 가려 "이 결함 뭐야?" 식 질의 시 데이터 동시 확인 불가 → 사이드 패널 채택.
+- **fetch + ReadableStream**: EventSource 는 GET 전용 + Authorization 헤더 미지원.
+- **낙관적 user 메시지 + onDone thread 끌어올림**: 메신저 UX 일관성.
+- **raw HTML 차단**: 어시스턴트 오작동 시 DOM 인젝션 방어.
+
+### ✅ 검증
+
+- `/employee/*` 진입 → violet FAB 노출, 메신저 FAB 와 위치 충돌 없음.
+- 새 대화 → 메시지 → 토큰 스트림 누적 → 새로고침 후 동일 thread 흐름 유지.
+- 입력 4000자 차단 / 스트리밍 중 중단 / ESC 패널 닫기.
+
+### 🚨 안전성 영향
+
+- 마크다운 raw HTML 비허용(XSS).
+- 비 /employee/* + 비 로그인 시 FAB·패널 비노출 — 랜딩에서 챗봇 노출 X.
+- API 호출 토큰 + X-Organization-Id 자동, 백엔드 user_id+org_id 이중 검증.

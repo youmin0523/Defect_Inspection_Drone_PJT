@@ -236,6 +236,15 @@ core/stream_inference.py ──→ services/inference_pipeline.py
 
 ## Revision History
 
+### v6.0_260515 (작성자: @youminsu0523 / branch: MS)
+- **Phase 24 신설 — OpenAI 챗봇 백엔드 통합 (R-v1.1.01, v1.1 사이클)**:
+  - **DB 모델 2**: `AiChatThread`(user_id+organization_id 격리, summary watermark, soft delete) / `AiChatMessage`(role enum user/assistant/system, tokens, JSONB meta). 인덱스: `(user_id, last_message_at DESC)`, `(thread_id, created_at ASC)`.
+  - **마이그레이션** `m6a7b8c9d0e1` — FK 사이클(threads↔messages) 회피를 위해 threads 먼저(summary_until_message_id FK 보류) → messages → ALTER threads ADD FK 순. down_revision 통합=`j3d4e5f6a7b8` / 분리=`k4e5f6a7b8c9`.
+  - **서비스** `app/services/openai_chat.py`: SYSTEM_PROMPT 정적 빌드(`DEFECT_CATALOG` 20종 마크다운 표 + "B 영역 더 엄격" + "안전 직결" + "추측 금지" + 인젝션 거절). `astream()` 으로 SSE 청크 yield, `chat.completions.create(stream=True, stream_options={"include_usage":True})`. `_retrieve_user_data_context()` 정규식 카테고리 코드 + 사이트 키워드 → `DefectLog`+`Site` JOIN(organization_id 필수). `maybe_schedule_summarization()` + `run_summarization()` — 30턴 초과 시 BackgroundTasks 비동기, 기존 summary 와 머지.
+  - **API 라우터** `app/api/ai_chat.py` (6 엔드포인트): GET/POST/PATCH/DELETE `/threads`, GET `/threads/{id}/messages`, POST `/threads/{id}/messages` (StreamingResponse media_type=`text/event-stream`). 모두 `get_current_org_member` 의존성. `_load_thread_or_404` 가 `user_id + org_id` 이중 검증. 사용자별 메시지 전송 분당 20회 라우터 내부 카운터.
+  - **설정·라우터·rate_limit**: settings 4(OPENAI_API_KEY/MODEL=`gpt-4o-mini`/MAX_OUTPUT_TOKENS=1200/SUMMARY_MODEL), requirements `openai>=1.40.0`, router.py `/ai-chat` include, rate_limit.py `/api/v1/ai-chat`:120/min.
+  - **보안**: 시스템 프롬프트/RAG 별도 system role 분리, 사용자 입력 system 격상 X, OPENAI_API_KEY 응답/스키마/로그 미노출, 클라이언트 끊김 시 부분 응답 영속화(`request.is_disconnected()` + finally).
+
 ### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
 - **Phase 23 신설 — test_mode 영상 60fps 아키텍처 (R28, v1.1 사이클)**:
   - **결정**: MJPEG 재인코딩 폐기. 원본 mp4 를 HTTP Range 로 직접 서빙, 프론트가 `<video>` 로 네이티브 디코드. backend는 background inference만.

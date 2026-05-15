@@ -200,6 +200,21 @@
 
 ## Revision History
 
+### v6.0_260515 (작성자: @youminsu0523 / branch: MS)
+- **(backend R-v1.1.01) OpenAI 챗봇(건축물·하자 도메인 어시스턴트) 통합**:
+  - 신규 ORM 2: `AiChatThread`(user_id+organization_id 격리, summary watermark, soft delete) / `AiChatMessage`(role enum user/assistant/system, tokens, JSONB meta).
+  - 신규 Pydantic 6: ThreadCreate/Update/Response/ListResponse, MessageCreate/Response/HistoryResponse. role=system 응답 제외(시스템 프롬프트 누설 차단).
+  - 신규 Alembic `m6a7b8c9d0e1`: FK 사이클(threads↔messages) 회피 위해 threads 먼저(summary_until_message_id FK 보류) → messages → ALTER threads ADD FK 순. down_revision 통합 repo=`j3d4e5f6a7b8` / 분리 repo=`k4e5f6a7b8c9`.
+  - 신규 서비스 `app/services/openai_chat.py`:
+    - 정적 `SYSTEM_PROMPT` — `DEFECT_CATALOG` 20종 마크다운 표 + "B 영역 더 엄격" + "안전 직결" + "추측 금지" + 인젝션 거절 가이드.
+    - `astream()` — OpenAI `chat.completions.create(stream=True, stream_options={"include_usage":True})`. 청크당 SSE `data: {"delta":"..."}` yield. `request.is_disconnected()` 폴링 + finally 부분 응답 보존.
+    - `_retrieve_user_data_context()` — 정규식 `\b([A-Ea-e])[\s\-]?(\d{2})\b` 카테고리 코드 + 사이트 키워드 추출 → DefectLog/Site JOIN(organization_id 필수) → 한국어 라인 포맷.
+    - `maybe_schedule_summarization()` + `run_summarization()` — 30턴 초과 시 BackgroundTasks 비동기. 기존 summary 와 머지.
+  - 신규 라우터 `app/api/ai_chat.py` (6 엔드포인트): GET/POST/PATCH/DELETE `/threads`, GET `/threads/{id}/messages`, POST `/threads/{id}/messages`(SSE). 모두 `get_current_org_member` 의존성. `_load_thread_or_404` 가 user_id+org_id 이중 검증. 사용자별 메시지 전송 분당 20회 라우터 내부 카운터.
+  - router.py include `/ai-chat` prefix, rate_limit.py `/api/v1/ai-chat` 분당 120 추가.
+  - settings: OPENAI_API_KEY / OPENAI_MODEL(default "gpt-4o-mini") / OPENAI_MAX_OUTPUT_TOKENS(1200) / OPENAI_SUMMARY_MODEL.
+  - requirements: `openai>=1.40.0`.
+
 ### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
 - **(backend R28) test_mode 영상 60fps 아키텍처 전환 — MJPEG 재인코딩 폐기**:
   - 본질 분석: 1 vCPU Fly 머신에서 MJPEG = 매 프레임 cv2 decode + PIL overlay + JPEG re-encode → 30fps 자체가 불안정. 원본 mp4 가 이미 H.264 압축인데 풀 디코드/재인코드는 모순.
