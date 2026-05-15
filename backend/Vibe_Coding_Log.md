@@ -2632,3 +2632,12 @@ R30 + R31 결합 효과: 사용자가 하자 카드 클릭 시 **(1) 항상 정�
 - 마이그레이션 무중단 (nullable add).
 - Rate limit 로 brute-force/DoS 표면 축소.
 - detect 무인증 GPU 추론 비용 누수 차단.
+
+
+---
+
+## 🎯 R-postdeploy.14 후속 정정 — ai_chat 라우터 등록 누락 (2026-05-15 15:35)
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .14.fix | 2026-05-15 15:35 | ai_chat 모델/스키마/엔드포인트는 포함됐으나 router.py include_router + rate_limit.py 의 `/api/v1/ai-chat` 한도(120/min) 두 줄이 누락. 동봉 커밋. | app/api/router.py, app/core/rate_limit.py |

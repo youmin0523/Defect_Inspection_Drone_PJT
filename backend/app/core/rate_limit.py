@@ -33,6 +33,8 @@ PATH_LIMITS: Dict[str, int] = {
     "/api/v1/detect": 60,
     "/api/v1/ai/": 600,           # AI 워커 콜백 — 시크릿 인증되므로 여유
     "/api/v1/telemetry": 600,     # 드론 텔레메트리 — webhook secret 인증
+    # AI 챗봇: CRUD 일반 한도. SSE 메시지 전송은 라우터 내부 사용자별 카운터로 추가 보호.
+    "/api/v1/ai-chat": 120,
 }
 DEFAULT_LIMIT = 120  # 분당 기본 한도
 WINDOW_SEC = 60

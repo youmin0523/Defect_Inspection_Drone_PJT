@@ -175,3 +175,11 @@ api_router.include_router(
     tags=["Contact"],
     responses=PUBLIC_RESPONSES,
 )
+
+# AI 챗봇 (OpenAI 기반 건축물·하자 도메인 어시스턴트, SSE 스트리밍)
+api_router.include_router(
+    ai_chat.router,
+    prefix="/ai-chat",
+    tags=["AI Chat"],
+    responses=PROTECTED_RESPONSES,
+)
