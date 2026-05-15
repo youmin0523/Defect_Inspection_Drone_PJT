@@ -2678,3 +2678,14 @@ S500 / Cinelog35 외곽 비 ≈ 2.55배. BuildingMesh 10m 가로의 1/55(Cinelog
 - WS JWT 인증으로 로그아웃 후 옛 알림이 새 사용자에게 누설되던 잠재 사고 차단.
 - 카메라 모드 sync 가 처음으로 동작 (다른 사용자가 mode 변경 시 내 화면도 따라옴).
 - 빌드: `npm run build` 14.61s 통과 (×5 회 검증). 번들 크기 +0.3KB.
+
+
+---
+
+## 🎯 R38 — AI Chatbot 프론트 컴포넌트 8종 + react-markdown (2026-05-15 15:50)
+
+> 분리 repo AeroInspect_frontend R38 와 동일 — 통합 repo 미러. AI 챗봇 UI 컴포넌트 + App.jsx 와이어업 + react-markdown 의존성.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R38 | 2026-05-15 15:50 | chatbot 8 컴포넌트(ChatbotInput/Bubble/Thread/Panel/Header/FloatingBtn/Global/ThreadList) + App.jsx GlobalFloatingChatbot 와이어업 + aiChatApi/aiChatStore + react-markdown ^9.0.1 (package-lock 재생성). | frontend/* |
