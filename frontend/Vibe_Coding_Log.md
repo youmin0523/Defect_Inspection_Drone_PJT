@@ -2770,3 +2770,34 @@ S500 / Cinelog35 외곽 비 ≈ 2.55배. BuildingMesh 10m 가로의 1/55(Cinelog
 ### ✅ 검증
 
 - `vite build`: 14.19s OK.
+
+
+---
+
+## 🎯 R-v1.1.04 — 인증 토큰 영속화 (localStorage write-through 미러) (2026-05-15 오후)
+
+> 사용자 피드백: "잘못해서 브라우저를 닫고 열었을 때 다시 로그인해야 되네? 로그인 토큰을 로컬에 저장해놨다가 브라우저를 모두 닫았을 때 소멸되게 할 수는 없을까?"
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .04.1 | 2026-05-15 오후 | **authStore localStorage write-through** — `setAuth/switchOrg/logout` 의 sessionStorage 호출을 `setBoth/removeBoth` 헬퍼로 교체. AUTH_KEYS 4개를 localStorage + sessionStorage 양쪽 동시 set/remove. | src/store/authStore.js |
+| .04.2 | 2026-05-15 오후 | **모듈 import 시 hydration** — `hydrateSessionFromLocal()` 자동 실행. 기존 api/* 인터셉터 17곳의 `sessionStorage.getItem` 호출 일절 수정 없이도 새 탭/새로고침/탭 닫았다 열기에서 인증 헤더 유효. | src/store/authStore.js |
+| .04.3 | 2026-05-15 오후 | **초기 state read 폴백** — `getAuthValue()` 가 localStorage → sessionStorage 폴백. 어느 한 쪽에만 있어도 복구. | src/store/authStore.js |
+
+### 📐 설계 결정
+
+- 17개 파일 일괄 교체 X — authStore 1곳 + 미러로 같은 효과 + 회귀 위험 최소.
+- "브라우저 완전 종료 시 소멸" 의 한계: localStorage 는 영구 — JWT 자체 만료(120분)로 보조 가드.
+- last_login_method 는 localStorage 유지(다음 로그인 가이드).
+
+### ✅ 검증
+
+- `vite build`: 15.34s OK.
+- 회귀 면 — 17개 인터셉터 sessionStorage.getItem 호출 정상.
+
+### 🚨 안전성 영향
+
+- 공유 PC 시 토큰 누설 위험 증가 → JWT 120분 만료 보조. 향후 idle 자동 logout(30분 무활동) 검토 가능.
+- XSS 노출 면은 sessionStorage 와 동일(JS 접근 가능). react-markdown raw HTML 차단 등 기존 방어 유효.
