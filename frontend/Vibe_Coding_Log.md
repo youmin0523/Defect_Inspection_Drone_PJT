@@ -2726,3 +2726,28 @@ S500 / Cinelog35 외곽 비 ≈ 2.55배. BuildingMesh 10m 가로의 1/55(Cinelog
 - 마크다운 raw HTML 비허용(XSS).
 - 비 /employee/* + 비 로그인 시 FAB·패널 비노출 — 랜딩에서 챗봇 노출 X.
 - API 호출 토큰 + X-Organization-Id 자동, 백엔드 user_id+org_id 이중 검증.
+
+
+---
+
+## 🎯 R-v1.1.02 — 어시스턴트 답변 클립보드 복사 UX (2026-05-15 오후)
+
+> 사용자 요청: "ChatBot 의 대화 답변을 클립보드로 복사할 수 있게 해줄 수 있을까? 내가 드래그해서 복사하는게 아닌 다른 UX적인 방법으로 복사될 수 있도록".
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R-v1.1.02.1 | 2026-05-15 오후 | **assistant bubble 우상단 복사 버튼** — ChatGPT 스타일. 데스크톱 hover 시 fade-in / 모바일·터치는 항상 노출. `navigator.clipboard.writeText` + 구형 fallback(textarea+execCommand). 성공 시 1.5s 동안 Copy → Check 아이콘 + emerald 색 피드백. 스트리밍 중·빈 응답은 버튼 숨김. user bubble 은 복사 X. lucide `Copy`/`Check` 아이콘 신규 사용. | src/components/chatbot/ChatbotMessageBubble.jsx |
+
+### 📐 설계 결정
+
+- **위치 우상단 absolute**: bubble 안 텍스트와 안 겹치고 ChatGPT/Claude 패턴에 익숙한 UX.
+- **데스크톱 hover-only / 모바일 always**: hover 없는 터치 환경 가독성 보장 위해 `md:opacity-0 md:group-hover:opacity-100` 분기.
+- **fallback**: `navigator.clipboard` 미지원 환경(HTTP/구형) 에서도 동작하도록 hidden textarea + `execCommand('copy')`. 운영은 HTTPS 라 정상 경로 사용.
+- **실패 무시**: 권한 거부 등 에러는 UI 잡음 없이 silent — 드래그 복사로 우회 가능.
+- **체크 1.5s 후 원복**: 사용자가 여러 응답을 빠르게 복사할 때 자연스러운 토글.
+
+### ✅ 검증
+
+- `vite build`: 14.99s OK.
