@@ -2677,3 +2677,32 @@ R30 + R31 결합 효과: 사용자가 하자 카드 클릭 시 **(1) 항상 정�
 - **API 키 미노출**: OPENAI_API_KEY 는 backend settings 전용. 응답 스키마/로그에 포함 X.
 - **남용 가드**: 입력 4000자 / 출력 1200 토큰 / 분당 20 메시지/사용자 / Rate Limit Path 한도 이중.
 - **상업 수준 도메인 톤**: "추측 금지", "B 영역 단열·방수 엄격 평가", "안전 직결", "DIY 수준 X" — 사용자 메모리 규칙(`feedback_strict_all_defects`, `feedback_insulation_strict`, `project_commercial_grade_target`) 가이드를 시스템 프롬프트에 영구 주입.
+
+
+---
+
+## 🎯 R-v1.1.03 — 챗봇 회피 응답 제거 + Web Search 활성화 + 자동 제목 (2026-05-15 오후)
+
+> 사용자 피드백: "'확정된 정보 없음' / 'KS 표준 참조하세요' 책임 전가 답변 X. ChatGPT/Gemini 처럼 검색으로라도 답을 줘." + "도메인 무관 질문에는 WebSearch 불필요." + "대화방 '제목 없음' 으로만 뜨면 못 찾는다, 요약 등으로 표현되면 좋겠다."
+
+### 🛠 변경 (분리 repo R-v1.1.03 와 동일)
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .03.1 | 2026-05-15 오후 | **SYSTEM_PROMPT 톤 완화** — 회피·책임 전가 응답 명시적 금지. 도메인 지식 + 일반 건축 상식 + 업계 관행값 적극 동원해 구체·실행 가능 답변. 출처 인용 시 표준명(KCS 41 40 04 등) 본문에 녹임. 카탈로그 외 하자(누전·곰팡이 등)도 정상 답변. 1951→3044자. | backend/app/services/openai_chat.py |
+| .03.2 | 2026-05-15 오후 | **Scope guard** — 도메인 무관 질문(요리·연예·잡담)에는 web search 호출 X, 짧게 안내 후 도메인 예시 제안. | backend/app/services/openai_chat.py |
+| .03.3 | 2026-05-15 오후 | **Web Search 활성화** — astream() model 명 substring "search" 검사로 자동 분기: temperature 제거, `web_search_options={"search_context_size":"medium"}` 추가. .env `OPENAI_MODEL=gpt-4o-mini-search-preview`. Fly secrets 갱신 후 두 머신 rolling 재시작. | backend/app/services/openai_chat.py, backend/.env, Fly secrets |
+| .03.4 | 2026-05-15 오후 | **자동 제목 2단계** — (1) 첫 user 메시지 INSERT 직전 30자 prefix 즉시 부여. (2) 응답 완료 후 BackgroundTask 로 `regenerate_thread_title()` 호출 — `OPENAI_SUMMARY_MODEL` 비검색 mini 로 7단어 이내 짧은 제목 생성. 사용자 PATCH 한 제목은 임시 prefix 패턴 일치 시에만 갱신. `_is_first_user_message()` 헬퍼 추가. astream 시그니처에 `background_tasks` 매개변수 추가. router 에서 전달. | backend/app/services/openai_chat.py, backend/app/api/ai_chat.py |
+
+### 📐 설계 결정 / 자가검토
+
+- search 모델 vs 일반 모델 토글: model 명 substring 검사 한 줄 — 운영자가 .env 만 갈아끼우면 즉시 전환.
+- scope guard 는 프롬프트 레벨에서 — 모델이 검색 자체를 스킵해 비용 증가 가드.
+- 자동 제목 1단계 prefix 즉시 + 2단계 LLM BackgroundTask: 사용자 체감 지연 X, 1~2초 후 의미있는 제목으로 갱신.
+- 사용자 명시 PATCH 제목 보호.
+
+### 🚨 비용·운영 영향
+
+- gpt-4o-mini-search-preview 는 일반 mini 대비 호출당 약 5~10배 비용.
+- scope guard 가 무관 질문 검색 차단으로 비용 폭증 가드.
+- 운영 머신 rolling 재시작 1회로 새 모델 즉시 적용 완료.

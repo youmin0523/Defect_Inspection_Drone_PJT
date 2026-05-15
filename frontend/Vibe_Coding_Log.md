@@ -2751,3 +2751,22 @@ S500 / Cinelog35 외곽 비 ≈ 2.55배. BuildingMesh 10m 가로의 1/55(Cinelog
 ### ✅ 검증
 
 - `vite build`: 14.99s OK.
+
+
+---
+
+## 🎯 R-v1.1.03 — ThreadList 자동 제목 반영 + FAB 세로 스택 (2026-05-15 오후)
+
+> 사용자 피드백: "대화창 '제목 없음' 으로만 뜨면 무슨 대화였는지 못 찾는다." (백엔드 R-v1.1.03 와 짝)
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .03.f1 | 2026-05-15 오후 | **ThreadList fallback** — `t.title?.trim() || '새로운 대화'`. 백엔드가 첫 user 메시지 prefix 30자를 자동 제목으로 채워 fallback 자체가 거의 안 보임. | src/components/chatbot/ThreadList.jsx |
+| .03.f2 | 2026-05-15 오후 | **aiChatStore onDone fetchThreads** — 백엔드 BackgroundTask 가 LLM 7단어 제목 갱신하는 데 1~2초 걸림. setTimeout 2.5s 후 fetchThreads → sidebar 자동 갱신. | src/store/aiChatStore.js |
+| .03.f3 | 2026-05-15 오후 | **FAB 세로 스택** — 메신저 FAB(`bottom-6 right-6`) 와 가로 충돌 회피 위해 `bottom-24 right-6` 으로 세로 스택. (사용자 직접 수정) | src/components/chatbot/FloatingChatbotButton.jsx |
+
+### ✅ 검증
+
+- `vite build`: 14.19s OK.
