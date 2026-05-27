@@ -33,6 +33,7 @@ import FloatingChatButton from './components/chat/FloatingChatButton.jsx'
 import ChatRealtimeListener from './components/chat/ChatRealtimeListener.jsx'
 import GlobalFloatingChatbot from './components/chatbot/GlobalFloatingChatbot.jsx'
 import PerfTimerWidget from './components/dev/PerfTimerWidget.jsx'
+import SentryErrorBoundary from './components/common/SentryErrorBoundary.jsx'
 import useChatStore from './store/chatStore.js'
 
 /** employee 경로에서만 Floating Chat Button 표시 */
@@ -126,13 +127,14 @@ function DashboardLayout() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <DocumentTitleBadge />
-      <ChatRealtimeListener />
-      <GlobalFloatingChat />
-      <GlobalFloatingChatbot />
-      <PerfTimerWidget />
-      <Routes>
+    <SentryErrorBoundary>
+      <BrowserRouter>
+        <DocumentTitleBadge />
+        <ChatRealtimeListener />
+        <GlobalFloatingChat />
+        <GlobalFloatingChatbot />
+        <PerfTimerWidget />
+        <Routes>
         {/* 공개 라우트 */}
         <Route path="/" element={<Landing />} />
         <Route path="/sample-report" element={<SampleReport />} />
@@ -155,7 +157,8 @@ export default function App() {
         <Route path="/employee/analytics" element={<OrgRequired><Analytics /></OrgRequired>} />
         <Route path="/employee/chat" element={<OrgRequired><Chat /></OrgRequired>} />
         <Route path="/employee/admin/members" element={<OrgRequired adminOnly><AdminMembers /></OrgRequired>} />
-        <Route path="/employee/admin/gpu" element={<OrgRequired><AdminGpu /></OrgRequired>} />
+        {/* GPU 제어는 비용 직결 — 일반 member 진입 차단(owner/admin/superadmin 만). */}
+        <Route path="/employee/admin/gpu" element={<OrgRequired adminOnly><AdminGpu /></OrgRequired>} />
 
         {/* //* [Modified Code] 세션 워크플로우 (Setup → Level → Modeling) */}
         <Route path="/session" element={<SessionLayout />}>
@@ -170,7 +173,8 @@ export default function App() {
             <Route path="report" element={<ReportModal />} />
           </Route>
         </Route>
-      </Routes>
-    </BrowserRouter>
+        </Routes>
+      </BrowserRouter>
+    </SentryErrorBoundary>
   )
 }

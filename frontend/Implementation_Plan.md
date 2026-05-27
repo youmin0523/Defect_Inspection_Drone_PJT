@@ -128,22 +128,46 @@
 
 ## Revision History
 
+### v6.4_260527 (작성자: @youminsu0523 / branch: MS)
+- **(frontend R-v1.1.09) 하자 인라인 검수 UI + 실시간 검수 broadcast 통합** — backend R-v1.1.x 신규 `PATCH /defects/{id}/review` + `GET /defects/{id}/audit-trail` + WS `defect.reviewed` 와 짝.
+  - `src/api/defectsApi.js` 전용 axios 인스턴스(Bearer + X-Organization-Id 자동 헤더) 일원화. `reviewDefect(id, {review_status, review_note})` / `getDefectAuditTrail(id, {limit, offset})` 신규. rejected/flagged_false_positive 는 호출 측 review_note 가드.
+  - `src/store/defectStore.js` — `applyReviewedDefect(reviewed)` idempotent 머지(id 매칭 후 review_status/reviewed_at/reviewed_by_user_id/review_note + verified 동기화), `lastManualSelectAt` (수동 selectDefect 시 ms 갱신), `addDefect` 가 30초 TTL 보호로 자동 selectedDefect 갱신(영상↔하자 동기), `getReviewStatusCounts()` selector.
+  - `src/hooks/useWebSocket.js` — `defect.reviewed` 메시지 핸들러 추가. REST PATCH 응답과 WS broadcast 양쪽 다 같은 머지 함수.
+  - 신규 `src/components/defects/DefectReviewActions.jsx` — pending 카드 [확인 / 반려 / 오탐] 3버튼(모바일 min-h 36px). 반려/오탐은 textarea 모달(autofocus, ESC, NOTE_MAX=2000). 검수 완료 카드는 검수자명+시각 + "재검수"(pending 회귀). 인라인 빨간 에러 배너(3초 자동 소실, 토스트 lib 미도입 정책 유지).
+  - `src/components/defects/DefectCard.jsx` — review_status border(approved=emerald, rejected=rose, flagged=amber, fallback=severity), `detection_model_id` 칩(M1_YOLO/M4_CONTEXT 매핑 + tooltip), GPS 칩(lat/lon 4자리 + N/S/E/W). 카드 자체를 `<button>` → `role="button"` div 로 전환하여 액션 모달의 nested button 회피.
+  - `src/components/report/ReportEditor.jsx` — `toggleVerified` 가 `review_status` 동시 patch (verified ↔ approved 매핑 통일). 실시간 검수 PATCH 는 DefectReviewActions 가, ReportEditor 의 verified 는 리포트 편집 컨텍스트(로컬) 전용으로 역할 분리.
+- **설계 결정**:
+  - `verified ↔ review_status === 'approved'` 통일. rejected/flagged 는 ReportEditor 에 노출 안 함(편집은 "포함할 하자 큐레이션", 검수는 대시보드). downstream(PDF/Excel/AI 내레이션) 은 두 필드 어느 쪽 참조해도 일관.
+  - 자동 영상↔하자 동기: 단순 LRU 가 아닌 "수동 선택 30초 TTL" — 검수자가 사유 입력 중 새 detection 으로 selectedDefect 가 바뀌면 모달 외부 클릭과 동일한 흐름 차단 사고 방지.
+  - 토스트 라이브러리 미도입 유지(react-hot-toast/sonner 등). 인라인 에러 배너로 충분, 추가 dep 0.
+- **검증**: `cd c:/Users/Codelab/Desktop/PROJECT/AeroInspect_frontend && npm run build` 17.91s OK. 모바일 viewport 액션 min-h 36px 충족.
+
+### v6.3_260527 (작성자: @youminsu0523 / branch: MS)
+- **(frontend R-v1.1.07) Role 기반 UI 분기 + Admin 사이드바 진입 경로** —
+  - `authStore` selector 5종 (named export): `selectIsSuperadmin / selectIsOwner / selectIsAdmin / selectIsMember / selectUserRole`. 컴포넌트에서 `useAuthStore(selectIsAdmin)` 한 줄로 권한 분기. superadmin OR owner/admin 통합 판정.
+  - 신규 `src/components/common/RoleGuard.jsx` — `<RoleGuard allowed={[...]} fallback={...}>children</RoleGuard>`. allowed 에 owner/admin 명시 시 superadmin 자동 통과. fallback 없으면 null.
+  - **권한 분기 적용 페이지 4종**: `SiteManagement`(등록·편집·삭제 owner/admin 만), `ReportDetail`(발행 토글 owner/admin 만), `ReportsList`(삭제 owner/admin 만), `App.jsx`(AdminGpu 라우트 `adminOnly` 추가 — 비용 직결 GPU 제어 차단).
+  - **Sidebar admin 섹션 신설**: `/dashboard` 좌측 사이드바에 amber 톤 ShieldCheck 구분자 + admin NavLink 2종 ("조직원 관리"/"GPU 모니터"). `useAuthStore(selectIsAdmin)` 조건부 렌더.
+  - **EmployeeLanding 프로필 드롭다운**: "관리자 영역" 섹션 헤더 + 조직원 관리/GPU 모니터 2종 통일(기존엔 멤버 관리 1개). QuickActions GPU 카드도 admin 조건부로 이동.
+  - **이중 가드**: 라우트 가드(OrgRequired adminOnly)가 URL 직접 입력 차단, RoleGuard 가 페이지 내부 버튼 분기. 백엔드 API 권한 검증은 기존 그대로.
+  - 검증: `npm run build` 20.15s OK. member/owner/admin/superadmin 4 role 매트릭스 시나리오 검증.
+
+### v6.2_260527 (작성자: @youminsu0523 / branch: MS)
+- **(frontend R-v1.1.06) ReportEditor 모바일 카드 뷰 + 3D Canvas 터치 제스처** — 19컬럼 와이드 테이블이 모바일 320px 에서 사용 불가였던 이슈 해결.
+  - 신규 컴포넌트 `DefectEditCard.jsx`(+184) — 헤더(severity/code/type/area chip) · 본문 dl 그리드(신뢰도·열영상 최고·장소·공종·심각도·조치 메모) · 푸터(검증 토글 44px + 삭제 44px). DefectEditRow 와 동일 prop 계약.
+  - `ReportEditor.jsx` 분기 — `hidden md:block` 테이블 + `md:hidden` 카드 리스트. Tailwind CSS 단의 토글이라 데이터 sorting/filtering/verified 핸들러 변경 0, 같은 `defects` state 양방향 동기화.
+  - `BuildingScene.jsx` + `PreWork.jsx` — `<OrbitControls>` 에 `touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}` + `enableDamping(0.08)` 추가. three 0.170 기본 상수 사용.
+  - 검증: `npm run build` 22.64s OK, DevTools 1280×800 = 테이블만, 375×667 = 카드만 렌더 확인.
+
+### v6.1_260515 (작성자: @youminsu0523 / branch: MS)
+- **(frontend R-v1.1.05) 챗봇 기존 대화 클릭 시 검정화면 hotfix** — `ChatbotMessageThread.jsx` selector 에 모듈 상수 `EMPTY_MESSAGES` 적용, `aiChatStore.selectThread` 에서 캐시 미스 시 빈 배열 placeholder 를 먼저 set. useSyncExternalStore getSnapshot 무한 루프로 인한 패널 unmount 차단. ErrorBoundary 도입은 v1.2 검토.
+
 ### v6.0_260515 (작성자: @youminsu0523 / branch: MS)
-- **(frontend R-v1.1.01) OpenAI 챗봇 UI 통합**:
-  - 신규 `src/api/aiChatApi.js` — REST(threads/messages CRUD) + SSE 스트리밍(fetch+ReadableStream 라인 파서). `EventSource` 미사용(GET-only + 헤더 한계).
-  - 신규 `src/store/aiChatStore.js` (Zustand) — `isOpen/view/threads/messagesByThread/streaming(+draft+AbortController)`. 액션: toggle/open/close, fetch/create/select/rename/delete Thread, fetchMessages, sendMessage(낙관적 user 메시지 + onDone 에서 thread 끌어올림), stopStreaming.
-  - 신규 `src/components/chatbot/` 8개: `FloatingChatbotButton`(violet FAB right-24) / `ChatbotPanel`(우측 sliding drawer + ESC) / `ChatbotPanelHeader`(뒤로/새 대화/삭제/닫기) / `ThreadList`(빈 상태 추천 질문 4) / `ChatbotMessageThread`(자동 스크롤, 스트리밍 중 임시 bubble, 에러 배너) / `ChatbotMessageBubble`(react-markdown raw HTML 비허용) / `ChatbotInput`(Enter 전송, 4000자 가드, 중단 버튼) / `GlobalFloatingChatbot`(/employee/* + 토큰 보유 시).
-  - `App.jsx` — `<GlobalFloatingChatbot />` 마운트 (기존 메신저 FAB 옆).
-  - `package.json` — `react-markdown` ^9.0.1 추가.
-
-### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
-- **(frontend R24) test_mode 영상 60fps 아키텍처 — `<video>` + SVG 오버레이**:
-  - 신규: `DetectionOverlay.jsx` (SVG bbox, rAF 33ms 동기화) / `useTestActiveMedia.js` (`/test/active` 폴링) / `testDetectionsStore.js` (timestamp 타임라인).
-  - 변경: `LiveVideoFeed.jsx` 영상 분기로 `<video src=/test/upload/file/{name}>` early return + testPlayState ↔ video.play()/pause() 동기화. `useWebSocket.js` 의 `defect.new` 가 video timestamp 가 있으면 testDetectionsStore 에도 적재.
-  - 효과: backend MJPEG 재인코딩 병목 제거 + 브라우저 네이티브 디코드 → 원본 mp4 fps(30/60/120) 그대로. Vite 빌드 OK (4.84MB chunk, 13.12s).
-
-### v5.2_260512 (작성자: @youminsu0523 / branch: MS)
-- **(backend 동기화)** test_stream 추론 fire-and-forget + UI conf gate 강화로 LiveVideoFeed / DefectCard 체감 품질 회귀 차단. 프론트 코드 변경 없음. 영상 30fps yield가 추론 지연에 끌리지 않아 끊김 해소되고, DefectPanel 에 caulking/scratch/paint_stain 등 OOD 거짓 양성 카드가 더 이상 노출되지 않음.
+- **(frontend R-v1.1.01) OpenAI 챗봇 UI 통합** — 통합 repo 와 동일.
+  - 신규 `src/api/aiChatApi.js` — REST + SSE 스트리밍 (fetch+ReadableStream `data: {json}\n\n` 파서).
+  - 신규 `src/store/aiChatStore.js` — Zustand. `isOpen / view / threads / messagesByThread / streaming`. 낙관적 user 메시지 + onDone 에서 thread 끌어올림.
+  - 신규 `src/components/chatbot/` 8개 (FloatingChatbotButton / ChatbotPanel / Header / ThreadList / ChatbotMessageThread / ChatbotMessageBubble / ChatbotInput / GlobalFloatingChatbot). 우측 sliding drawer + violet FAB. react-markdown raw HTML 비허용.
+  - `App.jsx` 마운트 + `package.json` `react-markdown` ^9.0.1.
 
 ### v5.1_260506 (작성자: @youminsu0523 / branch: main)
 - **R19 (5/6)** Landing 탭 favicon 일원화 — 누락된 `/drone-icon.svg` 참조 제거 후 ico+PNG 다중 등록. PowerShell + System.Drawing 알파 row 스캔으로 로고 PNG의 graphic/text 자동 분리(graphic = rows 59–252, cols 235–441). 정사각 캔버스(239×239) 가운데 배치 + 양쪽 16px 패딩. ICO 직접 바이너리 작성(ICONDIR + ICONDIRENTRY × 3 + 16/32/48 PNG payload)으로 32bpp 알파 보존. 배포 환경 globe 기본 favicon 이슈 해소.

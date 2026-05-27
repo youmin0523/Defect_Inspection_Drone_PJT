@@ -232,33 +232,57 @@ core/stream_inference.py ──→ services/inference_pipeline.py
 - [x] tasks 8개 문서 팀명 `다마코더 → AeroInspect` 일괄 교체
 - [x] `CHANGES_2026-05-03.md` 신설 — 내일 Claude 웹 문서 변환용 산출물 목록 + 변환 프롬프트 템플릿 + DB 시드 결과 요약
 
+### Phase 22. Sentry 에러 모니터링 통합 (R-v1.1.06, 2026-05-27)
+- [x] requirements: `sentry-sdk[fastapi]>=2.0.0`
+- [x] `app/config.py`: SENTRY_DSN/ENVIRONMENT/TRACES_SAMPLE_RATE/PROFILES_SAMPLE_RATE
+- [x] `app/core/sentry.py` 신규: init_sentry() — FastAPI/Starlette/SQLAlchemy/Asyncio integration, before_send 민감 키 redact, structlog request_id 자동 첨부, send_default_pii=False
+- [x] `app/core/middleware.py`: RequestIDMiddleware 에 sentry_sdk.set_tag 전파 (silent skip)
+- [x] `app/main.py`: lifespan 시작 첫 단계 init_sentry 호출
+- [x] `.env.example`: 4 항목 + 운영 전용 주석
+- [x] README 운영 섹션: flyctl secrets set 가이드
+
+### Phase 23. ONNX 4-way 매핑 회귀 가드 (R-v1.1.07, 2026-05-27)
+- [x] `app/services/defect_taxonomy.py`: EXPECTED_CLASS_NAMES 상수 + validate_class_mapping() 헬퍼 + _infer_onnx_class_count + _read_yaml_class_names
+- [x] `tests/conftest.py` 신규: onnx_weights_dir/datasets_dir fixture, env override (ONNX_WEIGHTS_DIR/DATASETS_DIR), CI graceful skip
+- [x] `tests/test_onnx_class_mapping.py` 신규: 9 모델 parametrize (ONNX dim ↔ data.yaml ↔ 상수 ↔ inference 인자 AST 비교)
+- [x] `tests/README.md` 신규: 신규 ONNX 추가 시 본 테스트 필수 명시
+- [x] **검증 결과**: 11 passed / 0 failed / 0 skipped — 운영 ONNX 매핑 불일치 0건
+
+### Phase 24. 하자 검수 메타 + 감사 로그 인프라 (R-v1.1.08, 2026-05-27)
+- [x] `app/models/defect.py`: 컬럼 8개 추가 (review_status Enum, reviewed_by_user_id FK, reviewed_at, review_note, detection_model_id, gps_lat/lon/alt) + 인덱스 2개
+- [x] `app/models/audit_log.py` 신규: AuditLog ORM (user_id/org_id FK SET NULL, action doted-name, resource_type/id, before/after JSONB, ip/UA/request_id) + 인덱스 4종
+- [x] `app/services/audit_logger.py` 신규: write_audit() — 민감 키 재귀 redact, structlog request_id_ctx 자동 첨부, silent failure
+- [x] `app/schemas/defect.py`: DefectLogResponse 6 필드 + DefectReviewRequest 신규
+- [x] `app/schemas/audit_log.py` 신규: AuditLogResponse/ListResponse/Filter
+- [x] `app/api/defects.py`: PATCH /defects/{id}/review + GET /defects/{id}/audit-trail + DELETE 에 audit.delete 첨부
+- [x] `app/api/audit_logs.py` 신규: GET /audit-logs (admin/owner/superadmin, 조직 격리 + 5 필터 + 페이지네이션), GET /audit-logs/{id}
+- [x] `app/api/router.py`: /audit-logs 등록 (tags=Audit)
+- [x] alembic `n7b8c9d0e1f2_add_defect_review_and_audit_logs.py` (down=`m6a7b8c9d0e1`): defect_logs 8 컬럼 + audit_logs CREATE + FK 3 + 인덱스 6
+- [x] **검증**: py_compile PASS, 라우터 등록 검증 (defects 8 + audit 2 routes)
+
+### Phase 25. 운영 신뢰성 가이드 + PostgreSQL 백업 (R-v1.1.09, 2026-05-27)
+- [x] `DEPLOYMENT_GUIDE.md` 신규 (분리 repo 최초): 10 섹션 — Fly secrets / alembic / 백업·복구 RTO·RPO / 콜드스타트 / Sentry / 감사 로그 운영 / 롤백 / CI·CD / 보안 체크리스트 / 장애 시나리오
+- [x] `scripts/backup_pg.ps1` 신규: pg_dump -Fc + R2 업로드 + RETENTION_DAYS 자동 정리
+- [x] `fly.toml`: min_machines_running 가이드 주석 (0 vs 1 트레이드오프)
+- [ ] **운영자 후속 결정**: min_machines_running 0→1 변경 (비용 vs 가용성), 백업 cron 등록, Sentry DSN 발급 + flyctl secrets set
+
 ---
 
 ## Revision History
 
+### v6.5_260527 (작성자: @youminsu0523 / branch: MS)
+- **Phase 22~25 신설** — Sentry 통합(R-v1.1.06) / ONNX 4-way 매핑 회귀 가드(R-v1.1.07) / 하자 검수 메타 + 감사 로그 인프라(R-v1.1.08) / 운영 신뢰성 가이드 + PostgreSQL 백업(R-v1.1.09).
+- 19 모델 → **21 모델** (AuditLog + DefectLog 컬럼 확장) , 12 alembic 리비전 → **13 리비전** (n7b8c9d0e1f2), 63+ 엔드포인트 → **66+** (audit-logs 2 + defects review/audit-trail 2). 운영 관점 "프로토타입 → 초기 운영" 전환 — 감사 추적 + 에러 모니터링 + 회귀 가드 + 백업·복구 인프라 동시 정착.
+
+### v6.1_260515 (작성자: @youminsu0523 / branch: MS)
+- **Phase 24 보강 — 챗봇 자동 제목 흐름 요약 (R-v1.1.05)** — `openai_chat.py` 의 임시 prefix 제목 부여 코드 제거(astream 의 첫 user 메시지 분기), BackgroundTask 호출 조건을 `user_count_before < 3` 으로 확장하여 1·2·3번째 응답마다 LLM 흐름 요약 제목 재생성. `regenerate_thread_title(thread_id)` 단일 인자로 단순화 — 내부에서 최근 10건 DB 조회 후 LLM 입력 구성. 프롬프트는 한국어 명사형 5~7단어, 하자 코드/현장명 키워드 포함, 단순 인사 시 일반 시작 제목 부여. `_is_first_user_message` → `_count_user_messages` 일반화. 마이그레이션 없음.
+
 ### v6.0_260515 (작성자: @youminsu0523 / branch: MS)
-- **Phase 24 신설 — OpenAI 챗봇 백엔드 통합 (R-v1.1.01, v1.1 사이클)**:
-  - **DB 모델 2**: `AiChatThread`(user_id+organization_id 격리, summary watermark, soft delete) / `AiChatMessage`(role enum user/assistant/system, tokens, JSONB meta). 인덱스: `(user_id, last_message_at DESC)`, `(thread_id, created_at ASC)`.
-  - **마이그레이션** `m6a7b8c9d0e1` — FK 사이클(threads↔messages) 회피를 위해 threads 먼저(summary_until_message_id FK 보류) → messages → ALTER threads ADD FK 순. down_revision 통합=`j3d4e5f6a7b8` / 분리=`k4e5f6a7b8c9`.
-  - **서비스** `app/services/openai_chat.py`: SYSTEM_PROMPT 정적 빌드(`DEFECT_CATALOG` 20종 마크다운 표 + "B 영역 더 엄격" + "안전 직결" + "추측 금지" + 인젝션 거절). `astream()` 으로 SSE 청크 yield, `chat.completions.create(stream=True, stream_options={"include_usage":True})`. `_retrieve_user_data_context()` 정규식 카테고리 코드 + 사이트 키워드 → `DefectLog`+`Site` JOIN(organization_id 필수). `maybe_schedule_summarization()` + `run_summarization()` — 30턴 초과 시 BackgroundTasks 비동기, 기존 summary 와 머지.
-  - **API 라우터** `app/api/ai_chat.py` (6 엔드포인트): GET/POST/PATCH/DELETE `/threads`, GET `/threads/{id}/messages`, POST `/threads/{id}/messages` (StreamingResponse media_type=`text/event-stream`). 모두 `get_current_org_member` 의존성. `_load_thread_or_404` 가 `user_id + org_id` 이중 검증. 사용자별 메시지 전송 분당 20회 라우터 내부 카운터.
-  - **설정·라우터·rate_limit**: settings 4(OPENAI_API_KEY/MODEL=`gpt-4o-mini`/MAX_OUTPUT_TOKENS=1200/SUMMARY_MODEL), requirements `openai>=1.40.0`, router.py `/ai-chat` include, rate_limit.py `/api/v1/ai-chat`:120/min.
-  - **보안**: 시스템 프롬프트/RAG 별도 system role 분리, 사용자 입력 system 격상 X, OPENAI_API_KEY 응답/스키마/로그 미노출, 클라이언트 끊김 시 부분 응답 영속화(`request.is_disconnected()` + finally).
-
-### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
-- **Phase 23 신설 — test_mode 영상 60fps 아키텍처 (R28, v1.1 사이클)**:
-  - **결정**: MJPEG 재인코딩 폐기. 원본 mp4 를 HTTP Range 로 직접 서빙, 프론트가 `<video>` 로 네이티브 디코드. backend는 background inference만.
-  - 신규 endpoint 2종: `/test/upload/file/{name}` (Range 206) + `/test/active` (메타).
-  - test_stream.py: `_video_inference_loop` task — 매 0.33s 1회 추론, `video_timestamp_sec` 첨부 WS broadcast. `_stream_video_frames` 삭제. `_broadcast_detection` payload에 `video_timestamp_sec / frame_w / frame_h` 조건부 필드.
-  - tier 파라미터 도입 — 영상 경로 tier=2(M4 thermal/M6 PatchCore 제외 — RGB 영상에 무의미). 이미지 경로 tier=3 유지.
-  - 보안: traversal 차단(`realpath + commonpath`), 416 응답, mime 매핑.
-  - 효과: Fly 1 vCPU 결정적 병목(프레임 재인코딩) 제거. 로컬 60fps mp4 가능, Fly 30fps 안정 목표.
-
-### v5.2_260512 (작성자: @youminsu0523 / branch: MS)
-- **Phase 22 신설 — Test Stream 안정화 (R27, v1.1 사이클)**:
-  - `_stream_video_frames` 의 인-루프 `await self._detect(...)` 차단 제거. 추론을 background asyncio task로 fire-and-forget 발사하고, yield 루프는 `_pending_video_detection` 슬롯에서 가장 최근 결과만 1회 소비. 추론 주기 7→10프레임 완화. 30fps yield가 추론 지연(500ms~수초)에 끌려가지 않음.
-  - `_ui_conf_gate` 클래스별 게이트 강화: 신규 `_UI_CONF_GATE_OOD_FRAGILE=0.75` 라인 추가 + 키워드 매칭 8종(caulking/코킹/scratch/찍힘/스크래치/paint_stain/도색/surface_defect/표면 결함/baseboard/걸레받이/pollution/오염). RGB 가시광 색·패턴 의존 클래스가 test_mode OOD 입력(SNS 밈 영상)에서 52~64% 신뢰도로 거짓 양성 카드를 띄우던 회귀 차단. 단열 0.30 / 기본 0.50은 유지.
-  - 학습 자체는 v1.1 후속 사이클(드론 자율비행 페이즈)로 분리 — UI 노출 게이트로 Precision 우선 확보.
+- **Phase 24 신설 — OpenAI 챗봇 백엔드 통합 (R-v1.1.01)** — 통합 repo 와 동일. 분리 repo head 가 `k4e5f6a7b8c9` 이므로 마이그레이션 `m6a7b8c9d0e1` down_revision 만 `k4e5f6a7b8c9` 로 분기.
+  - DB 모델 2: AiChatThread / AiChatMessage. 멀티테넌트 user_id + organization_id 이중 격리. summary watermark 로 컨텍스트 압축.
+  - 서비스 `OpenAIChatService` — SYSTEM_PROMPT(DEFECT_CATALOG 20종 표 + B영역 엄격 + 안전 직결 + 추측 금지 + 인젝션 거절). SSE 스트리밍. light-RAG(정규식 카테고리 코드 + 사이트 키워드, organization_id 필터). 30턴 초과 시 BackgroundTasks 자동 요약.
+  - API `/api/v1/ai-chat` 6엔드포인트. `get_current_org_member` 의존성 + thread.user_id·org_id 이중 검증 + 사용자별 분당 20 메시지 라우터 내부 카운터.
+  - settings 4(OPENAI_API_KEY/MODEL/MAX_OUTPUT_TOKENS/SUMMARY_MODEL), requirements `openai>=1.40.0`, rate_limit `/api/v1/ai-chat`:120/min.
 
 ### v5.1_260503 (작성자: @youminsu0523 / branch: MS)
 - Phase 20 추가 완료(alembic 분기 head 병합 `89b53c16de85` + 누락 컬럼 10건 ALTER 보정 + seed_demo_data 실 적용 sites=8/defects=315/reports=12/schedules=3) + Phase 21 신설(tasks 문서 양식 정정 — 부록 → 인라인, 파일 rename, 팀명 일괄, 가이드 3종 문서이력 위치, CHANGES md 신설)

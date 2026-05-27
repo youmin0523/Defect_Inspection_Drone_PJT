@@ -13,6 +13,7 @@ import {
   Plus, Sparkles, MapPin, ListFilter, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import DefectEditRow from './DefectEditRow.jsx'
+import DefectEditCard from './DefectEditCard.jsx'
 import LocationMapEditor from './LocationMapEditor.jsx'
 import AddDefectDialog from './AddDefectDialog.jsx'
 import TemplateExportButton from './TemplateExportButton.jsx'
@@ -77,10 +78,25 @@ export default function ReportEditor({ report, onChange, variant = 'page' }) {
     onChange?.({ defects: defects.filter((d) => d.id !== id) })
   }
 
+  /**
+   * verified 토글 — //* [Modified Code v3] (2026-05-27) R-v1.1.x 통합:
+   *   ReportEditor 의 verified 와 백엔드의 review_status 가 의미상 중복이므로 매핑을 통일한다.
+   *     verified=true  ↔ review_status='approved'
+   *     verified=false ↔ review_status='pending'  (반려/오탐은 카드 인라인 액션에서만 설정)
+   *   ReportEditor 는 리포트 편집 컨텍스트(로컬 state)이므로 백엔드 PATCH 는 호출하지 않는다.
+   *   (실시간 검수 PATCH 는 DefectCard 의 DefectReviewActions 가 담당.)
+   *   downstream(PDF/Excel export, AI 내레이션 prompt) 은 두 필드 중 어느 쪽을 참조해도 일관되도록 둘 다 set.
+   */
   const toggleVerified = (id) => {
-    const next = defects.map((d) =>
-      d.id === id ? { ...d, verified: !d.verified } : d
-    )
+    const next = defects.map((d) => {
+      if (d.id !== id) return d
+      const nextVerified = !d.verified
+      return {
+        ...d,
+        verified: nextVerified,
+        review_status: nextVerified ? 'approved' : 'pending',
+      }
+    })
     onChange?.({ defects: next })
   }
 
@@ -213,34 +229,52 @@ export default function ReportEditor({ report, onChange, variant = 'page' }) {
                 </button>
 
                 {!isCollapsed && (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
-                        <tr>
-                          <th className="px-2 py-2 text-left">이미지</th>
-                          <th className="px-2 py-2 text-left">하자 · 영역</th>
-                          <th className="px-2 py-2 text-left">공종</th>
-                          <th className="px-2 py-2 text-left">장소</th>
-                          <th className="px-2 py-2 text-left">심각도</th>
-                          <th className="px-2 py-2 text-left">조치 메모</th>
-                          <th className="px-2 py-2 text-left">검증·삭제</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {list.map((d) => (
-                          <DefectEditRow
-                            key={d.id}
-                            defect={d}
-                            aiSuggestedTrade={aiSuggestions[d.id]}
-                            presetsListId={DATALIST_ID}
-                            onChange={patchDefect}
-                            onRemove={removeDefect}
-                            onToggleVerified={toggleVerified}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <>
+                    {/* //* [Modified Code v3] (2026-05-27) 데스크탑 테이블 — md(≥768px)에서만 노출 */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+                          <tr>
+                            <th className="px-2 py-2 text-left">이미지</th>
+                            <th className="px-2 py-2 text-left">하자 · 영역</th>
+                            <th className="px-2 py-2 text-left">공종</th>
+                            <th className="px-2 py-2 text-left">장소</th>
+                            <th className="px-2 py-2 text-left">심각도</th>
+                            <th className="px-2 py-2 text-left">조치 메모</th>
+                            <th className="px-2 py-2 text-left">검증·삭제</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {list.map((d) => (
+                            <DefectEditRow
+                              key={d.id}
+                              defect={d}
+                              aiSuggestedTrade={aiSuggestions[d.id]}
+                              presetsListId={DATALIST_ID}
+                              onChange={patchDefect}
+                              onRemove={removeDefect}
+                              onToggleVerified={toggleVerified}
+                            />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* //* [Modified Code v3] (2026-05-27) 모바일 카드 뷰 — md 미만에서만 노출 */}
+                    <div className="md:hidden flex flex-col gap-3 p-3 bg-gray-50/60">
+                      {list.map((d) => (
+                        <DefectEditCard
+                          key={d.id}
+                          defect={d}
+                          aiSuggestedTrade={aiSuggestions[d.id]}
+                          presetsListId={DATALIST_ID}
+                          onChange={patchDefect}
+                          onRemove={removeDefect}
+                          onToggleVerified={toggleVerified}
+                        />
+                      ))}
+                    </div>
+                  </>
                 )}
               </section>
             )

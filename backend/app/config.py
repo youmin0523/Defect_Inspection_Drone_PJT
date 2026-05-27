@@ -11,7 +11,7 @@ from pydantic import field_validator, model_validator
 import json
 import os
 import warnings
-from typing import List
+from typing import List, Optional
 
 
 # 운영(prod) 환경 판정에 사용되는 환경변수.
@@ -65,24 +65,10 @@ class Settings(BaseSettings):
     # ── Camera ───────────────────────────────
     RGB_CAMERA_INDEX: int = 0
     THERMAL_CAMERA_INDEX: int = 1
-    # 빈 문자열이 아니면 RTSP URL 사용 (Pi → 백엔드 송출). 우선순위: RTSP > USB index.
-    THERMAL_RTSP_URL: str = ""
-    RGB_RTSP_URL: str = ""
 
     # ── LiDAR ────────────────────────────────
     LIDAR_SERIAL_PORT: str = "COM3"
     LIDAR_BAUD_RATE: int = 115200
-
-    # ── 자율비행 (Indoor Autonomous Inspection v1.1) ──
-    # Skydroid FUAV 5.8G OTG 동글의 캡처 디바이스 식별자.
-    # 정수면 cv2.VideoCapture index, 문자열이면 RTSP/file URI.
-    SLAM_CAPTURE_DEVICE: str = "0"
-    # Pi reverse-WS attach 시 검증 토큰 (mission/fc-bridge 엔드포인트)
-    AEROINSPECT_PI_TOKEN: str = ""
-    # Visual-Inertial SLAM 백엔드 선택 (orbslam3 | rtabmap | dummy)
-    SLAM_BACKEND: str = "dummy"
-    # SLAM 출력 점군 디렉터리 (PLY/PCD blob 저장 위치)
-    SLAM_POINTCLOUD_DIR: str = "./data/pointclouds"
 
     # ── AI Model (3-모델 파이프라인) ──────────
     # 가중치 디렉토리 + 개별 파일명 분리 → 배포 환경별로 경로만 바꾸면 됨
@@ -250,6 +236,16 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = "noreply@droneinspect.com"
     SMTP_FROM_NAME: str = "DRONE INSPECT"
+
+    # ── Sentry (운영 에러 모니터링) ────────────
+    # SENTRY_DSN 이 비어 있으면 init_sentry 가 no-op → 로컬 개발 영향 0.
+    # APP_ENV=production 이고 DSN 이 비어 있으면 startup 시 경고 로그만 (기동 차단 X).
+    # TRACES_SAMPLE_RATE: 트랜잭션 성능 추적 샘플링 비율 (0.0~1.0). 운영 비용 가드용 0.1 기본.
+    # PROFILES_SAMPLE_RATE: 프로파일링은 비용 큼 → 기본 비활성(0.0). 필요 시 0.05~0.1.
+    SENTRY_DSN: Optional[str] = None
+    SENTRY_ENVIRONMENT: str = "development"
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+    SENTRY_PROFILES_SAMPLE_RATE: float = 0.0
 
     # ── CORS ─────────────────────────────────
     CORS_ORIGINS: List[str] = [

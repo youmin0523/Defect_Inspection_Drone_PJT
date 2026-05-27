@@ -200,41 +200,52 @@
 
 ## Revision History
 
+### v6.5_260527 (작성자: @youminsu0523 / branch: MS)
+- **(backend R-v1.1.09) 운영 신뢰성 가이드 + PostgreSQL 백업 스크립트 + 콜드스타트 옵션** — Track D-3 (`DEPLOYMENT_GUIDE.md` 신규 — 시크릿 등록/마이그레이션/백업·복구 RTO·RPO/콜드스타트 트레이드오프/Sentry 통합/감사 로그 운영/롤백/CI·CD/보안 체크리스트/장애 시나리오 10 섹션, `scripts/backup_pg.ps1` 신규 — pg_dump custom format + R2 업로드 + RETENTION_DAYS 정책, `fly.toml` 의 `min_machines_running` 에 상업 운영 권장값 가이드 주석).
+
+### v6.4_260527 (작성자: @youminsu0523 / branch: MS)
+- **(backend R-v1.1.08) 하자 검수 메타 + 감사 로그 인프라** — Track B+C backend (상업 도메인 책임 추적 기반).
+  - `app/models/defect.py` 컬럼 추가: `review_status` (Enum pending/approved/rejected/flagged_false_positive, server_default=pending), `reviewed_by_user_id` (FK users.id SET NULL), `reviewed_at`, `review_note`, `detection_model_id`, `gps_lat/lon/alt`. 인덱스 2개 추가 (`idx_defect_review_status`, `idx_defect_reviewer`).
+  - `app/models/audit_log.py` 신규: AuditLog (user_id/organization_id/action 점구분 doted-name/resource_type/resource_id/before·after JSONB/ip/user_agent/request_id/note/created_at). 인덱스 4종 (org/user/resource/action × created_at DESC).
+  - `app/services/audit_logger.py` 신규: `write_audit()` 헬퍼 — 민감 키(password/token/secret/api_key/authorization/cookie/session/private_key/client_secret 등) 재귀 redact. structlog `request_id_ctx` 자동 첨부. 실패 silent (감사 로그가 메인 트랜잭션 막지 않음).
+  - `app/schemas/defect.py`: DefectLogResponse 에 6개 신규 필드 + `DefectReviewRequest` 신규 (rejected/flagged_false_positive 는 review_note 필수).
+  - `app/schemas/audit_log.py` 신규: AuditLogResponse/AuditLogListResponse/AuditLogFilter.
+  - `app/api/defects.py`: `PATCH /defects/{id}/review` 신규 — 조직 격리 + audit_logger 자동 호출 + WS "defect.reviewed" broadcast. `GET /defects/{id}/audit-trail` 신규 — 단일 하자 감사 이력. DELETE 에 `write_audit("defect.delete", before=snapshot)` 추가.
+  - `app/api/audit_logs.py` 신규: `GET /audit-logs` (admin/owner/superadmin, 조직 격리 + action prefix/resource/user/시각 필터 + 페이지네이션), `GET /audit-logs/{id}` (단건).
+  - `app/api/router.py`: audit_logs 라우터 등록 (`/audit-logs`, tags=Audit).
+  - `alembic/versions/n7b8c9d0e1f2_add_defect_review_and_audit_logs.py` 신규: down=`m6a7b8c9d0e1`. defect_logs 8 컬럼 추가 + audit_logs 테이블 + FK + 인덱스 6종.
+  - 검증: `python -m py_compile` OK, route 등록 검증 PASS (defects 8 + audit 2).
+
+### v6.3_260527 (작성자: @youminsu0523 / branch: MS)
+- **(backend R-v1.1.07) ONNX 4-way 매핑 회귀 가드** — Track D-2 — 5/7 거짓 라벨 사고 재발 방지.
+  - `tests/test_onnx_class_mapping.py` 신규: 9개 모델 parametrize (M1/M2/M3 YOLO + M4_CONTEXT + M5_SEG + furniture_aware + M1/M2/M3 ResNet). ONNX 출력 dim ↔ data.yaml `names` ↔ `EXPECTED_CLASS_NAMES` ↔ `inference_pipeline_20.py` AST 정적 비교까지 4-way 검증.
+  - `tests/conftest.py` 신규: `onnx_weights_dir` / `datasets_dir` fixture. ONNX_WEIGHTS_DIR / DATASETS_DIR 환경변수 override 지원.
+  - `app/services/defect_taxonomy.py`: `EXPECTED_CLASS_NAMES` 상수 + `validate_class_mapping(model_name, onnx_path, yaml_path)` 헬퍼 + `_infer_onnx_class_count` / `_read_yaml_class_names` 내부 함수.
+  - `tests/README.md` 신규: "신규 ONNX 추가 시 본 테스트 실행 필수" 명시.
+  - 검증: `pytest tests/test_onnx_class_mapping.py -v` → **11 passed, 0 failed, 0 skipped**. 매핑 불일치 0건 — 운영 ONNX 정합성 확인.
+
+### v6.2_260527 (작성자: @youminsu0523 / branch: MS)
+- **(backend R-v1.1.06) Sentry 에러 모니터링 통합** — 운영 중 미처리 예외/에러 알림·집계 경로 신설 (운영 갭 해소).
+  - `requirements.txt`: `sentry-sdk[fastapi]>=2.0.0` 추가.
+  - `app/config.py`: `SENTRY_DSN` (Optional), `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` (0.1), `SENTRY_PROFILES_SAMPLE_RATE` (0.0). DSN 미설정 + APP_ENV=production 시 경고 로그만 (기동 차단 X — 로컬 개발 영향 0).
+  - `app/core/sentry.py` (신규): `init_sentry(settings)` — FastAPI/Starlette/SQLAlchemy/Asyncio integration. `before_send` 훅에서 password/token/secret/authorization/api_key/cookie 등 민감 키 재귀 redact. structlog `request_id` contextvar 를 Sentry tag 로 승격. `send_default_pii=False`. release 자동 탐지 (SENTRY_RELEASE / FLY_RELEASE_VERSION / GIT_SHA).
+  - `app/core/middleware.py`: `RequestIDMiddleware` 가 `sentry_sdk.set_tag("request_id", ...)` + `set_context("request_meta", ...)` 추가 호출. sentry-sdk 미설치 시 silent skip.
+  - `app/main.py`: lifespan 시작 첫 단계에서 `init_sentry(settings)` 호출 (이후 startup 오류도 캡처).
+  - `.env.example`: SENTRY_DSN / ENVIRONMENT / TRACES_SAMPLE_RATE / PROFILES_SAMPLE_RATE 4개 항목 + 운영 전용 주석.
+  - `README.md`: "운영 에러 모니터링 (Sentry)" 섹션 — DSN 발급 → `flyctl secrets set SENTRY_DSN=...` → 검증 절차.
+  - 사용자 직접 작업: Sentry 프로젝트(FastAPI) 생성 → DSN 발급 → Fly secrets 등록.
+
+### v6.1_260515 (작성자: @youminsu0523 / branch: MS)
+- **(backend R-v1.1.05) 챗봇 자동 제목 흐름 요약 강화** — 임시 prefix("안녕하세요" 같은 첫 메시지가 제목으로 굳음) 제거 + 첫 3턴 동안 매 응답 후 LLM 흐름 요약 제목 재생성. `regenerate_thread_title(thread_id)` 시그니처 단순화(내부에서 최근 10건 DB 조회). 프롬프트 강화(명사형 5~7단어, 하자 코드/현장명 키워드 포함, 단순 인사면 '신규 도메인 문의' 일반화). `_is_first_user_message` → `_count_user_messages` 일반화. 마이그레이션 없음(`title_locked` 컬럼은 v1.2 검토).
+
 ### v6.0_260515 (작성자: @youminsu0523 / branch: MS)
-- **(backend R-v1.1.01) OpenAI 챗봇(건축물·하자 도메인 어시스턴트) 통합**:
-  - 신규 ORM 2: `AiChatThread`(user_id+organization_id 격리, summary watermark, soft delete) / `AiChatMessage`(role enum user/assistant/system, tokens, JSONB meta).
-  - 신규 Pydantic 6: ThreadCreate/Update/Response/ListResponse, MessageCreate/Response/HistoryResponse. role=system 응답 제외(시스템 프롬프트 누설 차단).
-  - 신규 Alembic `m6a7b8c9d0e1`: FK 사이클(threads↔messages) 회피 위해 threads 먼저(summary_until_message_id FK 보류) → messages → ALTER threads ADD FK 순. down_revision 통합 repo=`j3d4e5f6a7b8` / 분리 repo=`k4e5f6a7b8c9`.
-  - 신규 서비스 `app/services/openai_chat.py`:
-    - 정적 `SYSTEM_PROMPT` — `DEFECT_CATALOG` 20종 마크다운 표 + "B 영역 더 엄격" + "안전 직결" + "추측 금지" + 인젝션 거절 가이드.
-    - `astream()` — OpenAI `chat.completions.create(stream=True, stream_options={"include_usage":True})`. 청크당 SSE `data: {"delta":"..."}` yield. `request.is_disconnected()` 폴링 + finally 부분 응답 보존.
-    - `_retrieve_user_data_context()` — 정규식 `\b([A-Ea-e])[\s\-]?(\d{2})\b` 카테고리 코드 + 사이트 키워드 추출 → DefectLog/Site JOIN(organization_id 필수) → 한국어 라인 포맷.
-    - `maybe_schedule_summarization()` + `run_summarization()` — 30턴 초과 시 BackgroundTasks 비동기. 기존 summary 와 머지.
-  - 신규 라우터 `app/api/ai_chat.py` (6 엔드포인트): GET/POST/PATCH/DELETE `/threads`, GET `/threads/{id}/messages`, POST `/threads/{id}/messages`(SSE). 모두 `get_current_org_member` 의존성. `_load_thread_or_404` 가 user_id+org_id 이중 검증. 사용자별 메시지 전송 분당 20회 라우터 내부 카운터.
-  - router.py include `/ai-chat` prefix, rate_limit.py `/api/v1/ai-chat` 분당 120 추가.
-  - settings: OPENAI_API_KEY / OPENAI_MODEL(default "gpt-4o-mini") / OPENAI_MAX_OUTPUT_TOKENS(1200) / OPENAI_SUMMARY_MODEL.
-  - requirements: `openai>=1.40.0`.
-
-### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
-- **(backend R28) test_mode 영상 60fps 아키텍처 전환 — MJPEG 재인코딩 폐기**:
-  - 본질 분석: 1 vCPU Fly 머신에서 MJPEG = 매 프레임 cv2 decode + PIL overlay + JPEG re-encode → 30fps 자체가 불안정. 원본 mp4 가 이미 H.264 압축인데 풀 디코드/재인코드는 모순.
-  - 신규 endpoint: `GET /api/v1/stream/test/upload/file/{filename}` — HTTP Range(206 Partial Content) 지원 정적 서빙. `os.path.realpath + commonpath` 로 traversal 차단, 416 처리, Accept-Ranges/Content-Range/Content-Length 헤더. mp4/mov/mkv/avi/webm mime 매핑.
-  - 신규 endpoint: `GET /api/v1/stream/test/active` — `{kind, filename, fps, duration_sec, frame_w, frame_h}` 응답. 프론트가 `<video>` 분기에 사용.
-  - `services/test_stream.py`:
-    - 신규 필드: `_active_video_filename / _fps / _duration / _frame_w / _frame_h / _video_inference_task`.
-    - `activate_video_mode(filepath)` — cv2로 메타 peek + 백그라운드 `_video_inference_loop` task 발사.
-    - `_video_inference_loop` — 영상 1회 end-to-end로 읽으며 매 0.33초(30fps→매 10프레임, 60fps→매 20프레임) 1회 추론. detection 각각에 `_video_timestamp_sec/_frame_w/_frame_h` 첨부.
-    - 기존 `_stream_video_frames` 제거. `rgb_mjpeg_generator` 의 영상 분기 → `activate_video_mode + DIRECT VIDEO MODE placeholder yield` 로 교체.
-    - `_broadcast_detection` payload 확장: `video_timestamp_sec`, `frame_w`, `frame_h` 조건부 첨부.
-    - `_detect/_detect_real` 에 `tier` 파라미터 추가. 영상 경로는 **tier=2** (M4 thermal U-Net + M6 PatchCore 제외 — RGB 영상에 무의미하고 무거움). 이미지 경로는 tier=3 유지.
-    - `stop_playback` 에서 `_cancel_video_inference + _clear_active_video` 호출.
-  - WS `defect.new` payload: `video_timestamp_sec/frame_w/frame_h` 신규 (영상 경로일 때만 채움). 이미지 경로 호환성 100% (선택 필드).
-
-### v5.2_260512 (작성자: @youminsu0523 / branch: MS)
-- **(backend R27) test_stream 영상 재생 끊김 + OOD 거짓 검출 동시 수정**:
-  - `services/test_stream.py::_stream_video_frames` — 기존 `await self._detect(...)` 가 yield 루프 안에서 500ms~수초 차단하여 7프레임 주기마다 영상이 끊기던 문제를 제거. 추론을 `asyncio.create_task(_infer_and_stash(...))` 로 fire-and-forget 발사 + 이전 task 종료 시에만 새로 발사(큐 적체 방지). 추론 주기 매 7→10프레임 완화. yield 루프는 `self._pending_video_detection` 에서 가장 최근 결과를 비차단으로 1회 소비.
-  - `TestStreamService.__init__` — `_pending_video_detection: Optional[dict] = None` 필드 신규.
-  - `_ui_conf_gate` — 클래스별 게이트 강화: 단열 0.30 / 기본 0.50 유지, 신규 `_UI_CONF_GATE_OOD_FRAGILE=0.75` 추가하고 키워드 매칭 8종(`caulking`/`코킹`, `scratch`/`찍힘`/`스크래치`, `paint_stain`/`도색`, `surface_defect`/`표면 결함`, `baseboard`/`걸레받이`, `pollution`/`오염`)으로 가시광 색·패턴 의존 클래스에 적용. test_mode 첨부 영상이 사람/SNS 밈 같은 OOD 입력일 때 M1-YOLO가 52~64% 신뢰도로 "코킹 누락·불량" 카드를 띄우던 회귀 사고 차단 (Precision 우선, [모든 하자 엄격·신뢰 우선] 정책).
+- **(backend R-v1.1.01) OpenAI 챗봇(건축물·하자 도메인 어시스턴트) 통합** — 통합 repo 와 동일 구현. 분리 repo head 가 `k4e5f6a7b8c9` 이므로 마이그레이션 down_revision 분기.
+  - 신규 ORM 2: `AiChatThread`(user_id+organization_id 격리, summary watermark, soft delete) / `AiChatMessage`(role enum, tokens, JSONB meta).
+  - 신규 Pydantic 6: ThreadCreate/Update/Response/ListResponse, MessageCreate/Response/HistoryResponse. role=system 응답 제외.
+  - 신규 Alembic `m6a7b8c9d0e1` (down=`k4e5f6a7b8c9`): FK 사이클 회피 위해 threads → messages → ALTER threads ADD FK 순.
+  - 신규 서비스 `app/services/openai_chat.py` — SYSTEM_PROMPT(DEFECT_CATALOG 20종 + 안전 가이드), astream(SSE), light-RAG, 자동 요약.
+  - 신규 라우터 `app/api/ai_chat.py` (6 엔드포인트, `get_current_org_member` 의존성, user_id+org_id 이중 검증, 사용자별 분당 20 메시지 카운터).
+  - router.py include + rate_limit.py 한도, settings 4개(OPENAI_API_KEY/MODEL/MAX_OUTPUT_TOKENS/SUMMARY_MODEL), requirements `openai>=1.40.0`.
 
 ### v5.1_260503 (작성자: @youminsu0523 / branch: MS)
 - **R26 후속 정정**: tasks 문서(API 명세서 v1.1→v1.2, ERD v1.0→v1.1) 부록을 본문 인라인 위치(4.17 Employee API / 2.1.5 Swagger securityScheme / 8.5 운영 가드 / 4.19 inspection_schedules / 5장 관계 / 6.1 인덱스 / 13장 결론)로 분산 + 파일명 rename + 팀명 `다마코더 → AeroInspect`. 가이드 3종 문서이력 위치 정정.
