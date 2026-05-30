@@ -73,9 +73,11 @@ backend/training/colab/
 # 학습 ipynb 레거시 (개인 Drive mount 패턴 — 신규는 colab/ 안, 루트는 untrack 예정)
 backend/training/AeroInspect_Training*.ipynb
 
-# 개인 학습 자동화 wrapper (개인 GPU 스케줄 의존)
+# 개인 학습 자동화 wrapper (개인 GPU 스케줄 의존, 사용자 PC 절대경로 박혀있음)
 backend/training/auto_run_m4v2.py
 backend/training/overnight_train.py
+backend/training/auto_after_m4.ps1
+backend/training/monitor_status.ps1
 
 # 학습 로그 (재생성 가능)
 backend/training/*_log.txt

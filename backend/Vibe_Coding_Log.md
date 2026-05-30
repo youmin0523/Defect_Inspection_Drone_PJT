@@ -3115,3 +3115,18 @@ uploads/gazebo_worlds_real/
 - **verify는 Recall만 측정**: GT 라벨 비교 없음. test_external 각 카테고리에 roboflow 라벨(labels/) 존재하므로 IoU 기반 Precision 측정 스크립트 추가 필요.
 - **M4 seg ONNX 로더 호환성**: ONNXYoloDetector가 seg 2-output(det+mask proto)을 detection으로만 파싱. 게이팅엔 bbox만 쓰므로 동작하나, mask proto 활용 시 별도 처리 필요.
 - **집에서**: resume_m4_seg.py로 epoch 30→60 완주 + Precision GT 검증 + 과검출 원인 분석.
+
+### 🧹 gitignore 정리 + 약점 모델 보강 계획 문서 commit (2026-05-30 시각 append)
+
+> 사용자 "git changes 확인해서 ignore 처리 필요한거 처리하고 commit 하자". untracked 스캔 → venv/개인 스크립트 ignore, 문서만 추적.
+
+| 라운드 | 시각 | 작업 | 결과 |
+|-------|------|------|------|
+| .16.1 | 2026-05-30 | backend/.gitignore에 `rfenv/` 추가 — Roboflow 작업용 Python venv 2.1GB, 기존엔 venv/.venv/env/만 있어 누락 | 추적 차단 (12GB 사고 재발 방지 audit) |
+| .16.2 | 2026-05-30 | 루트 .gitignore에 `auto_after_m4.ps1`, `monitor_status.ps1` 추가 — 사용자 PC 절대경로(C:\Users\Codelab...) + 개인 GPU 스케줄 의존. 기존 auto_run_m4v2.py/overnight_train.py와 동일 카테고리 | 개인 자동화 wrapper untrack |
+| .16.3 | 2026-05-30 | WEAK_MODEL_PLAN.md + roboflow_*.md 5개 commit — 약점 모델 fine-tune 후보·계획 문서. 시크릿 스캔 결과 ROBOFLOW_API_KEY 환경변수명/공개 docs URL만(실제 키 없음) | 6개 문서 추적 시작 |
+
+### 📐 설계 결정
+
+- **rfenv는 ignore, 문서는 commit**: venv·개인 절대경로 스크립트는 환경 의존 → untrack. 계획 md는 팀 공유 가치 + 시크릿 없음 → 추적.
+- **gitignore audit 8단계 준수**: 신규 untracked 디렉터리(rfenv 2.1GB) 발견 → 용량·시크릿·절대경로 스캔 후 분류 (memory feedback_gitignore_periodic_audit).
