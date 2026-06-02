@@ -17,10 +17,10 @@ from pathlib import Path
 
 from ultralytics import YOLO
 
-EPOCHS = 150
+EPOCHS = 80         # 150→80 단축 (2026-05-31 사용자 지시, 시간 절약)
 BATCH = 4           # RTX 5070 Laptop 8GB VRAM (seg는 메모리 큼 → OOM 시 2로)
 IMGSZ = 768         # 엣지 정밀 vs 속도/메모리 절충 (960→768)
-PATIENCE = 30
+PATIENCE = 20
 LR0 = 1e-4
 DATA_YAML = "configs/frame_seg.yaml"
 PROJECT = "runs/m5_frame_seg"

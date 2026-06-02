@@ -1,0 +1,4 @@
+v11_current: FAIL InvalidArgument [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: images for the following indices
+ index: 2
+prev: mAP50=0.0820 mAP50-95=0.0380 P=0.3341 R=0.0899
+v3: mAP50=0.1060 mAP50-95=0.0530 P=0.3036 R=0.1284

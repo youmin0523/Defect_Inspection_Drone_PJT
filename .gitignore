@@ -119,3 +119,7 @@ test_nav*.py
 login_test_output.html
 test_dashboard.html
 test_dashboard.png
+
+# fine-tuning 임시 산출물 (2026-06)
+backend/training/*.err
+backend/training/_*.txt
