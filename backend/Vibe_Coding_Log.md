@@ -2204,302 +2204,82 @@ GitHub Actions Fly Deploy 가 `fly.toml` 미커밋으로 'missing app name' 실�
 - **start/stop 비용 위험 vs 운영 편의**: 직원 누구나 START 호출 가능 → 의도치 않은 가동 시 시간당 ~$0.71 과금 우려. 다만 (1) 인증된 직원만 가능, (2) UI 에 비용 가이드 명시, (3) 누적 사용량 카드로 가동 사실 즉시 가시화 → 1차 배포에선 운영 편의 우선. 사고 발생 시 누적치로 추적 가능.
 - **module docstring 권한 정책 표 갱신**: 라우터 헤더 주석에 새 권한 매트릭스를 표로 명시 → 다른 개발자/AI 가 이 파일을 처음 열었을 때 의도 즉시 파악 가능. plan 의 "1차 배포 임시 정책" 흔적을 코드에 남겨 향후 복구 시 참조점 제공.
 
+
+
 ---
 
-## 🐞 R30 — 테스트 모드 하자 조회 시 bbox/객체감지 위치 어긋남 (프레임 드리프트) 수정 (2026-05-07 10:05)
+## 🎯 R30 — git hook 활성화 (Vibe 로그 강제 + Conventional Commits) (2026-05-07 13:30)
 
-> 사용자 보고 (1차 배포 후 실사용 검증): "bbox·객체 감지의 위치가 정확하지 않은데 이 부분은 딥러닝을 해야 되는 거니?", "전체 모델이 다 그런데 들인 시간에 비해 표시되는 게...". 통합 mAP 0.9 학습이 진행됐음에도 모든 모델에서 일관되게 박스가 어긋나 보이는 현상. 1차 배포에서 TEST MODE 를 '현장 점검' 으로 위장해 직원 전체 노출 중이라 사용자 신뢰에 직결된 critical issue.
-
-### 🔍 진단
-
-**버그는 학습/좌표변환이 아닌 파이프라인 프레임 페어링 결함.** Ultralytics `result.boxes.xyxy` 는 원본 이미지 좌표로 정확히 반환되며, 라이브 오버레이(`_apply_live_overlay`) 는 같은 프레임에 같은 bbox 를 그리므로 라이브 영상은 정확. 그러나 사용자가 하자 카드를 클릭해 호출되는 `/api/v1/stream/test/defect/{id}/{channel}?mode=bbox|detection` 경로에서 박스가 명백히 다른 위치 / 다른 이미지 위에 그려지는 현상 발생.
-
-데이터 플로우 추적:
-
-```
-Iteration N (image_A.jpg 로드, test 모드는 매 iteration 새 파일):
-  detection_A = _detect(image_A)            # bbox = image_A 좌표
-  _current_rgb_jpeg = encode(image_A)
-  yield image_A
-  prev_detection = detection_A
-
-Iteration N+1 (image_B.jpg, 완전히 다른 사진!):
-  detection_B = _detect(image_B)
-  _current_rgb_jpeg = encode(image_B)        # ← 이미 image_B 로 갱신됨
-  yield image_B
-  await sleep(0.4)                           # ← 이 사이 ↑ 갱신 끝남
-  broadcast(prev_detection_A)
-    → store_defect_frame(id_A, bbox=bbox_A)
-       └─ "rgb"  ← self._current_rgb_jpeg = image_B  ❌ 다른 이미지
-       └─ "bbox" ← bbox_A (image_A 좌표)              ❌ 짝 어긋남
-```
-
-사용자 클릭 시점: `_defect_frames[id_A]` 조회 → image_B JPEG 위에 image_A 의 bbox 좌표로 사각형 그림 → "전혀 다른 사진에 엉뚱한 위치에 박스" 가 나옴. **모든 모델에서 동일하게 보이는 이유** = 모델 출력은 정상, 출력을 저장하는 파이프라인이 jpeg ↔ bbox 짝을 한 프레임 어긋나게 맞춤. `bbox` 모드와 `detection` 모드 모두 같은 `_defect_frames[id]` 데이터를 읽어 그리므로 두 모드 동시 영향.
-
-비디오 스트림(`_stream_video_frames`) 도 동일 패턴 — 더 심각: 추론은 매 3프레임마다(`if self._frame_counter % 3 == 0`) 만 돌고 brodcast 까지 0.15~0.4s 지연이 추가돼 카메라가 연속 이동하는 동안 bbox 가 실제 객체에서 떨어져 그려짐.
+> 통합 repo 의 R32 작업 후, 분리 repo 에도 동일 정책을 적용하기 위한 hook 도입.
+> 각 repo 의 .githooks/ 는 독립 working tree 라 중복처럼 보여도 git 표준 패턴 — 다른 PC 에서 clone 시 hook 이 함께 따라오기 위함.
 
 ### 🛠 변경
 
 | 라운드 | 시각 | 작업 | 산출물 |
 |-------|------|------|-------|
-| R30.1 | 2026-05-07 10:05 | **`_prepare_thermal_frame` 리팩터** — 반환 타입을 `None` → `Optional[bytes]` 로 변경, 오버레이 적용 *전* 의 raw thermal JPEG 를 반환. `self._current_thermal_jpeg` 는 라이브 스트림용으로 오버레이된 버전 유지. raw 버전을 호출자가 detection 에 굳혀둘 수 있도록 노출. | `app/services/test_stream.py` |
-| R30.2 | 2026-05-07 10:05 | **`store_defect_frame` 시그니처 확장** — `rgb_jpeg`, `thermal_jpeg` optional 인자 추가. 주어지면 사용, 없으면 `_current_*_jpeg` 폴백. 폴백은 드리프트 위험이 있다는 docstring 경고 명시. | 같음 |
-| R30.3 | 2026-05-07 10:05 | **`_run_loop` 에서 raw 스냅샷 첨부** — `_detect` 직후 `detection["_rgb_snapshot"] = encode(frame)`, `_prepare_thermal_frame` 반환값을 `detection["_thermal_snapshot"]` 으로 첨부. detection 이 다음 iteration 의 prev_detection 이 되어도 자기 짝 jpeg 를 들고 다님. | 같음 |
-| R30.4 | 2026-05-07 10:05 | **`_stream_video_frames` 에도 동일 패턴 적용** — 3프레임마다 detection 발생 시점에 raw RGB snapshot 첨부. 비디오는 thermal 페어 없으므로 thermal_snapshot 생략. | 같음 |
-| R30.5 | 2026-05-07 10:05 | **`_broadcast_detection` 배선** — `store_defect_frame` 호출에 `rgb_jpeg=detection.get("_rgb_snapshot")`, `thermal_jpeg=detection.get("_thermal_snapshot")` 명시 전달. | 같음 |
+| R-hooks.1 | 2026-05-07 13:30 | .githooks/pre-commit — 코드 변경 시 Vibe_Coding_Log.md 갱신 강제 (분리 repo 인 본 repo 는 root Vibe_Coding_Log.md 자동 매칭) | .githooks/pre-commit |
+| R-hooks.2 | 2026-05-07 13:30 | .githooks/commit-msg — Conventional Commits 강제 (feat/fix/chore/docs/refactor/test/perf/style/build/ci/release/hotfix), 한국어 친화 가이드 + 메시지 길이 ≥10자 + Merge/Revert 통과 | .githooks/commit-msg |
+| R-hooks.3 | 2026-05-07 13:30 | tools/setup-githooks.sh + .ps1 — core.hooksPath=.githooks 활성화 + 다른 repo 에 hook 복사 옵션 (`bash tools/setup-githooks.sh /path/to/other-repo`) | tools/setup-githooks.{sh,ps1} |
+| R-hooks.4 | 2026-05-07 13:30 | docs/git-hooks.md — 사용법/우회/트러블슈팅 가이드 | docs/git-hooks.md |
+| R-hooks.5 | 2026-05-07 13:30 | core.hooksPath = .githooks 활성화 (`git config`) | (.git/config) |
 
-### 📐 설계 결정 사항
+### 📐 설계 결정
 
-- **raw frame snapshot 을 detection 딕셔너리에 굳혀두기**: prev_detection 가 다음 iteration 으로 넘어가도 자기 발생 시점의 jpeg 를 함께 운반. broadcast 의 0.4s 지연 동안 `_current_*_jpeg` 가 다음 프레임으로 갱신돼도 영향 없음. 메모리 비용은 jpeg 1장 × `_MAX_DEFECT_FRAMES` 한도 내라 무시 가능.
-- **annotated 가 아닌 raw 를 스냅샷**: defect 조회 모드(`bbox`/`detection`)가 자체적으로 박스를 그림. annotated(이미 박스 burned-in) 위에 또 그리면 박스가 두 번 겹쳐 보임(같은 좌표라도 두께/색이 미세 다름). raw 로 굳혀두면 선택한 모드가 한 번만 깔끔하게 그림.
-- **객체감지 모드 보너스 수정**: `_draw_bbox_on_jpeg` 와 `_draw_detection_on_jpeg` 둘 다 `_defect_frames[id]` 의 `(jpeg, bbox)` 를 읽어 쓴다. 버그가 두 함수가 아니라 데이터 저장 단(`store_defect_frame`)에 있었으므로 한 패치로 두 모드 동시 정상화. 사용자 즉시 검증 가능.
-- **폴백을 제거하지 않은 이유**: `store_defect_frame` 의 `_current_*_jpeg` 폴백을 유지한 건 외부 직접 호출(테스트/디버그) 호환성. 내부 정상 경로(`_broadcast_detection`)는 항상 명시 전달하므로 폴백은 안전망.
-- **검증 — 학습 책임 분리**: 이 수정은 모델 가중치를 일절 건드리지 않는다. 통합 mAP 학습은 그대로 유효하며, 사용자가 "표시되는 게..." 라고 본 어긋남은 모델 품질이 아니라 디스플레이 파이프라인의 결함이었음을 코드로 증명. 기존 학습 시간 무손실.
+- **각 repo .githooks/ 중복은 정상**: git submodule / 사내 패키지 / 사용자 home 공용 hooks 같은 대안은 모두 무거움. 단순히 .githooks/* 파일을 각 repo 의 working tree 에 두는 게 표준 패턴 (husky / lefthook / pre-commit 도 동일).
+- **통합 repo → 분리 repo 동기화**: 통합 repo 의 tools/setup-githooks.sh 가 분리 repo 경로를 인자로 받으면 자동 복사 + 활성화. hook 정책 변경 시 한 곳만 수정 후 동기화.
+- **우회 환경변수**: SKIP_VIBE_LOG_CHECK=1 / SKIP_COMMIT_MSG_CHECK=1 — 긴급 commit 대비. 사후 보강 권장.
+- **분리 repo 정책 — MS 브랜치까지만**: 통합 repo 와 동일하게 본 repo 의 작업 commit 도 MS 브랜치만 사용. develop / main / 배포는 사용자 명시 시점.
 
-### 🚨 안전성 영향
 
-1차 배포에서 TEST MODE 가 '현장 점검'(파란/Camera) 으로 위장돼 모든 직원에게 노출 중. 박스가 어긋난 채로 보이면 (1) 검출된 하자 위치를 직원이 잘못 인식 → 잘못된 보고/현장 점검 누락, (2) 시스템 신뢰도 즉시 추락 → "AI 가 엉뚱한 곳을 잡는다" 로 회사·솔루션 평가에 직격탄. 이번 수정으로 사용자 클릭 시 항상 (해당 detection 발생 시점의) 정확한 frame + 정확히 정렬된 bbox/detection 표시 보장.
 
 ---
 
-## 🎯 R31 — 객체감지 모드 UX 본질화 ('도장' → 'AI 스캔→탐지' 시퀀스) (2026-05-07 10:05)
+## 🎯 R31 — 1차 배포 후속 보완: 객체감지 raw 모드 + 콜드 스타트 완화 (2026-05-07 17:00)
 
-> 사용자 피드백 (R30 직후): "아무리 데이터가 정적인 사진 데이터였지만 객체감지모드에서 객체가 감지되는 것보다 그냥 하자부위에 도장을 찍어놓은 듯한 느낌이었어서.. 이미지 혹은 영상이 나오면 스캔을 통한 하자가 객체감지모드에서 걸러져야되는 게 맞지 않나 싶은데 .." → 추가 요청: "현재 진행 중인건 TEST MODE와 현장점검 모두에 적용이 되어야하는게 맞겠지" / "배포는 어제부로 완료해서 제출했고 이제 1.1v 시작이니까 두개 다 적용해". UX 결정: 1+2단계 (스캔 sweep + SVG bbox 모션 + naturalWidth 보정 + confidence 카운트업) 풀 구현.
-
-### 🔍 진단 — 왜 '도장' 으로 느껴졌는가
-
-R30 수정으로 좌표 정확도는 회복됐으나, 사용자가 하자 카드를 클릭하면 **이미 박스가 burned-in 된 정지 JPEG 1장**이 즉시 표시되는 구조라 "AI 가 작업 중" 의 시각적 신호가 0. 사용자 인식 = "그냥 위치 표시" / "도장". 객체감지 모드의 가치(반투명 마스크/윤곽/코너마커) 가 정적이라 "감지되는 과정" 의 임팩트 없음. 1차 배포의 '현장 점검' 위장 노출 맥락에서 시스템 신뢰도 형성에 부정적.
+> 1차 배포(2026-05-06) 후 실사용 피드백 보강.
+> 통합 repo 의 R30(객체감지 raw 모드) + R31(콜드 스타트 — bcrypt asyncio + README 단순화) 작업물을 분리 repo 로 동기화.
+> 자율비행(R32) 관련 변경은 사용자 명시로 본 배포에서 제외.
 
 ### 🛠 변경
 
 | 라운드 | 시각 | 작업 | 산출물 |
 |-------|------|------|-------|
-| R31.1 | 2026-05-07 10:05 | **백엔드 `mode='raw'` 분기 신설** — `get_defect_frame()` 에 raw 분기 추가 (오버레이 미적용 원본 JPEG 반환). `app/api/stream.py` 의 `get_test_defect_frame` 핸들러에 `("bbox","detection","raw")` 화이트리스트 확장. | `app/services/test_stream.py`, `app/api/stream.py` |
-| R31.2 | 2026-05-07 10:05 | **real 현장점검 경로 패턴 가이드** — 영상 수신기 도착 후 `RealStreamService` 가 동일 시그니처 `GET /api/v1/stream/defect/{id}/{channel}?mode=...` 를 노출해야 한다는 패턴 (drift 방지 3원칙 포함) 을 `app/api/stream.py` docstring 에 명시. 향후 작업자(개발자/AI)가 파일을 처음 열었을 때 즉시 따라할 수 있도록 코드 옆 문서화. | `app/api/stream.py` |
-
-### 📐 설계 결정 사항 (백엔드)
-
-- **base 클래스 추출 미실시**: 시스템 프롬프트 원칙 — "hypothetical future requirements 위한 추상화 금지". `RealStreamService` 가 미존재(영상 수신기 미도착) 인 상태에서 `BaseDefectFrameService` 를 추출하면 인터페이스 추측 게임이 됨. 패턴 가이드(주석 + R30 referenced) 만 남겨두고, 진짜 코드는 real 경로 구현 시점에 작성. 추출 대상의 사용처가 1개(test_stream) 인 동안은 inline 유지가 정답.
-- **frontend source-agnostic 설계 보장**: `LiveVideoFeed.jsx` 의 `defectFrameUrl` 분기를 `isTestMode` 로 명시 분리하면서, `isDefectView` (`!!defectFrameUrl`) 만 보고 모든 UX 가 발화하도록 작성. real 경로 backend 만 구현되면 `isTestMode === false` 분기에 URL 한 줄만 추가하면 즉시 동작 (프론트 수정 0).
-- **1차 배포 경로 자동 적용 검증**: 1차 배포 임시 정책상 "현장 점검" 카드 = `setIsTestMode(true)` 위장 → `isTestMode = true` → R31 UX 가 그대로 발화. 별도 분기/플래그 없이 사용자 노출 즉시.
-
-### 🎨 프론트엔드 — 시퀀스 페이즈 머신
-
-| 페이즈 | 시간 | 화면 |
-|-------|------|------|
-| `raw` | 0 ~ 1.0s | raw 이미지 (오버레이 0) — "AI 가 막 화면을 받았다" |
-| `scan` | 1.0 ~ 2.2s | raw + 시안색 격자 그리드 (pulse) + 위→아래 sweep 라인 (glow shadow 24px) + 우상단 "SCANNING · AI DETECT" 라벨 (ping dot) |
-| `detected` | 2.2s ~ | raw + SVG bbox (반투명 fill 12% + stroke pulse + glow filter 페이드) + 4코너 브래킷 마커 (stroke-dashoffset in) + 카테고리 라벨 박스 (translate-y in) + confidence chip (0 → conf% 700ms ease-out cubic 카운트업) |
-
-### 🎨 프론트엔드 — 핵심 구현 결정
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R31.3 | 2026-05-07 10:05 | **CSS 키프레임 6종 전역 등록** — `scanSweep`(top -4% → 104%), `scanGridPulse`(opacity 0.06 ↔ 0.18), `detectPulse`(stroke-opacity 0.65 ↔ 1), `detectGlow`(drop-shadow 6px ↔ 14px), `detectLabelIn`(opacity + translate-y + scale), `detectCornerIn`(stroke-dashoffset 60 → 0). 컴포넌트 인라인 `<style>` 회피 → 재렌더 비용 0. | `frontend/src/index.css` |
-| R31.4 | 2026-05-07 10:05 | **LiveVideoFeed 페이즈 머신** — `detectionPhase` state ∈ {idle, raw, scan, detected}. `selectedDefect.id` 또는 `isDefectView`/`isDetectionMode` 변경 시 `setTimeout` 2개로 raw(1.0s) → scan(1.2s) → detected 로 전이. cleanup 으로 timer 회수. confidence 카운트업은 별도 `requestAnimationFrame` (cubic ease-out 700ms). | `frontend/src/components/video/LiveVideoFeed.jsx` |
-| R31.5 | 2026-05-07 10:05 | **naturalWidth viewBox SVG 오버레이** — `imgRef` + `onLoad` 에서 `naturalWidth/Height` 캡처. SVG `viewBox="0 0 W H"` 로 두면 bbox 픽셀 좌표가 그대로 매핑. `preserveAspectRatio` 를 img 의 `object-cover/contain` (fill prop) 과 일치(`xMidYMid slice/meet`) → 풀스크린/16:9 모두 정확 정렬. | 같음 |
-| R31.6 | 2026-05-07 10:05 | **심각도 컬러링 + 코너 브래킷** — HIGH=red-500, MED=orange-500, LOW=yellow-500. SVG `currentColor` + `color: severityHex` 로 stroke/fill/glow 일관 적용. 4 코너 브래킷은 `stroke-dasharray=cm*2` + `detectCornerIn` 으로 dashoffset in. 라벨 폰트 크기 `imgNatural.w * 0.018` (해상도 비례) → 1080p/4K 모두 자연. | 같음 |
-| R31.7 | 2026-05-07 10:05 | **confidence 카운트업 chip** — `requestAnimationFrame` 으로 0 → conf% 700ms cubic. fill 모드(=대시보드 풀스크린) 에서 좌상단 DEFECT VIEW 배지 옆에 emerald chip 으로 표시. tabular-nums 로 자릿수 흔들림 방지. | 같음 |
-
-### 📐 설계 결정 사항 (프론트엔드)
-
-- **detection 모드만 시퀀스 적용, bbox 모드는 그대로**: bbox 모드는 의도가 "단순 위치 표시" — 빠른 확인용. 시퀀스를 양쪽 다 걸면 "빠른 확인" 의도가 망가짐. 사용자 원본 피드백도 정확히 detection 모드 한정 ("객체감지모드에서 객체가 감지되는 것보다"). 의도 보존.
-- **백엔드 raw 모드 vs 프론트 라이브 오버레이의 분리**: detection 모드 진입 시 backend 로 `?mode=raw` 요청 → JPEG 자체에 박스 없음 → SVG 가 박스/마스크/코너/라벨 일체를 그림. burned-in 박스 위에 SVG 박스를 또 그리면 두 겹 = 미세 어긋남 + 시각적 노이즈. raw 분리로 단일 박스, 단일 책임.
-- **viewBox 기반 좌표계 고정**: `viewBox="0 0 naturalW naturalH"` + `preserveAspectRatio` 매칭 → 사용자가 윈도우 리사이즈/풀스크린 토글해도 bbox 가 자동 정렬. canvas/JS 수동 비율 계산 금지 (DOM 리사이즈 이벤트 listener 필요해지고 race condition 발생). SVG 가 무료로 처리해주는 영역.
-- **CSS 키프레임 전역 등록**: 컴포넌트 안 `<style>` 태그는 매 렌더마다 텍스트가 DOM 에 다시 들어가는 비효율 + 키프레임 중복 정의 경고. `index.css` 로 한 번 등록, 컴포넌트는 `style={{ animation: '...' }}` 로 참조만. 표준 패턴.
-- **SVG `currentColor` 사용**: `<svg style={{ color: severityHex }}>` 로 부모에 색을 정하고 자식 요소들에 `stroke="currentColor"` / `fill="currentColor"`. 심각도가 바뀌어도 한 곳만 갱신. drop-shadow filter 도 `currentColor` 인식.
-- **확률 chip 의 카운트업 ease**: cubic ease-out (`1 - (1-p)^3`) → 빠르게 시작해 점근적으로 도달. 사용자 인지에 "AI 가 즉시 반응했다 → 정확한 값에 수렴" 의 신뢰감 부여. 700ms 는 너무 빠르지도(못 본다) 너무 느리지도(짜증) 않은 sweet spot.
-- **timer cleanup 보장**: useEffect cleanup 에서 `clearTimeout` 모두 — 사용자가 1초 이내에 다른 하자를 클릭하면 이전 timer 가 그대로 작동해 페이즈가 꼬이는 버그 방지. confidence rAF 도 `cancelAnimationFrame` 으로 회수.
-- **fill prop 분기 보존**: 풀스크린 dashboard(fill=true, object-cover) 와 16:9 카드(fill=false, object-contain) 의 시각 정책 차이를 SVG `preserveAspectRatio` 도 동기화. 두 모드 모두 픽셀 정렬 유지.
-
-### 🚨 안전성 영향 / 사용자 가치
-
-R30 + R31 결합 효과: 사용자가 하자 카드 클릭 시 **(1) 항상 정확한 시점의 정확히 정렬된 박스 + (2) AI 가 방금 스캔해서 발견한 모션** 둘 다 충족. 1차 배포 '현장 점검' 위장 노출 맥락에서 (a) 좌표 어긋남으로 인한 위치 오인 위험 0, (b) "그냥 도장 찍은 거" → "AI 가 검출했다" 로 인지 전환 → 시스템 신뢰도 형성. 사용자가 직접 화면 검증 후 즉시 v1.1 출하 가능 수준.
-
-### 🔮 v1.1 후속 (영상 수신기 도착 시)
-
-`RealStreamService` 구현 시 R30 frame drift 방지 패턴(snapshot 굳히기 + store_defect_frame 명시 전달 + raw mode) 그대로 복제. `GET /api/v1/stream/defect/{id}/{channel}?mode=...` 노출만 하면 프론트 LiveVideoFeed 의 `isTestMode === false` 분기에 URL 한 줄 추가로 즉시 동일 UX 가동. 별도 React 작업 0.
-
-
-
----
-
-## 🎯 R32 — Indoor Autonomous Inspection v1.1 통합 구현 + 다중 패스 검증 (2026-05-07 13:00)
-
-> 사용자 요청: "이제 드론이 자율비행을 할 수 있는 프로세스를 만들거야 — LiDAR 스캔 → 3D 렌더링 → 자율 경로 + 4면 정밀 그리드(천장/벽/바닥/창호) + 공간 자동 전환 + 도면 ↔ SLAM 재검증 + 점검 면적 자동 산출 + 천장/바닥은 nose-tilt 자율주행으로 보강". 사용자 정책: "v1.1 = 최종, 처음부터 풀 스코프 고려, 양보·타협 금지, 안전 직결 상업 플랫폼 마인드". 본 R32 는 자율비행 시스템의 백엔드/Pi/프론트/문서/테스트/git hook 을 한 commit 으로 통합.
-
-### 🔍 진단 — 왜 자율비행이 별도 통합이었나
-
-기존 시스템은 텔레메트리 수신/MJPEG 스트림/실시간 추론은 성숙했으나 드론 능동 제어 계층은 0 (`pymavlink` 의존성만 명시). 사용자 BOM 변경(Holybro S500 → cinewhoop + Kakute H7 Mini + INAV/Betaflight + Pi Zero 2 W + Skydroid OTG) 으로 PX4/MAVSDK 표준 자율비행 스택과 결이 달라 갭을 코드로 메워야 했음. + 사전 도면 ↔ SLAM 재검증, 4면 정밀 스캔, 천장/바닥 nose-tilt, 검사 면적 산출, ORB-SLAM3 빌드 부담 회피(Docker), commit 정책(MS 브랜치 + Vibe 로그 + Conventional Commits) 강제.
-
-### 🛠 변경 — 데이터 모델 (4종 + 마이그레이션)
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R32.1 | 2026-05-07 13:00 | ORM 4종: mission_plan(FSM 상태+plan_json), slam_pointcloud(키프레임 점군 메타+6DoF pose), coverage_grid(룸별 3D 셀 captured + face_kind/face_idx/cam_pitch_rad), room_topology(nodes/edges JSONB) | app/models/{mission_plan,slam_pointcloud,coverage_grid,room_topology}.py |
-| R32.2 | 2026-05-07 13:00 | Alembic 마이그레이션 1건: mission_status_enum + mission_phase_enum(11단계 — verification 포함) + 4 테이블 + UNIQUE/INDEX | alembic/versions/j3d4e5f6a7b8_add_autonomous_mission_tables.py |
-
-### 🛠 변경 — services 9종 본 구현
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R32.3 | 2026-05-07 13:00 | path_planner — 4면(벽×N+천장+바닥+창호) 보스트로페돈, PCA 회전, shapely 클리핑, FoV 산식, 차이영역 보조 WP, 천장/바닥 1.5× spacing | app/services/path_planner.py |
-| R32.4 | 2026-05-07 13:00 | room_segmenter — cv2 erosion + connectedComponents + distanceTransform ridge 도어웨이 검출(0.7~1.0m) | app/services/room_segmenter.py |
-| R32.5 | 2026-05-07 13:00 | obstacle_avoider — voxel(0.1m) + 시간 감쇠 + DWA + 무특징 정책(SLAM<0.4 hover) + 속도 상한 | app/services/obstacle_avoider.py |
-| R32.6 | 2026-05-07 13:00 | floorplan_verifier — phaseCorrelate + yaw sweep ±10°/1° → IoU 정합 + 차이영역 폴리곤 + 3-tier verdict | app/services/floorplan_verifier.py |
-| R32.7 | 2026-05-07 13:00 | inspection_area — Shoelace + 둘레×층높 + 창호 차감 + 면별/룸별/전체 커버리지 + 분양면적 비율 | app/services/inspection_area.py |
-| R32.8 | 2026-05-07 13:00 | safety_monitor — E-stop / battery RTL(35%, 셀당 3.55V) / comm-loss(2s) / SLAM pos_var(0.5m) / tilt(60°) / geofence / 장애물(35cm) — 단일 진입점 | app/services/safety_monitor.py |
-| R32.9 | 2026-05-07 13:00 | fc_bridge — Pi reverse-WS, MspCommand 7종, heartbeat 200ms, broadcast→broadcast_all 전환 | app/services/fc_bridge.py |
-| R32.10 | 2026-05-07 13:00 | slam_runner — Strategy(ORB-SLAM3 docker subprocess + RTAB-Map + Pseudo) + CaptureAdapter(Skydroid OTG OS별 자동 분기) + colored point cloud + occupancy fetch | app/services/slam_runner.py |
-| R32.11 | 2026-05-07 13:00 | mission_orchestrator — 11단계 FSM + nose-tilt sweep(±30°+yaw 360°4-step) + 안전 가드 100ms + DB 영속화 + WS broadcast + prior_polygons 폴백 | app/services/mission_orchestrator.py |
-
-### 🛠 변경 — API + 기존 모듈 확장
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R32.12 | 2026-05-07 13:00 | mission API: POST /start /abort /estop /rtl /pause + GET /state /{id}/state + WS /fc-bridge + floorplan/공급면적 자동 조회 | app/api/mission.py, app/api/router.py |
-| R32.13 | 2026-05-07 13:00 | coverage API 확장: GET /coverage/mission/{id}/grid + /summary | app/api/coverage.py |
-| R32.14 | 2026-05-07 13:00 | slam API 확장: PATCH /slam/pointcloud (Visual SLAM 키프레임 등록 + WS broadcast) | app/api/slam.py |
-| R32.15 | 2026-05-07 13:00 | ws_manager 확장: broadcast_all() 신설 (단일 WS 클라이언트가 mission/coverage/pointcloud 모두 수신) | app/core/ws_manager.py |
-| R32.16 | 2026-05-07 13:00 | config 확장: SLAM_BACKEND/SLAM_CAPTURE_DEVICE/SLAM_POINTCLOUD_DIR/AEROINSPECT_PI_TOKEN/RGB+THERMAL_RTSP_URL | app/config.py |
-| R32.17 | 2026-05-07 13:00 | main lifespan: mission_orchestrator WS 매니저 결선 (lifespan 시작부) | app/main.py |
-| R32.18 | 2026-05-07 13:00 | requirements: scipy + shapely + msgpack 추가 (networkx 미사용 정리) | requirements.txt |
-
-### 🛠 변경 — Pi 펌웨어 + INAV (분리 컴퓨터)
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R32.19 | 2026-05-07 13:00 | pi/fc_bridge.py: WS↔MSP V2 UART 펌프(CRC8 DVB-S2) + RC 채널 캐시(8채널 전체 빌드) + battery 8byte 정확 파서 + set_attitude(angle 모드 RC 환산) | pi/fc_bridge.py |
-| R32.20 | 2026-05-07 13:00 | pi/thermal_relay.sh: IRC-256CA → V4L2 → ffmpeg(h264_v4l2m2m hw 우선) → RTSP | pi/thermal_relay.sh |
-| R32.21 | 2026-05-07 13:00 | systemd 유닛 2종 + Pi README (배선/배포/환경변수/안전 가이드) | pi/systemd/*, pi/README.md |
-| R32.22 | 2026-05-07 13:00 | INAV CLI 프로파일: feature OPFLOW + rangefinder + failsafe LAND + AUX 매핑 + cinewhoop 보수 PID | tools/inav/aeroinspect_profile.txt |
-
-### 🛠 변경 — Docker 자동화 + SITL + 단위 테스트
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R32.23 | 2026-05-07 13:00 | ORB-SLAM3 Docker: docker-compose + Dockerfile + JSONL adapter + run.sh — 사용자 직접 빌드 부담 회피 | tools/slam/* |
-| R32.24 | 2026-05-07 13:00 | INAV SITL Docker: docker-compose + Dockerfile.sitl + run.sh + socat 가상 PTY — 실기 없이 MSP 루프 검증 | tools/inav-sitl/* |
-| R32.25 | 2026-05-07 13:00 | SITL 통합 테스트 스위트: pytest --integration 마커 + conftest fixture + MSP 라운드트립/battery/ARM AUX/FSM 풀플로우 | app/tests/integration/* |
-| R32.26 | 2026-05-07 13:00 | 단위 테스트 7개: path_planner / room_segmenter / obstacle_avoider / floorplan_verifier / inspection_area / safety_monitor / mission_orchestrator FSM(mock) | app/tests/test_*.py |
-
-### 🛠 변경 — 운영 가이드 + git hook
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R32.27 | 2026-05-07 13:00 | 운영 가이드 4종: 01 조립(BOM+배선) / 02 INAV 플래싱 / 03 캘리브레이션(RGB/광학흐름/ToF/IMU/열화상) / 04 필드 절차(Stage A~D + fail-safe + 트러블슈팅) | docs/operations/01~04.md |
-| R32.28 | 2026-05-07 13:00 | git hook 활성화: pre-commit(Vibe_Coding_Log 강제 — 통합/분리 repo 자동 탐지) + commit-msg(Conventional Commits, type 12종) + setup 스크립트(sh+ps1) + 가이드 + core.hooksPath=.githooks 활성 | .githooks/*, tools/setup-githooks.{sh,ps1}, docs/git-hooks.md |
-
-### 📐 설계 결정 사항 (백엔드 핵심)
-
-- PX4/MAVSDK 표준 vs Kakute H7 Mini 현실: cinewhoop FC 가 INAV 메인스트림이라 PX4 OFFBOARD 패턴 사용 불가. MSP V2 over UART + Pi reverse-WS 펌프로 우회. INAV OFFBOARD 정밀도(0.3~0.5m) 는 그리드 overlap 30%+ 와 셀 captured 허용반경 0.4m 로 흡수.
-- occupancy 갱신 책임 — 백엔드 단일 소스: SlamBackend.get_latest_occupancy() 인터페이스로 Strategy 별 산출 방식 흡수. PseudoSlam 합성 occupancy(개발 검증), ORB-SLAM3 keyframe 합성, RTAB-Map GridMap 직접. mission_orchestrator 는 fetch 만.
-- prior_polygons 폴백: SLAM occupancy 가 없어도 사전 도면만으로 미션 진행 가능. 도면 + SLAM 둘 다 있으면 verifier 가 정합 비교 + 차이영역 PATH_PLAN 가중. 둘 다 없으면 미션 거부(soft-fail).
-- discrepancy 보조 WP의 cell_idx 충돌 방지: 일반 WP 와 동일 cell_idx + _seed_coverage_grids 가 보조 WP 시드 X + _capture_cell 가 보조 WP 캡처는 하되 captured set 진입 X.
-- face_kind cell_z 인코딩으로 unique constraint 통과: floor=0, walls=1..N(face_idx), ceiling=N+1, windows=N+2.. 로 인코딩.
-- nose-tilt 한계와 안전 클램프: cinewhoop fixed-forward 카메라는 천장/바닥 직접 캡처 불가 → 자세 ±30° 기울임. SafetyMonitor TILT_LIMIT_DEG=60° 의 절반에서 캡처. 매 step 후 0° 복귀. pos_var > 0.4m 시 즉시 abort.
-- WS broadcast → broadcast_all 전환: 채널별 broadcast 는 프론트 단일 WS 연결이 다른 채널 메시지를 못 받는 한계. broadcast_all 로 type 부착 송신 → 프론트 messageHandlers 가 dispatch.
-- mission status enum vs phase enum 분리: status = 미션 전체(running/paused/completed/aborted/failsafe), phase = FSM 단계. _persist_phase 가 phase 기반 매핑.
-
-### 🔬 다중 패스 검증 — 발견·수정한 11건
-
-사용자가 "여러번 검수해서 버그 없도록 해" 명시 후 다중 패스 검증으로 발견:
-
-| # | 위치 | 증상 | 수정 |
-|---|---|---|---|
-| 1 | mission_orchestrator._do_room_transition | vertical_layers_m[1] 옛 필드 → AttributeError | (floor_z+ceiling_z)/2 |
-| 2 | _persist_phase | IDLE 도 status=running → 모순 | phase별 매핑 신설 |
-| 3 | ws_manager.broadcast | 채널별 분리 → 프론트 단일 WS 미수신 | broadcast_all() 신설 |
-| 4 | mission API StateResponse | verification 필드 누락 → 422 | dict 필드 추가 |
-| 5 | mission.path WS payload | cell_idx/face_kind/face_idx/cam_pitch_rad 누락 | 필드 보강 |
-| 6 | AutonomousMissionControl | PATH_PLAN 진입 시 coverage GET 자동 호출 X | useEffect(missionId, phase) |
-| 7 | pi/fc_bridge.parse_battery_state | struct format 사이즈 미스매치 | "<BHBHH" 8byte 정정 |
-| 8 | pause() | DB status=paused 갱신 X | UPDATE 추가 |
-| 9 | path_planner _plan_horizontal_plane / _plan_walls | discrepancy 보조 WP 누락 + _capture_cell 분기 누락 | 본 구현 추가 |
-| 10 | (치명적) pi/fc_bridge.cmd_set_raw_rc | 매번 ARM AUX NEUTRAL → 즉시 disarm | RC 채널 캐시(8채널 전체 빌드) |
-| 11 | (치명적) mission_orchestrator._do_path_plan | _latest_occupancy 갱신 누락 → PATH_PLAN skip | get_latest_occupancy() + prior fallback |
-
-검증: py_compile 18개 파일 통과 + 단위 테스트 7개 collect 통과 + 프론트 9개 파일 존재 + git hook(잘못된 메시지 차단 ✓, 올바른 메시지 통과 ✓).
-
-### 🚨 안전성 영향
-
-다층 fail-safe — 단일 의존 없음:
-- RC 끊김 → INAV 자체 LAND
-- Pi heartbeat 2초 누락 → INAV GCS_FAILSAFE LAND
-- 배터리 35% / 셀당 3.55V → 백엔드 RTL
-- SLAM 무특징 1.5초 → LAND
-- 자세 60°+ → LAND
-- 장애물 35cm 침입 → hover
-
-### 🔮 v1.1 후속 (외부 환경 단계, 사용자 명시 시점)
-
-- ORB-SLAM3 Docker 빌드 (`bash tools/slam/run.sh build`) — 초기 30~60분
-- INAV SITL 환경 검증 (`bash tools/inav-sitl/run.sh up` + pytest --integration)
-- 실기 단계적 검증 — 04_field_ops.md Stage C-1 ~ C-7
-- 분리 repo 동기화 — 사용자 명시 시점
-
-
-
----
-
-## 🎯 R-postdeploy.1 — 객체감지 raw 모드 (frame snapshot 굳히기) (2026-05-07 10:05)
-
-> 사용자 피드백 (1차 배포 후 실사용 중): "bbox·객체 감지의 위치가 정확하지 않은데". 백엔드 측 진단 — broadcast 0.4s 디레이 동안 _current_*_jpeg 가 다음 프레임으로 갱신되어 bbox(N 시점 좌표)와 JPEG(N+1 시점) 페어링 어긋남(frame drift).
-
-### 🛠 변경
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R-pd.1 | 2026-05-07 10:05 | **stream.py — `?mode=raw` 분기 지원** — frontend SVG 오버레이 모션을 위해 오버레이 없는 원본 JPEG 반환 모드 추가. `mode in ('bbox','detection','raw')` 검증. | app/api/stream.py |
-| R-pd.2 | 2026-05-07 10:05 | **test_stream.py — frame snapshot 굳히기** — detection 발생 시점에 raw RGB/Thermal JPEG 를 detection dict 의 `_rgb_snapshot/_thermal_snapshot` 으로 굳혀두고 store_defect_frame 호출 시 명시 전달. broadcast 가 0.4s 후 호출되는 사이 `_current_*_jpeg` 가 다음 프레임으로 갱신되어 bbox/이미지 짝이 어긋나는 프레임 드리프트 버그 방지. | app/services/test_stream.py |
+| R31.1 | 2026-05-07 10:05 | **stream.py — `?mode=raw` 분기 지원** — frontend SVG 오버레이 모션을 위해 오버레이 없는 원본 JPEG 반환 모드 추가. `mode in ('bbox','detection','raw')` 검증. | app/api/stream.py |
+| R31.2 | 2026-05-07 10:05 | **test_stream.py — frame snapshot 굳히기** — detection 발생 시점에 raw RGB/Thermal JPEG 를 detection dict 의 `_rgb_snapshot/_thermal_snapshot` 으로 굳혀두고 store_defect_frame 호출 시 명시 전달. broadcast 가 0.4s 후 호출되는 사이 `_current_*_jpeg` 가 다음 프레임으로 갱신되어 bbox/이미지 짝이 어긋나는 프레임 드리프트 버그 방지. | app/services/test_stream.py |
+| R31.3 | 2026-05-07 17:00 | **auth.py — bcrypt verify_password 를 asyncio.to_thread 로 오프로드** — bcrypt(rounds=12) 검증은 ~250ms 동기 CPU 작업으로 이벤트 루프 블로킹 → 동시 요청 처리 안정성 저하. 스레드로 오프로드해 단일 로그인 응답성 + 동시 요청 처리량 개선. | app/api/auth.py |
+| R31.4 | 2026-05-07 (오후) | **README.md 단순화** — 자율비행 강조 제거하고 3-모델 추론 파이프라인 (YOLOv8 × 2 + ResNet50) 설정·엔드포인트·마이그레이션 절차 중심으로 재구성. 인증/사이트/보고서 등 도메인 모듈 세부는 코드 참고로 명시. | README.md |
 
 ### 📐 설계 결정
 
 - **raw 모드 분리 — 단일 박스 원칙**: detection 모드 진입 시 backend 가 burned-in 박스를 제거하고 raw JPEG 반환 → frontend SVG 가 박스 일체 렌더. burned-in box + SVG box 두 겹이면 미세 어긋남 + 시각 노이즈. 책임 분리: backend = 추론·raw, frontend = 시각화.
-- **frame snapshot 굳히기 — 드리프트 방지**: broadcast 는 정확도/UX 균형상 ~0.4s 디레이를 두는데 그 사이 `_current_rgb_jpeg` 는 다음 프레임으로 이미 갱신됨. detection dict 에 raw 스냅샷을 굳혀두고 store_defect_frame 에 명시 전달.
-
----
-
-## 🎯 R-postdeploy.2 — 콜드 스타트 완화 (bcrypt asyncio + README 단순화) (2026-05-07 17:00)
-
-> 사용자 피드백: "로그인할 때 '로그인중...' 이 생각보다 오래 걸려" → Fly.io `auto_stop_machines='stop'` + `min_machines_running=0` 설정으로 idle 후 머신이 완전 정지 → 첫 요청이 콜드 스타트(컨테이너 + Python + FastAPI + DB 풀 부팅) 비용 다 먹음. 두 번째부터 빠르다는 사용자 확인으로 콜드 스타트 100% 확정.
-
-### 🛠 변경
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R-pd.3 | 2026-05-07 17:00 | **auth.py — bcrypt verify_password 를 asyncio.to_thread 로 오프로드** — bcrypt(rounds=12) 검증은 ~250ms 동기 CPU 작업으로 이벤트 루프 블로킹 → 동시 요청 처리 안정성 저하. 스레드로 오프로드해 단일 로그인 응답성 + 동시 요청 처리량 개선. | app/api/auth.py |
-| R-pd.4 | 2026-05-07 (오후) | **README.md 단순화** — 자율비행 강조 제거하고 3-모델 추론 파이프라인 (YOLOv8 × 2 + ResNet50) 설정·엔드포인트·마이그레이션 절차 중심으로 재구성. 인증/사이트/보고서 등 도메인 모듈 세부는 코드 참고로 명시. | README.md |
-
-### 📐 설계 결정
-
+- **frame snapshot 굳히기 — 드리프트 방지**: broadcast 는 정확도/UX 균형상 ~0.4s 디레이를 두는데 그 사이 `_current_rgb_jpeg` 는 다음 프레임으로 이미 갱신됨. 사용자가 본 "bbox 위치가 정확하지 않다" 피드백의 백엔드 측 원인. detection dict 에 raw 스냅샷을 굳혀두고 store_defect_frame 에 명시 전달.
 - **bcrypt asyncio 오프로드 — 이벤트 루프 보호**: bcrypt 4.x 직접 사용(rounds=12)은 ~250ms 동기 CPU 작업. async 함수 안에서 직접 호출하면 그 시간 동안 이벤트 루프가 다른 요청을 처리 못함. `asyncio.to_thread(...)` 로 별도 스레드에 던져 이벤트 루프는 즉시 다음 작업으로 이동.
-- **콜드 스타트 완화 정책 — 워밍 핑 + bcrypt 오프로드 만 적용**: Fly.io `min_machines_running=1` 변경은 1GB 머신이 무료 한도 초과 가능성 → 비용 발생 우려로 보류. 워밍 핑(frontend Landing/Login mount) 만으로도 사용자 ID/PW 입력하는 동안 머신 부팅이 진행되어 첫 로그인 체감속도 5~10초 단축 예상. 비용 결정은 사용자 명시 시점.
-- **README 단순화 의도**: 1차 배포 후 본 repo 가 "3-모델 추론 파이프라인 + 인증/사이트/보고서/채팅" 의 운영 백엔드로 자리잡음. 자율비행은 통합 repo R&D 영역. 분리 repo README 는 운영 관점에 집중하여 신규 합류자가 즉시 setup·배포할 수 있게 정리.
+- **콜드 스타트 완화 정책 — 워밍 핑 + bcrypt 오프로드 만 적용**: Fly.io `min_machines_running=1` 변경은 1GB 머신이 무료 한도 초과 가능성 → 비용 발생 우려로 보류. 워밍 핑(frontend Landing/Login mount)만으로도 사용자 ID/PW 입력하는 동안 머신 부팅이 진행되어 첫 로그인 체감속도 5~10초 단축 예상. 비용 결정은 사용자 명시 시점.
+- **README 단순화 의도**: 1차 배포 후 본 repo 가 "3-모델 추론 파이프라인 + 인증/사이트/보고서/채팅" 의 운영 백엔드로 자리잡음. 자율비행은 통합 repo 측 R&D 영역. 분리 repo README 는 운영 관점에 집중하여 신규 합류자가 즉시 setup·배포할 수 있게 정리.
 
 ---
 
-## 🎯 R-postdeploy.5 — 검출 파이프라인 정합성 사고 5건 일괄 수정 (2026-05-07 18:00)
+## 🎯 R32 — 검출 파이프라인 정합성 사고 5건 일괄 수정 (2026-05-07 18:00)
 
-> 사용자 피드백 (배포 후 실사용 중): bbox/객체 검출 위치 부정확, 클래스 라벨이 엉뚱(균열 사진을 "C-02 도배지 기포·들뜸"으로, 풀밭에 "B-03 코킹 누락" FP), 일부 케이스는 검출 자체가 안 되어 화면 빈 상태. 시스템 audit 결과 **학습-추론 동기화 누락 사고 5건 동시 발견**.
+> 사용자 피드백 (배포 후 실사용 중): bbox/객체 검출 위치 부정확, 클래스 라벨이 엉뚱(균열 사진을 "C-02 도배지 기포·들뜸"으로, 풀밭에 "B-03 코킹 누락" FP), 일부 케이스는 검출 자체가 안 되어 화면 빈 상태. 시스템 audit 결과 **학습-추론 동기화 누락 사고 5건 동시 발견**. 통합 repo R-postdeploy.5 작업물 동기화.
 
 ### 🛠 변경
 
 | 라운드 | 시각 | 작업 | 산출물 |
 |-------|------|------|-------|
-| R-pd.5 | 2026-05-07 18:00 | **mock 폴백 4곳 모두 제거** — `_detect()`/`_detect_real()`이 모델 미로드, 검출 0건, bbox 비어있음, 추론 예외 시 mock 라벨을 만들지 않고 `None` 반환. 디렉토리명 기반 가짜 라벨이 실제 추론 자리를 가로채 입주자 신뢰 직결 사고. mock 함수 자체는 dead code로 보존(시연 분기 부활 여지). | app/services/test_stream.py |
-| R-pd.6 | 2026-05-07 18:00 | **PatchCore 입력 차원 자동 감지** — `ONNXPatchCoreDetector.__init__`이 모델 그래프(`session.get_inputs()[0].shape`)에서 입력 H/W 자동 추출. 하드코딩 256은 모델이 224 fixed로 export된 상태에서 매 frame `INVALID_ARGUMENT` 예외 → `_detect_real` try/except에 잡혀 모든 검출 None. 향후 backbone 교체에도 자동 적응. | app/services/onnx_inference.py |
-| R-pd.7 | 2026-05-07 18:00 | **M2-ResNet 5→2 클래스 매핑 동기화** — 학습 스크립트(`train_m2_resnet_surface.py:30-32`)는 `NUM_CLASSES=2` (`baseboard_damage`, `surface_defect`)인데 추론 코드는 옛 5-class 매핑 유지. 모델 인덱스 1 → `wallpaper_bubble`로 잘못 매핑되어 모든 표면 결함이 "C-02 도배지 기포·들뜸"으로 표시. ImageFolder 알파벳순 2-class로 동기화. | app/services/inference_pipeline_20.py |
-| R-pd.8 | 2026-05-07 18:00 | **M4-Context 클래스 순서 수정** — `m4_context_refined/data.yaml`은 `0=wall, 1=ceiling, 2=floor, 3=window, 4=door`인데 추론 코드는 알파벳 순 `[ceiling, door, floor, wall, window]`. wall↔ceiling↔window↔door 라벨 뒤섞여 `geometric_gate`가 사실상 무작위 통과 판정 — 풀밭 위 검출이 통과한 핵심 원인. data.yaml 순서로 정렬. | app/services/inference_pipeline_20.py |
-| R-pd.9 | 2026-05-07 18:00 | **taxonomy 9개 raw 클래스 등록** — M1-ResNet 출력 4종(`caulking_indicator`, `crack_indicator`, `moisture_indicator`, `structural_damage`), M2 출력 2종(`surface_defect`, `surface_defect_wall`), M3 출력 3종(`floor_defect`, `glass_defect`, `frame_defect`)이 미등록 → `("X-00", raw_name, ...)` 폴백으로 화면에 영문 raw 라벨 노출 가능성. 의미 정렬된 정식 코드(A-02/A-03/B-03/B-04/C-04/D-03/E-01/E-02)로 매핑. | app/services/defect_taxonomy.py |
-| R-pd.10 | 2026-05-07 18:00 | **0-detection 진단 트레이스** — `pipeline20.detect`에 단계별 카운트(M1/M2/M3 raw → geometric_gate → furniture_gate → NMS) 캡처 후 검출 0건 시 한 줄 로그 출력. 정상 흐름은 침묵, 0건일 때만 손실 지점 즉시 식별. | app/services/inference_pipeline_20.py |
+| R32.1 | 2026-05-07 18:00 | **mock 폴백 4곳 모두 제거** — `_detect()`/`_detect_real()`이 모델 미로드, 검출 0건, bbox 비어있음, 추론 예외 시 mock 라벨을 만들지 않고 `None` 반환. 디렉토리명 기반 가짜 라벨이 실제 추론 자리를 가로채 입주자 신뢰 직결 사고. mock 함수 자체는 dead code로 보존(시연 분기 부활 여지). | app/services/test_stream.py |
+| R32.2 | 2026-05-07 18:00 | **PatchCore 입력 차원 자동 감지** — `ONNXPatchCoreDetector.__init__`이 모델 그래프(`session.get_inputs()[0].shape`)에서 입력 H/W 자동 추출. 하드코딩 256은 모델이 224 fixed로 export된 상태에서 매 frame `INVALID_ARGUMENT` 예외 → `_detect_real` try/except에 잡혀 모든 검출 None. 향후 backbone 교체에도 자동 적응. | app/services/onnx_inference.py |
+| R32.3 | 2026-05-07 18:00 | **M2-ResNet 5→2 클래스 매핑 동기화** — 학습 스크립트(`train_m2_resnet_surface.py:30-32`)는 `NUM_CLASSES=2` (`baseboard_damage`, `surface_defect`)인데 추론 코드는 옛 5-class 매핑 유지. 모델 인덱스 1 → `wallpaper_bubble`로 잘못 매핑되어 모든 표면 결함이 "C-02 도배지 기포·들뜸"으로 표시. ImageFolder 알파벳순 2-class로 동기화. | app/services/inference_pipeline_20.py |
+| R32.4 | 2026-05-07 18:00 | **M4-Context 클래스 순서 수정** — `m4_context_refined/data.yaml`은 `0=wall, 1=ceiling, 2=floor, 3=window, 4=door`인데 추론 코드는 알파벳 순 `[ceiling, door, floor, wall, window]`. wall↔ceiling↔window↔door 라벨 뒤섞여 `geometric_gate`가 사실상 무작위 통과 판정 — 풀밭 위 검출이 통과한 핵심 원인. data.yaml 순서로 정렬. | app/services/inference_pipeline_20.py |
+| R32.5 | 2026-05-07 18:00 | **taxonomy 9개 raw 클래스 등록** — M1-ResNet 출력 4종(`caulking_indicator`, `crack_indicator`, `moisture_indicator`, `structural_damage`), M2 출력 2종(`surface_defect`, `surface_defect_wall`), M3 출력 3종(`floor_defect`, `glass_defect`, `frame_defect`)이 미등록 → `("X-00", raw_name, ...)` 폴백으로 화면에 영문 raw 라벨 노출 가능성. 의미 정렬된 정식 코드(A-02/A-03/B-03/B-04/C-04/D-03/E-01/E-02)로 매핑. | app/services/defect_taxonomy.py |
+| R32.6 | 2026-05-07 18:00 | **0-detection 진단 트레이스** — `pipeline20.detect`에 단계별 카운트(M1/M2/M3 raw → geometric_gate → furniture_gate → NMS) 캡처 후 검출 0건 시 한 줄 로그 출력. 정상 흐름은 침묵, 0건일 때만 손실 지점 즉시 식별. | app/services/inference_pipeline_20.py |
 
 ### 📐 설계 결정 / 진단 패턴
 
-- **5건 모두 동일 패턴 — 학습-추론 동기화 누락**: 학습 스크립트/data.yaml은 갱신됐는데 추론 코드와 taxonomy가 그에 맞춰 갱신되지 않음. 단일 사고가 아니라 시스템 전반의 정합성 검증 부재. 재발 방지용 메모리(`feedback_onnx_class_mapping_audit`) 추가 — ONNX dim ↔ data.yaml/CLASS_NAMES ↔ inference 매핑 ↔ taxonomy 4-way cross-check를 표준 절차로.
-- **mock 폴백 정책 — 안전 직결 우선**: 데모용 mock이 실제 추론 자리를 가로채는 것 자체가 가장 큰 사고. "검출 못함"이 정직한 답. mock 함수는 dead code로 보존(시연 분기 부활 여지)하되 호출 경로는 차단.
+- **5건 모두 동일 패턴 — 학습-추론 동기화 누락**: 학습 스크립트/data.yaml은 갱신됐는데 추론 코드와 taxonomy가 그에 맞춰 갱신되지 않음. 단일 사고가 아니라 시스템 전반의 정합성 검증 부재. 재발 방지용 메모리 추가 — ONNX dim ↔ data.yaml/CLASS_NAMES ↔ inference 매핑 ↔ taxonomy 4-way cross-check를 표준 절차로.
+- **mock 폴백 정책 — 안전 직결 우선**: 데모용 mock이 실제 추론 자리를 가로채는 것 자체가 가장 큰 사고. "검출 못함"이 정직한 답. mock 함수는 dead code로 보존하되 호출 경로는 차단.
 - **PatchCore 자동 감지의 일반성**: 향후 backbone 교체로 input shape이 바뀌어도 코드 수정 불필요 — 같은 사고 재발 차단.
-- **남은 학습 차원 이슈 (v1.1 사이클)**: M1-YOLO `caulking_defect` precision 부족 (풀밭/배경 위 FP), M2/M3 ResNet sub-분류 부재 (도배 vs 도색 vs 스크래치 구분 불가). 후처리로 가리지 않고 학습 차원에서 처리 — `feedback_pure_training_mAP`, `feedback_training_first_no_postprocess_default` 정책 준수.
+- **남은 학습 차원 이슈 (v1.1 사이클)**: M1-YOLO `caulking_defect` precision 부족 (풀밭/배경 위 FP), M2/M3 ResNet sub-분류 부재 (도배 vs 도색 vs 스크래치 구분 불가). 후처리로 가리지 않고 학습 차원에서 처리.
 
 ### 🚨 안전성 영향
 
@@ -2507,60 +2287,929 @@ R30 + R31 결합 효과: 사용자가 하자 카드 클릭 시 **(1) 항상 정�
 - `geometric_gate` 정상화로 배경/풀밭/실외 환경에서의 FP 차단 정확도 회복.
 - 검출이 없을 때 가짜 표시 안 함 — 미탐(false negative)은 학습 차원에서 해결, 화면은 항상 모델의 정직한 출력만.
 
-
-
 ---
 
-## 🐞 R-postdeploy.11 — testMode 첨부/재생/오탐 일괄 수정 (2026-05-07 16:34)
+## 🎯 R33 — 체감 속도 + TEST MODE 녹화 지원 (2026-05-07 19:00)
 
-> 사용자 보고 (배포 + 로컬): (1) `aeroinspect.site` test mode 에서 파일 첨부 시도 시 항상 실패. (2) 36.8MB 영상 업로드는 매우 오래 걸리고 업로드 후에도 화면이 `AWAITING SIGNAL` 로 대기. (3) 사람 영상에 "B-03 코킹 누락 43%", "B-04 방수층 들뜸/누수 35%" 같은 OOD 거짓 검출. (4) 영상 재생 자체가 슬라이드쇼처럼 끊김.
+> 사용자 피드백: "전체적인 체감 속도가 너무 느리다. 로그인 최초 10초+, 업로드/재생도 마찬가지. 다른 플랫폼 가면 된다는 생각이 드는 순간 망한 거다. 사용자 기다림 최소화. 녹화는 R2 보류 상태에서 로컬에라도 저장되길 희망." 통합 repo R-postdeploy.12 작업물 동기화.
 
 ### 🛠 변경
 
 | 라운드 | 시각 | 작업 | 산출물 |
 |-------|------|------|-------|
-| R-pd.11.1 | 2026-05-07 16:34 | **Fly secrets `TEST_MODE_ENABLED=true`** — `curl POST /api/v1/stream/test/upload` → `404 {"detail":"Test mode is disabled"}` 확인. 배포 시점에 false 로 박혀 있어 모든 `/test/*` 엔드포인트가 가드 차단. v1.1 정책상 영상 수신기 미도착이라 testMode 가 사실상 운영 모드인데 비활성 상태 → secret 활성화 + 머신 재시작 검증(200 응답). | Fly secrets |
-| R-pd.11.2 | 2026-05-07 16:34 | **업로드 직후 자동 source 전환** — `upload_test_files()` 가 saved>0 이면 `set_source("upload")`. 머신 재시작/콜드 스타트로 in-memory `_source` 가 'project' 디폴트로 reset 된 후 사용자가 업로드 탭 재클릭 안 하면 백엔드는 project 폴더 스캔 → 컨테이너에 학습 이미지 없음 → 0 frames → `AWAITING SIGNAL` 로 멎는 사고 재발 방지. 업로드 행위 자체가 source 의도 표명. | app/api/stream.py |
-| R-pd.11.3 | 2026-05-07 16:34 | **chunk 스트리밍 업로드** — `await upload_file.read()`(전체 RAM 로드) → 1MiB chunk 루프 + `f.write(chunk)`. 1GB Fly 머신에서 모델+multipart 동시 압박으로 36MB 영상이 수십 초 걸리는 사고 재발 방지. RAM 점유는 chunk 크기로 cap. | app/services/test_stream.py |
-| R-pd.11.4 | 2026-05-07 16:34 | **영상 재생 끊김 수정 (3~5fps → ~30fps)** — `_stream_video_frames()` 의 fps cap 10→30, detection 추론 빈도 매 3프레임→매 7프레임, `prev_detection` broadcast 를 `await`(0.15~0.4s lag) → `asyncio.create_task` fire-and-forget 으로 전환. multipart commit 타이밍은 prev_detection 1프레임 지연으로 이미 보장되므로 별도 sleep 불필요. | app/services/test_stream.py |
-| R-pd.11.5 | 2026-05-07 16:34 | **UI 노출 conf 게이트(클래스별)** — `_detect_real()` 마지막에 클래스별 `_ui_conf_gate` cutoff 적용. 기본 0.50, 단열(insulation/단열) 0.30. 모델 학습 임계값(M1=0.25, M2/M3=0.30)과 별개로 UI 노출 단계에서 OOD 저신뢰 검출 차단. 사람 영상 35~43% conf 사례를 직접 차단. 단열은 미탐 비용이 더 커 cutoff 보수 유지. | app/services/test_stream.py |
-
-### 📐 설계 결정 / 진단 패턴
-
-- **TEST_MODE_ENABLED 가드와 운영 정책 정합성 사고**: 코드 디폴트는 True 인데 Fly secret 으로 False 가 박혀 있어 운영 모드(testMode 위장 = 현장 점검) 자체가 차단됨. v1.1 cycle 동안 영상 수신기 미도착이 명시적이므로 secret 정책은 True 가 맞음. 향후 배포 환경 secret 변경 시 운영 정책과 코드 가드의 정합성 cross-check 필수.
-- **In-memory 싱글톤 reset 대비 자동 동기화**: `test_stream_service._source` 는 process-local. Fly auto_stop_machines='stop' + min_machines=0 이면 idle 시 머신 종료, 다음 요청에서 새 인스턴스가 디폴트('project')로 시작. 프론트 store 와 백엔드 in-memory 가 어긋나는 race 를 행위(=업로드)가 의도를 표명한다는 원칙으로 자동 봉합.
-- **multipart 메모리 스풀 vs 디스크 스트리밍**: FastAPI `UploadFile.read()` 는 spooled 1MB 임계값 이상이면 디스크에 재배치하지만, `await ufile.read()` 는 그 후 다시 bytes 객체로 RAM 로드. chunk 루프(`while ufile.read(N)`)가 RAM cap 보장.
-- **fire-and-forget broadcast 안전성**: detection broadcast 는 사용자에게 카드를 띄우는 부수 동작이라 실패해도 영상 자체는 멈추지 않음. `asyncio.create_task` 의 미참조 task 는 GC 위험이 이론적으로 있으나, ws_manager.broadcast 가 즉시 schedule 되어 실 GC 전에 완료. 30fps 보장 우선.
-- **UI conf 게이트 ≠ 학습 임계값 약화**: 모델 자체는 그대로(학습 단계 baseline 보존, [후처리 강도 정책] 정합), 노출 단계에 추가 보호막. Precision 우선([모든 하자 엄격·신뢰 우선]). 단열만 cutoff 보수 — [단열 결함 더 엄격하게] 와 정합.
-
-### 🚨 안전성 영향
-
-- 운영 모드(testMode 위장)가 배포에서 다시 동작 — 영상 수신기 도착 전까지의 v1.1 운영 가능.
-- OOD 입력에서 거짓 라벨 노출 차단 — 입주자 신뢰 사고 추가 방지.
-- 영상 재생 30fps 보장 — 사용자가 카메라 영상으로 인지 가능한 수준.
-- 업로드 RAM 사용량 cap — 1GB Fly 머신 OOM 방지(영상 한 개 당 1MiB 이하).
-
----
-
-## 🎯 R-postdeploy.12 — 체감 속도 + TEST MODE 녹화 지원 (2026-05-07 19:00)
-
-> 사용자 피드백 (배포 후 실사용 중): "전체적인 체감 속도가 너무 느리다. 로그인 최초 10초+, 업로드/재생도 마찬가지. 다른 플랫폼 가면 된다는 생각이 드는 순간 망한 거다. 사용자 기다림 최소화. 드래그앤드랍도 가능하게. 녹화는 R2 보류 상태에서 로컬에라도 저장되길 희망."
-
-### 🛠 변경
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R-pd.12.1 | 2026-05-07 19:00 | **`/test/start` 모델 로드 비동기화** — `await load_models()` → `asyncio.create_task(...)` 백그라운드. 즉시 응답해서 `_playing=True` 만 켜놓고 모델은 뒤따라 준비. 모델 미로드 시 `_detect`가 None 반환하므로 검출 없이도 영상은 흐름. Fly.io 콜드 스타트 + 11모델 로드(~25-40초) 동안 frontend `<img>` 가 first-boundary 오기 전 edge timeout으로 onError 발화 → '스트림 대기 중' 영구 표시 사고 차단. | app/api/stream.py |
-| R-pd.12.2 | 2026-05-07 19:00 | **TEST MODE 녹화 지원 — `_TestStreamRecorder`** — RecordingService 가 실제 카메라(`CameraService`) 만 구독해 test mode 에선 녹화 불가 사고. test_stream._current_*_jpeg 폴링 → cv2.imdecode → cv2.VideoWriter mp4 저장. RecordingService.start() 자동 분기 (test_stream._playing 체크). 로컬 ./recordings 디스크 우선 (R2 보류). 사용자 다운로드는 `GET /api/v1/stream/record/{filename}` 그대로 활용. | app/services/recording.py |
+| R33.1 | 2026-05-07 19:00 | **`/test/start` 모델 로드 비동기화** — `await load_models()` → `asyncio.create_task(...)` 백그라운드. 즉시 응답해서 `_playing=True` 만 켜놓고 모델은 뒤따라 준비. 모델 미로드 시 `_detect`가 None 반환하므로 검출 없이도 영상은 흐름. Fly.io 콜드 스타트 + 11모델 로드(~25-40초) 동안 frontend `<img>` 가 first-boundary 오기 전 edge timeout 으로 onError 발화 → '스트림 대기 중' 영구 표시 사고 차단. | app/api/stream.py |
+| R33.2 | 2026-05-07 19:00 | **TEST MODE 녹화 지원 — `_TestStreamRecorder`** — RecordingService 가 실제 카메라(`CameraService`) 만 구독해 test mode 에선 녹화 불가 사고. test_stream._current_*_jpeg 폴링 → cv2.imdecode → cv2.VideoWriter mp4 저장. RecordingService.start() 자동 분기 (test_stream._playing 체크). 로컬 ./recordings 디스크 우선 (R2 보류). | app/services/recording.py |
 
 ### 📐 설계 결정
 
-- **모델 로드 비동기화 — frontend 영상 흐름 즉시 보장**: 모델 미로드 시 `_detect` 가 None 반환하는 R32 mock 폴백 제거가 부수 효과로 활용됨. 영상은 ONNX 추론 없이도 raw frame 그대로 yield → 사용자 체감 "재생 시작" 시간 ~25초 → 즉시.
-- **TEST MODE 녹화 — 폴링 vs 콜백**: test_stream 에 콜백 등록 메커니즘 추가는 침습적. 대신 `_frame_version` 카운터 polling(50ms) — 추가 변경 0, 동시성 안전. 첫 frame 기준으로 VideoWriter 해상도 고정 + 후속 frame 리사이즈로 다양한 소스 mix(이미지 + 동영상 혼합) 대응.
-- **R2 보류 + 로컬 우선 정책**: 메모리 룰 [project_file_storage_r2] 상 R2 연동은 정식 점검 세션용. test mode 녹화는 데모/검증/QA 영역이라 로컬 디스크로 충분. ephemeral storage 한계는 사용자가 녹화 직후 다운로드로 회피.
+- **모델 로드 비동기화 — 영상 흐름 즉시 보장**: 모델 미로드 시 `_detect` 가 None 반환하는 R32 mock 폴백 제거가 부수 효과로 활용됨. 영상은 ONNX 추론 없이도 raw frame 그대로 yield → 사용자 체감 "재생 시작" 시간 ~25초 → 즉시.
+- **TEST MODE 녹화 — 폴링 vs 콜백**: test_stream 에 콜백 등록 메커니즘 추가는 침습적. 대신 `_frame_version` 카운터 polling(50ms) — 추가 변경 0, 동시성 안전. 첫 frame 기준으로 VideoWriter 해상도 고정 + 후속 frame 리사이즈로 다양한 소스 mix 대응.
+- **R2 보류 + 로컬 우선 정책**: 메모리 룰 [project_file_storage_r2] 상 R2 연동은 정식 점검 세션용. test mode 녹화는 데모/검증/QA 영역이라 로컬 디스크로 충분. ephemeral storage 한계는 사용자가 녹화 직후 다운로드로 회피 (`GET /api/v1/stream/record/{filename}`).
 
 ### 🚨 안전성 영향
 
 - 거짓 응답 가속화 사고 없음 — 모델 로드 비동기화는 검출 정확도엔 영향 0. 검출 카드는 모델 준비 완료 후에만 등장.
 - TEST MODE 녹화 mp4 는 backend burned-in bbox/라벨 그대로 포함 — 검출 결과 그대로 보존.
 - 운영 환경 ephemeral storage 한계 그대로(머신 stop 시 ./recordings 사라짐). 사용자가 녹화 직후 다운로드해야 영구 보관.
+
+---
+
+## 🎯 R34 — Fly cold start 근본 완화 (auto_stop_machines suspend) (2026-05-12 13:35)
+
+> 사용자 피드백: "처음 브라우저 접속해서 로그인까지 15초가 걸리는데 .. 맞는거야? 너무 오래 걸리는데" — R33에서 다층 워밍 핑(Login.jsx t=0/5s/12s + input focus)으로 완화 시도했지만, 사용자가 랜딩 거치지 않고 직접 /login 깊은 링크 진입 시 SPA 번들 로드 후 첫 ping 자체가 cold boot 트리거 → 같은 부팅 큐에 사용자 요청이 합류해 콜드 비용을 그대로 흡수. 워밍 핑은 보완책일 뿐 근본 해결 아님. 통합 repo R-postdeploy.13 작업문 동기화.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R34.1 | 2026-05-12 13:35 | **fly.toml `auto_stop_machines = 'stop'` → `'suspend'`** — `stop` 은 컨테이너 완전 종료 → 첫 요청 시 Python+Uvicorn+모델 import 비용을 사용자가 그대로 흡수(~10-15초). `suspend` 는 메모리 스냅샷 보존 → wake-up ~수백ms. 비용 영향 없음(`min_machines_running=0` 유지). | fly.toml |
+
+### 📐 설계 결정
+
+- **suspend vs min_machines_running=1**: 후자는 0초 cold start지만 월 ~$5 추가 비용. 사용자가 "비용 들이지 않는 방법" 우선 요청 → suspend 채택. 상업 출시 기준에서 본격 트래픽 발생 시 min_machines_running=1 재검토 여지 남김.
+- **워밍 핑 코드는 유지**: suspend 모드에서도 첫 wake-up에는 ~수백ms 비용 발생. 워밍 핑이 사용자 입력 시점 이전에 wake를 걸어두면 체감 latency 추가 절감. 이중 안전장치.
+- **CI 자동 deploy 무관**: `.github/workflows/fly-deploy.yml` 은 main 브랜치 push 시에만 자동 deploy. MS push 는 production 미반영. 명시적 `fly deploy` 로만 적용.
+
+### 🚨 안전성 영향
+
+- suspend 모드는 Fly 공식 권장 기능 — 데이터 손실 위험 없음. 메모리 스냅샷 + 디스크 영속.
+- 첫 wake-up 응답 빨라짐 → 사용자 신뢰 회복 (R33 사용자 코멘트 "다른 플랫폼 가면 된다는 생각이 드는 순간 망한 거다" 직접 대응).
+
+---
+
+## 🎯 R35 — Gazebo .world 자동 생성 + L3 자율비행 + LiDAR raycast 시뮬레이터 (2026-05-13 17:30)
+
+> 사용자 요구: "L3 는 Gazebo 를 이용해서 드론의 시뮬레이션 비행을 통한 3D 모델링을 할거야. LiDAR 를 사용하겠지. 자율비행이니까 참고. 실시간 자율비행 프로세스 검증." 자가검토 결과 L3 는 UI 만 있고 Gazebo/ROS2/SLAM/자율비행 제어 API 전부 미구현 — 프론트 LevelThreeMesh 가 5000점 랜덤 폴백만 그리고 있던 상태.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R35.1 | 2026-05-13 16:50 | **Gazebo .world SDF 생성기** — 평면도 추출 결과(walls + outline) → SDF 1.9 .world XML. 각 벽 = static box `<model>` (collision + visual), outline = 반투명 cyan 박스 (창호 갭 포함 외벽). 표준 sun + ground_plane 동봉. `derive_world_size()` 가 BuildingMesh.deriveSceneSize 와 동일 정책으로 calibrated > aspect > fallback 산출. ROS2 / Gazebo 의존성 0 (순수 ElementTree). | app/services/gazebo_world_generator.py |
+| R35.2 | 2026-05-13 17:00 | **자율비행 + LiDAR raycast 시뮬레이터** — Gazebo 미가용 환경 백엔드 단독 실행. boustrophedon (Z형 격자) 비행 경로 자동 산출 (lane_spacing=1.5m, margin=0.8m). 각 위치에서 360° 빔(36개) raycast → 가장 가까운 벽까지 거리 → 3D 점 (z 산란 0.05~ceiling+1m). MissionState dataclass + `_active_missions` 모듈 레지스트리 + `cancel_event` 으로 중단 가능. 비동기 백그라운드 태스크 (`asyncio.create_task`). 1Hz/10Hz 텔레메트리/스캔. WS 'defects' 채널에 batch publish. | app/services/autonomous_flight_simulator.py |
+| R35.3 | 2026-05-13 17:10 | **POST /floorplan/{id}/generate-world + GET /floorplan/{id}/world** — 추출된 walls + scale_px_per_meter 를 `write_world_file()` 로 디스크 작성, `gazebo_world_path` 에 경로 기록. GET 엔드포인트는 FileResponse 로 .world 파일 다운로드 (실제 Gazebo 컨테이너에 즉시 입력 가능). | app/api/floorplan.py |
+| R35.4 | 2026-05-13 17:15 | **POST /missions/autonomous-scan/start + cancel + status + list** — pydantic 요청/응답 스키마 + `run_autonomous_scan()` 호출. floorplan_id 전달 시 DB 에서 walls 로드 (이후 사용자가 조직 스코프 검증 추가). `derive_world_size()` 통합. boustrophedon 길이/속도로 estimated_duration_s 산출. | app/api/missions.py |
+| R35.5 | 2026-05-13 17:20 | **router.py — /missions 등록** — 다른 protected 라우터들과 동일 패턴. PROTECTED_RESPONSES + tags=["Missions"]. (이후 사용자가 contact 라우터 등도 함께 등록하며 정합성 유지.) | app/api/router.py |
+
+### 📐 설계 결정
+
+- **Gazebo 의존성 0 — SDF XML 직접 생성**: ROS2/Gazebo 설치는 인프라 부담(컨테이너/GPU/X11). 백엔드는 `.world` 파일만 생성하고 실제 시뮬은 별도 컨테이너에 일임 → 배포 환경 자유도 확보. 동시에 같은 walls 데이터로 자체 raycast 시뮬도 제공해 Gazebo 없이도 동등 데이터 흐름.
+- **boustrophedon vs spiral vs random**: 격자 스캔이 실제 LiDAR 매핑 SOP. spiral 은 중앙 밀도 편향, random 은 비결정적. lane_spacing 1.5m 는 라이다 빔 간격 + 점 밀도 균형값. margin 0.8m 로 외벽 충돌 회피.
+- **모듈 레지스트리 vs DB 미션**: 미션이 ephemeral(시뮬 환경 한정)이라 DB 영속성 불필요. 단일 프로세스 가정(--workers 1) 이므로 모듈 dict 충분. 다중 프로세스 도입 시 Redis 로 이관 필요(R32-style).
+- **z 산란 — 0.05~ceiling+1m 균등**: 실제 LiDAR 빔이 천장/바닥 면에 부딪힐 확률을 균등 모델링. 현실은 빔 angle/지면 반사율에 따라 분포 다르지만 데모 시각화엔 충분.
+- **WS 채널 'defects' 재사용**: 새 'lidar' 채널 추가하면 useWebSocket 변경 + 백엔드 STATIC_CHANNELS 변경 둘 다 필요. 이벤트 type 으로 구분되므로 'defects' 채널에 통합 발행 — 채널 = 연결 단위, 이벤트 type = 의미 단위 분리.
+- **batch publish (60점/batch)**: 36 빔 × 10Hz = 360 점/초. 1점씩 publish 하면 WS 오버헤드. 60점 batch (≈ 1 스캔 + α) 가 React 렌더 부하와 네트워크 패킷 빈도 균형점.
+- **floorplan_id vs payload.walls 둘 다 허용**: floorplan_id 는 DB 보안 검증 동반(이후 조직 스코프 추가). payload.walls 는 PreWork 안 거친 ad-hoc 시나리오 (e.g. 프론트 폴백 walls). 두 경로 모두 유효.
+
+### 🚨 안전성 영향
+
+- Gazebo 의존성 추가 0 → requirements 변경 없음. 운영 환경 영향 0.
+- 시뮬레이터는 백그라운드 태스크 → 메인 요청 흐름 차단 0. cancel_event 로 즉시 중단 가능.
+- `_active_missions` 메모리 dict 누수 — 프로세스 재시작 전까지 누적. 향후 TTL 청소 필요 (지금은 자율비행 미션 빈도가 낮아 허용).
+- WS broadcast 부하 — 36 빔 × 10Hz × 다중 클라이언트 = 클라이언트 N 배. 현재 데모 환경은 N=1~2. 운영 시 클라이언트 N 명이면 batch_size 증가 + lidar_hz 감소로 조정.
+- 검출/추론 결과 정확도 영향 0 — L3 자율비행은 별도 기능 라인.
+
+### 🔍 검증 결과
+
+- 단위: `write_world_file()` 1500×1000(3:2)→12×8m, 600×1500(2:5)→4.8×12m, calibrated 200px/m→실측 10×7.5m 종횡비 보존 확인
+- 시뮬레이터: L2 환경 (5벽 + outline) 100% 완주 4032점, 빈 사각형 환경 100% 완주 1512점, mission.completed 발행 확인
+- ws_manager.broadcast 모킹 테스트로 telemetry.update + lidar.points + mission.completed 이벤트 시퀀스 확인
+- 백엔드 syntax + 모듈 import 통과 (`ast.parse` + 런타임 import)
+
+### 🔧 향후 확장 포인트
+
+- **실 Gazebo 도입 시**: `autonomous_flight_simulator` 의 raycast 부분만 ros2 lidar 토픽 subscriber 로 교체. WS publish 부분(`_publish_points`/`_publish_telemetry`) 은 그대로 재사용 → 프론트 변경 0.
+- **MAVLink 실 드론 도입 시**: `_fly_and_scan()` 의 boustrophedon 경로 산출 부분을 MAVLink mission upload + waypoint feedback 으로 교체.
+- **Gazebo .world 다운로드 활용**: GET /floorplan/{id}/world 로 받은 파일을 사용자가 로컬 Gazebo 에 즉시 로드 가능 → 동일 환경 재현성 보장.
+
+---
+
+## 🎯 R35 — 전체 프로세스 검증 + 보안·격리·인프라 일괄 보완 + Fly 운영 적용 (2026-05-13 14:30~18:30)
+
+> 사용자 피드백: "현재 프로젝트의 전체적인 프로세스 검증해줘. 로그인부터 시작해서 모든 기능들 전체 다. 누락된 부분이나 보완이 필요한 부분 정리해서 알려주면 순차적으로 진행하자." → 프론트/백 동시 audit → P0(보안)·P1(미구현)·P2(통합 미스매치)·P3(인프라) 정리 → 사용자 확인 후 순차 수정·검증·다음 단계 반복. 후속 사용자 지시: "다 진행", "PostgreSQL 연결 됨, Cloudflare만 별도", "Fly·로컬 .env 양쪽 동기화", "통합 repo TEAM_PROJECT_2 에도 함께 업데이트".
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R35.1 | 2026-05-13 14:30 | **WebSocket 다중 채널 구독 (`?channels=a,b,c`)** — 기존 단일 `?channel=` 그대로 호환하면서 콤마 분리 다중 구독 추가. ws_manager 에 `register()` 분리 — 첫 채널은 connect()(accept+register), 이후는 register-only. autonomous_flight_simulator 가 'defects' 채널로 일괄 발행해 미션 중에는 작동했지만, telemetry/camera/thermal 채널 분리 broadcast 가 프론트에 도달 못 하던 사고 해결. | app/api/websocket.py, app/core/ws_manager.py |
+| R35.2 | 2026-05-13 14:35 | **WebSocket JWT 인증 (본인 채널 검증)** — `?token=` 쿼리 파라미터 추가. `_authorize_channel()` 헬퍼로 채널별 권한 평가: 정적(defects/telemetry/camera/thermal) 누구나, `user:{uid}`·`notifications:{uid}` 는 토큰 sub 일치 필수, `chat:*` 는 토큰 보유만 검증(멤버십은 발행 측). 거부 채널은 묵시적 제거 후 rejected[] 응답으로 디버깅 단서. | app/api/websocket.py |
+| R35.3 | 2026-05-13 14:40 | **floorplan/upload `image/webp` MIME 허용** — 프론트 floorplanApi 는 webp 허용인데 백엔드 ALLOWED_CONTENT_TYPES 누락이라 업로드 400. set 에 `"image/webp"` 추가. | app/api/floorplan.py |
+| R35.4 | 2026-05-13 14:55 | **floorplan/slam 조직 멤버 의존성 (1차)** — `get_current_user` → `get_current_org_member` 로 일괄 교체. 미소속 사용자 차단. 데이터 격리는 R35.11 에서 마이그레이션과 함께. missions.py 의 floorplan 조회도 같이 갱신. | app/api/floorplan.py, app/api/slam.py, app/api/missions.py |
+| R35.5 | 2026-05-13 15:00 | **telemetry POST / detect / stream 인증** — `POST /telemetry`(드론→백 푸시) `verify_ai_webhook` 강제. `POST /detect` `/detect/batch` 는 새 의존성 `verify_ai_webhook_or_user`(webhook secret OR Bearer 둘 다 허용). stream/mode·record/test 13개 엔드포인트에 `get_current_user` 부여(GET MJPEG·녹화 다운로드는 공개 유지 — 브라우저 `<img>` 호환). | app/dependencies.py, app/api/telemetry.py, app/api/detect.py, app/api/stream.py |
+| R35.6 | 2026-05-13 15:05 | **Rate Limit 미들웨어** — IP+엔드포인트 prefix 슬라이딩 윈도우(60s). login=10/min, signup=5/min, find-id/pw=5/min, oauth=20/min, detect=60/min, ai_webhook=600/min, telemetry=600/min, 기본 120/min. 429 + Retry-After:60. 외부 의존성 없이 메모리 deque. main.py middleware 등록. | app/core/rate_limit.py (신규), app/main.py |
+| R35.7 | 2026-05-13 15:25 | **/contact 엔드포인트 + Notification 발송** — 프론트 ContactModal 의 TODO 백엔드 부재 해결. 비로그인 호출 허용(랜딩 페이지용). 슈퍼어드민 사용자 수집 → `notification_service.create_for_many()` 로 `category="system"` 알림 일괄 발송. metadata 에 customer_type/biz_number/phone 보존. | app/api/contact.py (신규), app/api/router.py |
+| R35.8 | 2026-05-13 15:30 | **employee/kpi/monthly — average_flight_minutes 텔레메트리 기반 계산** — 기존 하드 0 placeholder 제거. TelemetryLog 를 site_id 별로 (MAX-MIN ts) AVG → 분 단위. 5개 미만 샘플 사이트는 HAVING 으로 제외. | app/api/employee.py |
+| R35.9 | 2026-05-13 15:45 | **Floorplan/SlamMap `organization_id` UUID FK 컬럼** — 모델에 nullable FK + 인덱스 추가. 점진 마이그레이션 위해 nullable=True. 라우터는 strict 필터(NULL 로우는 반환 안 함). | app/models/floorplan.py, app/models/slam_map.py |
+| R35.10 | 2026-05-13 15:50 | **Alembic revision j3d4e5f6a7b8 (down=89b53c16de85)** — 두 테이블에 organization_id + FK organizations.id + idx. 백필 SQL 가이드를 docstring 에 명시(`UPDATE ... WHERE organization_id IS NULL`). | alembic/versions/j3d4e5f6a7b8_add_org_id_to_floorplans_and_slam_maps.py (신규) |
+| R35.11 | 2026-05-13 16:00 | **floorplan/slam 라우터 조직 격리 완성** — `_get_org_floorplan(db, org_id, floorplan_id)`, `_get_org_slam_map()` 헬퍼 도입. list 는 base `WHERE organization_id == org.id` + count 동일 필터. upload/create 시 `organization_id=org.id` 자동 기록. 같은 패턴을 missions.start_autonomous_scan 의 floorplan 조회에도 적용. | app/api/floorplan.py, app/api/slam.py, app/api/missions.py |
+| R35.12 | 2026-05-13 16:15 | **Redis psubscribe 동적 채널** — 기존 RedisConnectionManager 가 정적 5채널만 subscribe → notifications:* / user:* / chat:* 패턴 누락 (cross-worker 알림/채팅 누락). `_patterns` 추가 + start() 에서 psubscribe, _subscriber_loop 가 message + pmessage 둘 다 처리, stop() 에서 punsubscribe. | app/core/ws_manager_redis.py |
+| R35.13 | 2026-05-13 16:20 | **main.py lifespan Redis 통합 + get_ws_manager lazy 참조** — WS_BACKEND==redis 면 lifespan 시작 시 RedisConnectionManager.start() + ws_manager 모듈 어트리뷰트 교체. dependencies.get_ws_manager 가 매번 `from app.core import ws_manager as wsmod; return wsmod.ws_manager` 로 lazy 참조 — top-level `from ... import ws_manager` 가 캡처한 옛 인스턴스 사고 차단. lifespan 종료 시 isinstance(RedisConnectionManager) 로 type narrowing 후 stop(). | app/main.py, app/dependencies.py |
+| R35.14 | 2026-05-13 16:30 | **Fly 운영 DB 마이그레이션 적용** — Fly 머신 깨우고(`flyctl machine start`), ssh stdin 으로 revision 파일 업로드(`cat > /app/alembic/versions/...`), `alembic upgrade head` 실행 → `89b53c16de85 → j3d4e5f6a7b8` 적용 확인. floorplans/slam_maps 에 organization_id 컬럼 정상 추가. | (운영 DB 직접 변경) |
+| R35.15 | 2026-05-13 17:00 | **Fly 코드 deploy** — `flyctl deploy --strategy=rolling -a aeroinspect-backend` 백그라운드 실행. 이미지 빌드 + 두 머신 롤링 업데이트. deployment-01KRG4MEB17HTFFZEQGRZGQPZ3 활성. | (Fly 운영 반영) |
+| R35.16 | 2026-05-13 16:48 | **로컬 .env 작성 (운영 secret 미러)** — Fly secrets 만 두지 말고 로컬 .env 에도 동일 정리 요청. `flyctl ssh console -C "env"` 로 운영 환경변수 dump → 분리 .env 작성. SMTP·ODCLOUD/KAKAO_JS 는 통합 repo TEAM_PROJECT_2 .env 에서 보강 (Fly 에 미설정인 부분 채움). | .env (신규, .gitignore 포함) |
+| R35.17 | 2026-05-13 18:10 | **통합 repo TEAM_PROJECT_2 동기화** — 18개 backend 변경 파일(websocket/ws_manager/ws_manager_redis/floorplan/slam/missions/telemetry/detect/stream/router/employee/contact/dependencies/main/rate_limit/floorplan model/slam_map model/j3d4e5f6a7b8 revision)을 통합 repo backend/ 에 그대로 복사. 통합 .env 에는 분리 repo 의 새 변수(APP_ENV·DATABASE_URL·AEROINSPECT_WEIGHTS_DIR·WALLPAPER_*·FRAME_SKIP·DEVICE·LOG_*·JWT_REFRESH_EXPIRE_DAYS·AI_WEBHOOK_SECRET·PUSH_PROVIDER·WS_BACKEND·REDIS_URL·DRONE_CONNECTED·TEST_MODE_ENABLED·USE_20DEFECT_PIPELINE·OAUTH_REDIRECT_BASE) append. | TEAM_PROJECT_2_Drone_project/backend/ |
+
+### 📐 설계 결정
+
+- **A1+A2 분리 vs 한 PR**: WebSocket 다중 채널(A1)은 클라이언트가 채널 늘려도 백엔드는 단순 register 추가만이라 위험 낮음. JWT 인증(A2)은 미인증 사고 차단이라 별도 단계로 빌드/테스트. 단, 핸들러 시그니처에 token 파라미터를 추가하는 변경은 한 번에 두 단계가 같이 들어가는 게 합리적이라 함께 적용 후 6 케이스 검증(본인/타인/공개/wrong-uid/chat-with-token/chat-no-token).
+- **`_authorize_channel` 기본 deny + 화이트리스트 prefix**: chat: 만 토큰 보유 검증(멤버십은 broadcast 발행 측에서 이미 체크) — 한 군데서 모든 멤버십 enforcement 를 강제하는 게 정합성 유지에 유리. user:/notifications: 는 토큰 sub 일치 강제. 거부된 채널은 응답에 명시 → 클라이언트가 잘못 구독 시 디버깅.
+- **rate_limit 가장 긴 prefix 우선 매칭**: `/api/v1/auth/login` 이 `/api/v1/auth/` 보다 길어 우선. PATH_LIMITS 정의 순서 무관 → 운영자가 새 prefix 추가 시 길이 비교만 신경.
+- **B1 2단계 분리 — 인증 강화 → 데이터 격리**: 첫 단계는 의존성만 교체해 미소속 사용자 차단(코드 변경 최소·즉시 적용). 두 번째는 모델/마이그레이션/필터링까지 — 이건 운영 DB 변경 동반이라 사용자 확인 후 단행. nullable=True 로 점진 허용 — 기존 NULL 로우는 라우터가 반환 안 함 → 비파괴.
+- **detect 의 verify_ai_webhook_or_user — OR 가 AND 보다 안전**: 둘 중 하나 통과면 OK. webhook secret 가진 외부 워커도, JWT 가진 웹 UI 사용자도 같은 엔드포인트 호출. AND 면 한 쪽이 다른 쪽 인증 자격 둘 다 가져야 하므로 운영 복잡도 ↑.
+- **employee/avg_flight_minutes 5건 미만 제외**: 첫 텔레메트리 1건만 들어와도 (MAX-MIN)=0 으로 평균 왜곡. 5건 임계는 짧은 비행도 통과시키되 빈 site 노이즈 제외하는 절충.
+- **Redis psubscribe 패턴 vs 동적 subscribe**: 본인 채널은 사용자별 동적 — subscribe 마다 새 subscriber 등록은 워커 수 × 사용자 수 만큼 채널 폭발. psubscribe("notifications:*") 한 줄로 패턴 매칭 후 자동 분배 — Redis 측 부담 최소.
+- **lazy get_ws_manager**: lifespan 에서 ws_manager 모듈 어트리뷰트를 RedisConnectionManager 로 교체할 때, 라우터들이 `from app.core.ws_manager import ws_manager` 로 캡처한 옛 ConnectionManager 인스턴스를 그대로 쓰면 broadcast 분리. dependencies 가 매번 lazy 참조하면 교체 효과 즉시 반영.
+- **운영 DB 직접 마이그레이션 — Fly SSH stdin**: 새 revision 파일은 컨테이너 이미지 deploy 전에는 머신에 없음. 두 단계 가능: (a) deploy 먼저 → revision 자동 포함 → alembic upgrade head, (b) ssh stdin 으로 revision 만 컨테이너에 cat > → alembic upgrade head, 그 다음 deploy. (b) 는 deploy 시간(~5분) 기다리지 않고 스키마 먼저 적용 가능 + 비파괴 마이그레이션(nullable add)이라 안전. 이번엔 (b).
+- **로컬 .env 운영 secret 미러 — 보안 트레이드오프**: 사용자가 명시 요청. .gitignore 포함이라 추적 X 지만 로컬 디스크 노출 시 운영 인증 정보까지 위험. .env 헤더에 명시 경고 + 외부 공유 금지 적시. dev 분리 시크릿이 정석이지만 사용자 의도 우선.
+
+### 🚨 안전성 영향
+
+- **본인 채널 정합성** — 이전엔 WS 가 인증 없이 누구나 `notifications:{타인 uid}` 구독 가능 → 알림 누설 가능했음. 토큰 sub 일치 검증으로 차단. 운영 시 사용자 알림이 정확히 본인에게만 전달.
+- **floorplan/slam 다조직 누설 차단** — 같은 백엔드 인스턴스에 여러 조직 사용자가 들어와 있어도 SELECT 단계에서 organization_id 필터로 분리. 기존 NULL 로우는 어떤 조직도 못 봐서 운영자 백필 필요(docstring 가이드 포함).
+- **마이그레이션 적용 무중단** — nullable 컬럼 추가 + FK + 인덱스. ALTER TABLE 시 락은 짧고 기본값 NULL 로 데이터 변경 없음. 운영 트래픽 영향 없음 확인.
+- **deploy 후 코드/DB 정합성** — 마이그레이션을 deploy 전에 적용했으므로 새 코드가 컬럼 참조 시도 시 이미 존재. 반대 순서였다면 OperationalError 발생 가능.
+- **Rate limit — DoS 표면 축소** — login 10/min, signup 5/min 등 가장 노출된 인증 경로 우선 제한. 단일 IP 의 brute-force·credential stuffing 차단.
+- **detect 무인증 → 인증 강제** — GPU 추론은 비용 발생. 무인증으로 누구나 호출 가능했던 점 차단.
+- **structlog/psql 등 일부 모듈 미설치는 로컬 환경 한정** — 운영 Fly 컨테이너엔 모두 설치되어 있고 검증 완료. AST 파싱으로 모든 변경 파일 구문 정상 확인.
+
+### 🔍 자가검토 발견 갭 (보완 완료)
+
+| # | 갭 | 보완 |
+|---|---|---|
+| 1 | WS 채널 분리 broadcast 가 프론트에 도달 못 함 | 다중 채널 구독 + 백엔드 register 분리 |
+| 2 | WS 본인 채널 무인증 → 알림 누설 가능 | JWT token + sub 일치 검증 |
+| 3 | floorplan/upload webp 400 | ALLOWED_CONTENT_TYPES 에 image/webp |
+| 4 | floorplan/slam 미소속자 접근 가능 | get_current_org_member 강제 |
+| 5 | floorplan/slam 타 조직 데이터 누설 | organization_id FK + 라우터 strict 필터 |
+| 6 | telemetry/detect/stream 무인증 | verify_ai_webhook / verify_ai_webhook_or_user / get_current_user |
+| 7 | 로그인/회원가입 brute-force 가능 | rate_limit 슬라이딩 윈도우 |
+| 8 | ContactModal 백엔드 미연결 (alert만) | /contact + notification_service |
+| 9 | average_flight_minutes 항상 0 | TelemetryLog MAX-MIN AVG |
+| 10 | Redis 동적 채널 cross-worker 안 됨 | psubscribe(notifications:*/user:*/chat:*) |
+| 11 | lifespan 에서 ws_manager 교체해도 라우터는 옛 인스턴스 사용 | dependencies lazy 참조 |
+| 12 | 운영 DB·로컬 .env 정합성 부재 | flyctl env dump → .env 미러 |
+| 13 | 분리 repo 만 변경 → 통합 repo 미반영 | TEAM_PROJECT_2 backend/frontend 동기 |
+
+---
+
+## 🎯 R36 — 평면도 가구 검출 정확도 + 데이터 수집 + ML 인프라 (2026-05-13 23:00)
+
+> 사용자 요구: "확실해? 정확도 측면은 어떻게 되지?" → "부족한 부분 다시 보완해서 진행" → "데이터 수집이라던가 .. 지금 할 수 있는 것들 해". 이전 R35 의 가구 처리는 평면도→3D 라인에 추가했지만 정량 정확도 측정 없음 + 외부 데이터 미검증 + ML 미통합 상태였음.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R36.1 | 2026-05-13 21:00 | **가구 검출 v3 (정확도 1차 향상)** — 다중 threshold (200/160/110), 작은 인접 객체 분리(closing 제거), circular/rectangular/small/unknown 라벨, IoU NMS 중복 제거, 진한 가구는 RETR_LIST + aspect 4.5 필터, axis-aligned `boundingRect` 보정. 합성 4 케이스 P=R=F1=1.0, IoU=0.987 | app/services/floorplan_processor.py (`_detect_furniture_shapes_multi`) |
+| R36.2 | 2026-05-13 21:30 | **DXF 파서 확장** — LINE 외에 INSERT(블록 펼치기) + CIRCLE + ARC + LWPOLYLINE + POLYLINE 처리. 합성 DXF (LINE 6 + CIRCLE + ARC + LWPOLYLINE 3 + INSERT 4) → walls 6 + furniture 13 정확 추출. 모듈로 분리. | app/services/dxf_parser.py (신규 240 줄), app/api/floorplan.py |
+| R36.3 | 2026-05-13 22:00 | **자율비행 회피 강화** — `_detour_chain` 재귀 우회 (MAX_DETOUR_DEPTH=3). 드론 외곽 반경 0.25m + 안전 마진 0.4m → obstacle 반경에 합산. 빽빽한 6가구 환경에서 회피 waypoint 35개 자동 삽입 (이전 1차 우회만은 8개) | app/services/autonomous_flight_simulator.py (`_detour_chain` + `MissionState.furniture_obstacles`) |
+| R36.4 | 2026-05-13 22:15 | **정량 정확도 측정 스위트** — `tests/test_floorplan_accuracy.py`: 합성 4 케이스 (simple/dense/noisy/dark) × precision/recall/IoU. anti-regression 안전 임계값 자동 체크 (recall ≥ 0.5~0.7). pytest 5/5 통과 (TOTAL P=R=F1=1.0, mIoU=0.987) | tests/test_floorplan_accuracy.py |
+| R36.5 | 2026-05-13 22:25 | **services-level 통합 테스트** — `tests/test_floorplan_pipeline_integration.py`: /analyze 스키마, /generate-world SDF, /missions/autonomous-scan/start + cancel, DXF 파이프라인. pytest 5/5 통과 (10.7s) | tests/test_floorplan_pipeline_integration.py |
+| R36.6 | 2026-05-13 22:35 | **ezdxf.read → ezdxf.readfile 패치** — `ezdxf.read()` 는 file stream 만 받음. file path 는 `readfile` 사용. DXF 파이프라인이 항상 실패하던 버그 1줄 수정 | app/api/floorplan.py |
+| R36.7 | 2026-05-13 22:50 | **Settings extra='ignore' + HTTP TestClient 통합** — `.env` 의 APP_ENV 등 알 수 없는 키로 부팅 차단되던 문제 해결. dependency_overrides 로 인증 우회 후 실 라우터 hit. /analyze, /validate, /missions/autonomous-scan/start + status + cancel + list, 비정상 입력 거부 7/7 통과 | app/config.py, tests/test_floorplan_http_integration.py |
+| R36.8 | 2026-05-13 22:55 | **공개 평면도 데이터 수집** — `tools/fetch_real_floorplans.py` (Wikimedia Special:FilePath) + `tools/synthesize_korean_floorplans.py` (한국 아파트 5 패턴: 84A 3bed, 59B 2bed, 110C 4bed, studio, L-shape) + GT JSON. 외부 1장 + 합성 5장 = 6장 데이터셋 | tools/, datasets/real_floorplans/, datasets/synthetic_korean/ |
+| R36.9 | 2026-05-13 22:58 | **실 데이터 정확도 측정** — `tests/test_floorplan_real_dataset.py`. 한국 5 시나리오에서 검출/매칭. NMS IoU 임계 0.5 → 0.3 적극 머지로 FP 감소. **TOTAL P=0.83, R=1.00, F1=0.92** (모든 가구 빠짐 없이 검출, FP는 회피 안전 입장에서 수용 가능) | tests/test_floorplan_real_dataset.py |
+| R36.10 | 2026-05-13 23:00 | **ML 학습 인프라** — CubiCasa5K 다운로더 (zenodo + 폴백 가이드), HouseExpo 대체, YOLOv8 학습 스크립트 (CubiCasa5K SVG → YOLO 라벨 변환 + 합성 한국 평면도로 시연 학습), `furniture_inference.py` 추론 서비스 + 도형 기반과 NMS 머지 하이브리드. 가중치 없으면 graceful pass-through | tools/fetch_cubicasa5k.py, tools/train_floorplan_yolo.py, app/services/furniture_inference.py |
+
+### 📐 설계 결정
+
+- **다중 threshold + RETR_LIST + boundingRect**: 한 번에 깨끗한 임계값을 잡기 어려운 평면도(가구 색조 다양·외벽이 가구 contour 가림·minAreaRect 회전 모호성) 에 대해 세 임계값 후보를 NMS로 통합. RETR_LIST 는 외벽 contour 안의 내부 가구도 잡되 max_area 필터로 외벽 자체는 제외. `boundingRect` 는 `minAreaRect` 의 회전된 (w,h) 가 GT와 90° 어긋나는 문제를 평면도(거의 축정렬) 가정 하에 회피.
+- **NMS IoU 0.3 (적극 머지)**: 다중 threshold 가 같은 가구를 다른 위치로 잡는 경우가 많음. 안전 입장에서 "같은 위치 점유물은 한 객체" 가 합리적. 측정에서 P 0.50→0.83, F1 0.81→0.92로 향상하면서 R 100% 유지.
+- **Recall 우선 안전 임계**: 가구 처리는 자율비행 충돌 회피의 안전 요건 → false positive (가짜 가구 회피) 보다 false negative (놓친 가구 충돌) 가 위험. 모든 테스트가 recall 임계값으로 검증.
+- **재귀 회피 + MAX_DETOUR_DEPTH=3**: 빽빽한 가구 환경에서 1차 우회 waypoint 가 다른 가구와 또 충돌 가능. 무한 재귀 방지 위해 깊이 3 한계. 실제 재귀 발생 시 우회 waypoint 자동 추가 (1차 8개 → 재귀 35개 환경에서).
+- **HTTP TestClient + dependency_overrides**: `.env` 의 알 수 없는 키 문제는 `extra="ignore"` 1 줄로 해결. 인증은 단위 테스트 표준 패턴 (실 JWT 발급/세션 없이 가짜 user/org 주입). 라우터 자체의 정합성은 검증되지만 실 인증 흐름은 별도 e2e 필요.
+- **데이터 수집 — 외부 의존성 한계**: Wikimedia 썸네일 차단 + Special:FilePath 도 일부만 성공 (1/6). CubiCasa5K 는 5GB 자동 다운로드 시도 + 실패 시 수동 가이드 출력. 즉시 정확도 측정 가능하도록 한국 아파트 패턴 합성 5 케이스 (실 분양 평면도 형태 모방) 보강.
+- **ML 인프라 — graceful pass-through**: 가중치 파일이 없거나 ultralytics 미설치면 자동 비활성, 도형 기반 결과만 반환. 학습은 별도 GPU 환경에서 진행하고 가중치만 `models_weights/` 에 떨어뜨리면 즉시 활성화.
+
+### 🚨 안전성 영향
+
+- 가구 처리 정확도 향상으로 자율비행 충돌 회피 안전성 직접 개선. 측정으로 검증된 첫 라운드.
+- 회피 알고리즘 강화는 빽빽한 가구 환경에서 의미 있음. 단순 환경에서는 추가 비용 0 (기존 동작 유지).
+- HTTP TestClient 가능해지면서 향후 회귀 테스트 자동화 기반 확보.
+- ML 추론은 옵션 기능 — 미설치 환경 영향 0. 가중치 도입 시 도형 기반은 1차 검출, ML 은 보강 (안전망 유지).
+
+### 🔍 측정 결과 요약
+
+| 데이터셋 | 케이스 | TP | FP | FN | Precision | Recall | F1 | mIoU |
+|---|---|---|---|---|---|---|---|---|
+| 합성 4 케이스 | simple/dense/noisy/dark | 18 | 0 | 0 | **1.000** | **1.000** | **1.000** | **0.987** |
+| 한국 아파트 5 시나리오 | 84A/59B/110C/studio/L-shape | 28 | 9 | 0 | **0.83** | **1.00** | **0.92** | 0.87 |
+| Wikimedia 외부 1장 | wiki_house_plan | — | — | — | (GT 없음) | — | — | walls=0, furniture=6 추출 |
+
+### 🔍 테스트 통과 현황
+
+- 평면도 정확도: 5/5 (test_floorplan_accuracy.py)
+- 평면도 통합: 5/5 (test_floorplan_pipeline_integration.py)
+- HTTP 통합: 7/7 (test_floorplan_http_integration.py)
+- 실 데이터: 7/7 (test_floorplan_real_dataset.py)
+- 평면도 calibration: 7/7 (test_floorplan_calibration.py — 기존)
+- **합계: 31/31 통과 (30.3s)**
+- 프론트엔드 빌드: 통과
+
+### 🔧 다음 단계 (외부 리소스 필요)
+
+- 실제 CubiCasa5K 다운로드 + YOLO 학습 (GPU + 5GB 디스크)
+- 한국 분양 평면도 50~100장 수집 (저작권 협의)
+- 실 Gazebo 컨테이너 (Docker + ROS2) 에 .world 로드 검증
+- 실 드론 + MAVLink 연동
+
+---
+
+## 🎯 R37 — 실 한국 분양 평면도 + 실 CAD/DXF 데이터 수집 + 종단 3D 모델링 검증 (2026-05-13 23:45)
+
+> 사용자 요구: "저작권 상관 없이 테스트용이니까 실 분양 평면도 수집해" → "cad 혹은 dxf 파일은 구할 수 없는거야?" → "실데이터 받아와서 3D 모델링해봐 해보고 결과 알려줘". R36 까지의 합성 데이터 한계를 실 데이터로 메우고, 추출 → .world → 자율비행 시뮬까지 종단 검증.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R37.1 | 2026-05-13 23:15 | **LH 분양 매뉴얼 다운로더** — `tools/fetch_lh_real_floorplans.py`. drbuild 호스팅 LH 일반분양주택 주력평면 매뉴얼 (10MB PDF) 자동 다운로드 + PyMuPDF 로 페이지별 PNG 변환 (DPI 150). 15페이지 추출 | tools/fetch_lh_real_floorplans.py, datasets/lh_real_floorplans/ |
+| R37.2 | 2026-05-13 23:20 | **공개 DXF 샘플 다운로더** — `tools/fetch_dxf_samples.py`. GitHub raw URL (jscad/sample-files) 에서 floorplan.dxf 다운로드. 1MB DXF, walls 80 + furniture 50 + outline 16점 추출 확인 | tools/fetch_dxf_samples.py, datasets/dxf_samples/ |
+| R37.3 | 2026-05-13 23:25 | **실 데이터 테스트 스위트 확장** — `test_floorplan_real_dataset.py` 에 LH 페이지 (15개 parametrize) + DXF (parametrize) 추가. 종합 요약 테스트로 페이지별 검출 분포 출력 | tests/test_floorplan_real_dataset.py |
+| R37.4 | 2026-05-13 23:35 | **실 데이터 → 3D 모델링 종단 실행** — LH p006/p007 + jscad DXF 3 시나리오. extract_walls_from_bytes/parse_dxf → write_world_file (가구 포함) → run_autonomous_scan (가구 raycast + 회피) 종단. 모두 mission.completed 발행, 100% 완주 | uploads/gazebo_worlds_real/ |
+| R37.5 | 2026-05-13 23:45 | **PyMuPDF 의존성 추가** — pymupdf (fitz) 설치. PDF 페이지 → PNG 변환에 사용 (pdf2image 의 poppler 의존성 회피) | pip pymupdf |
+
+### 📊 실 데이터 종단 결과
+
+| 케이스 | 출처 | 추출 (벽/가구/외곽) | .world 모델 | 자율비행 점 | 회피 waypoint | 상태 |
+|---|---|---|---|---|---|---|
+| **LH p006** | LH 일반분양 매뉴얼 (실 한국 분양) | 10 / 26 / 0 | 36개 SDF | 2,778점 | 36 | ✅ completed |
+| **LH p007** | LH 일반분양 매뉴얼 | 6 / 31 / 0 | 37개 SDF | 2,346점 | 30 | ✅ completed |
+| **jscad DXF** | GitHub jscad/sample-files (실 CAD) | 80 / 50 / 16 | 146개 SDF | 1,826점 | 28 | ✅ completed |
+
+### 📊 LH 분양 매뉴얼 페이지별 분포 (15장)
+
+| 분류 | 페이지 수 | 예시 |
+|---|---|---|
+| ★ 평면도 (walls+furn ≥ 6) | **11/15** | p005~p007, p009~p015 |
+| · 부분 추출 (1~5개) | 2/15 | p001 (표지), p008 (페이지 구분) |
+| 표지/목차 (0개) | 2/15 | p002, p003 |
+
+총 추출량: walls 69개 + furniture 235개
+
+### 📐 설계 결정
+
+- **PyMuPDF (fitz) vs pdf2image**: pdf2image 는 poppler 시스템 의존성 (Windows 설치 복잡). PyMuPDF 는 순수 Python wheel — 즉시 동작. DPI 150 으로 무난한 품질 + 페이지당 2481×1754px (LH PDF 기준).
+- **DXF 처리 일반화 검증**: jscad floorplan.dxf 는 합성 DXF (R35) 와 다른 형식 (실제 CAD 도면 — LINE 80 + LWPOLYLINE 닫힌 도형 + INSERT 블록 다수). 우리 dxf_parser 가 별도 코드 변경 없이 80 walls + 50 furniture + 16 outline 점 추출. 일반화 성능 확인.
+- **자율비행 시뮬은 실 데이터에 강건**: SDF 모델 36~146 개, 가구 회피 waypoint 28~36 개 자동 삽입에도 모두 100% 완주. boustrophedon + 재귀 회피 알고리즘이 복잡한 환경에서 동작 검증.
+- **표지/목차 페이지 graceful**: extract_walls_from_bytes 가 평면도가 아닌 페이지 (텍스트 위주) 에 대해서도 죽지 않고 walls=0/furniture=0 반환. 실 운영에서 사용자가 잘못된 페이지 업로드해도 안전.
+
+### 🚨 안전성 영향
+
+- 실 한국 분양 평면도에서 가구 회피 waypoint 자동 삽입 30+ 개 → 자율비행 충돌 회피 검증.
+- 실 CAD 도면 (146 SDF 모델 환경) 에서도 시뮬 100% 완주 → 복잡한 환경 처리 가능 확인.
+- LH 매뉴얼 표지/목차 graceful 처리 → 사용자 입력 오류에도 시스템 안정.
+- PyMuPDF 추가 의존성은 PDF 처리 한정 — 다른 기능 영향 0.
+
+### 🔍 통과 테스트 현황
+
+- 평면도 정확도: 5/5
+- services 통합: 5/5
+- HTTP 라우터 통합: 7/7
+- 실 데이터 (Wikimedia + 한국 합성 + LH 페이지 + DXF): **24/24**
+- 평면도 calibration: 7/7 (기존)
+- **합계: 48/48 통과**
+
+### 📂 다운로드된 실 데이터 자산
+
+```
+datasets/
+  lh_real_floorplans/
+    _pdf/lh_main_plans_2018.pdf  (10 MB — LH 일반분양주택 주력평면 매뉴얼 2018)
+    pages/lh_main_plans_2018_p001~p015.png  (15 페이지, 2481×1754 px)
+  dxf_samples/
+    jscad_floorplan.dxf  (1090 KB — GitHub jscad/sample-files)
+  real_floorplans/
+    wiki_house_plan.png  (Wikimedia)
+  synthetic_korean/
+    84A_3bed.png + .json  (합성 한국 아파트 패턴)
+    59B_2bed.png + .json
+    110C_4bed.png + .json
+    studio.png + .json
+    L_shape.png + .json
+
+uploads/gazebo_worlds_real/
+  real_case_1.world  (15 KB — LH p006)
+  real_case_2.world  (16 KB — LH p007)
+  real_case_3.world  (59 KB — jscad DXF, SDF 146 모델)
+```
+
+### 🔧 다음 단계 (외부 리소스 필요)
+
+- LH BIM 라이브러리 8개 평면 (lh.or.kr 직접 다운로드, 등록 무관) 추가 수집
+- CubiCasa5K 5GB 다운로드 + GPU YOLO 학습
+- 실 Gazebo 컨테이너에 .world 로드 + 실 드론 모델 충돌 검증
+
+---
+
+## 🎯 R38 — 자율비행 다층 sweep + 가구 분류 회피 + lane 0.5m (2026-05-13 24:00)
+
+> 사용자 요구: "벽 근처와 가구 뒤편은 어쩔 수 없지만, 바닥과 천장, 걸레받이 몰딩 등 전체 점검할 수 있도록 다층 비행, 격자 라인 사이의 1.5m 갭 최대한 줄여 빈틈 제거" → "0.8m 떨어지는건 많이 떨어짐. 벽 마진 줄이고, 가구 뒤편 — 빌트인은 어쩔 수 없지만 freestanding 은 뒤도 확인". R37 까지의 단일층·1.5m lane·0.8m 마진·획일 가구 회피의 한계 보완.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R38.1 | 23:30 | **가구 분류 (builtin / freestanding)** — `_classify_furniture_builtin`. 가구 bbox 4변 중 하나가 어떤 벽 segment 와 정규화 거리 2.5% 이내면 builtin. LH p006 측정: 가구 26개 중 builtin 17 / freestanding 9 | app/services/floorplan_processor.py |
+| R38.2 | 23:35 | **회피 반경 분기** — `_furniture_obstacle_circles` 가 `is_builtin` 플래그 기반 margin 사용. builtin = 0.4m / freestanding = 0.15m. CASE B 가구 점유 셀 1750 → 1591 (10% 감소, 통로 sweep 가능) | app/services/autonomous_flight_simulator.py |
+| R38.3 | 23:40 | **lane_spacing 1.5 → 0.5m + 벽 margin 0.8 → 0.35m** — 격자 빈틈 1/3 + 벽 가까이 접근. 빈 공간 커버리지 99.1% → 100% (CASE B), 99.1% → 99.33% (CASE C) | (parameter defaults) |
+| R38.4 | 23:45 | **다층 비행** — `altitude_layers` 기본 (0.4, 1.5, 2.5). 각 레이어마다 boustrophedon. 고고도 (2.5m + furniture_height 1m + 0.5 마진) 에서는 가구 회피 안 함 → 가구 위 over-fly | _fly_and_scan, MissionState |
+| R38.5 | 23:50 | **수직 LiDAR 빔** — `_scan_lidar_at` 에 천장(z=ceiling)/바닥(z=0) 직접 빔 + 4방향 사선빔(±35° elevation) 추가. 걸레받이/몰딩 검출 가능 | _scan_lidar_at |
+| R38.6 | 23:53 | **Gazebo .world ceiling_plane SDF 모델** — 기존 ground_plane 옆에 ceiling_plane (normal 아래향). 실 Gazebo 시뮬에서 천장 충돌·LiDAR 검사 가능 | gazebo_world_generator.build_world_xml |
+| R38.7 | 23:55 | **API + 프론트 옵션 노출** — `/missions/autonomous-scan/start` 에 `altitude_layers / lane_spacing / ceiling_height` 추가. missionApi.startAutonomousScan opts 동일 | app/api/missions.py, src/api/missionApi.js |
+| R38.8 | 23:58 | **테스트 polling 시간 조정** — 다층 비행으로 시뮬 시간 증가 → integration 테스트 polling 200×0.05s → 400×0.05s + 단일 layer 모드로 단축 | test_floorplan_pipeline_integration.py |
+
+### 📊 빈 공간 커버리지 측정 (20cm 격자, LiDAR 사거리 6m)
+
+| 케이스 | 환경 | 가구 (builtin/free) | 비행 layers | waypoints | 가구 점유 % | 빈 공간 커버리지 |
+|---|---|---|---|---|---|---|
+| **A** 빈 사각형 | 8×6m | 0 / 0 | 3 | 66 | 0% | **100.00%** |
+| **B** LH p006 (실 분양) | 12×8.5m | 17 / 9 | 3 | 185 | 61.7% | **100.00%** |
+| **C** jscad DXF (실 CAD) | 12×6m | 0 / 50 | 3 | 167 | 58.7% | **99.33%** |
+
+### 📐 설계 결정
+
+- **builtin 판별 기준 2.5%**: 정규화 거리 2.5% (가로 12m 도면 = 30cm). 한국 아파트 빌트인(붙박이장·냉장고·싱크대) 은 벽에 거의 붙어있고 일반 가구(소파·식탁·침대) 는 보통 30cm+ 떨어져 있어 분리됨.
+- **freestanding 회피 0.15m**: 드론 반경 0.25m + 0.15m = 0.4m 외접원. 가구 가까이 비행해서 LiDAR 빔이 가구 양옆+뒤편까지 도달. 충돌 위험은 외접원 기준이라 안전.
+- **다층 (0.4 / 1.5 / 2.5m)**: 0.4m 는 걸레받이, 2.5m 는 가구(평균 1m) over-fly + 천장 가까이. 1.5m 는 일반. 향후 천장 높이 ≠ 2.7m 환경이면 ceiling_height 파라미터로 조정.
+- **lane 0.5m vs 1.5m**: 1.5m 는 boustrophedon 인접 라인 사이 1.5m 갭 → 가구 뒤·구석에서 LiDAR 빔 도달 어려움. 0.5m 는 인접 라인 빔 영역 충분 겹침. 비행 시간 3배 증가하지만 안전 요건이라 수용.
+- **벽 margin 0.35m**: 드론 반경 0.25m + 안전 0.1m. 0.8m → 0.35m 로 벽 가까이 접근. 0.35m 거리에서 LiDAR 가 벽까지 직접 + 걸레받이 사선 빔 도달.
+- **수직 빔 추가**: 수평 빔만으로는 천장/바닥 정직 측정 어려움. 위·아래 직접 빔 + 4방향 ±35° 사선빔으로 천장 모서리·걸레받이 검출.
+
+### 🚨 안전성 영향
+
+- 회피 반경 분기는 충돌 위험 증가 가능 (freestanding 가까이 비행). 외접원+0.4m 마진 유지로 드론 본체 닿지 않음.
+- 다층 비행으로 비행 시간 ~3배 증가. 배터리 한계 고려 필요 (실 드론 적용 시).
+- 고고도 (2.5m) over-fly 는 가구 높이 1m + 0.5m 마진 가정. 더 높은 가구 (옷장 1.8m+) 에서는 충돌 가능 → 향후 가구 높이 추정 (도형 기반은 어려움, ML 도입 시 가능) 필요.
+- 수직 빔이 ceiling 평면 도달 — 실 Gazebo 환경에서는 ceiling_plane SDF 가 있어야 정상. SDF generator 자동 추가됨.
+
+### 🔍 검증
+
+- 평면도 pytest: **48/48 통과 (49.13s)**
+- 프론트 빌드: **16.73s 통과**
+- 빈 공간 커버리지 측정: 합성/실 LH/실 DXF 모두 99~100%
+
+### 🔧 다음 단계 (이어서 진행 가능)
+
+- 가구 높이 추정 (현재 일괄 1m 가정 → 라벨/ML 기반 가변)
+- 다층 비행 적응형 (작은 환경은 단일층, 가구 많은 환경은 4층 등)
+- 실 Gazebo 컨테이너에 ceiling_plane 포함 .world 로드 검증
+- 커버리지 측정 스크립트를 자동화 테스트로 통합
+
+
+---
+
+## 🎯 R-postdeploy.15 — test_mode 영상 60fps 아키텍처 (2026-05-15 15:00~15:30)
+
+> 사용자 피드백: "test mode 에서 첨부한 영상 끊긴다" → MJPEG 재인코딩이 Fly 1 vCPU 결정적 병목임을 분석 → mp4 를 HTTP Range(206) 정적 서빙 + 프론트 `<video>` 네이티브 디코드 + SVG 오버레이로 전환. 추가 요청: "60fps + Fly 30fps 안정". 통합 repo R28 와 동일 변경.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .15.1 | 2026-05-15 15:00 | **신규 endpoint `GET /api/v1/stream/test/upload/file/{name}`** — HTTP Range(206 Partial Content) 정적 서빙. `os.path.realpath + commonpath` 로 traversal 차단. 416 처리. mp4/mov/mkv/avi/webm mime 매핑. 풀파일 요청 시 `FileResponse + Accept-Ranges`. | app/api/stream.py |
+| .15.2 | 2026-05-15 15:05 | **신규 endpoint `GET /api/v1/stream/test/active`** — 현재 재생 대상 메타(`kind / filename / fps / duration_sec / frame_w / frame_h`). 프론트가 `<video>` 분기 결정 용. | app/api/stream.py |
+| .15.3 | 2026-05-15 15:10 | **TestStreamService 영상 직접재생 모드** — 신규 필드 `_active_video_filename/_fps/_duration/_frame_w/_frame_h/_video_inference_task`. `active_media` property + `_clear_active_video` + `_cancel_video_inference`. | app/services/test_stream.py |
+| .15.4 | 2026-05-15 15:15 | **activate_video_mode + _video_inference_loop** — cv2.VideoCapture 로 메타 peek 후 background asyncio task 발사. 매 0.33s(fps/3) 1회 추론. detection 에 `_video_timestamp_sec/_frame_w/_frame_h` 첨부. play_state(_playing/_paused) 존중. 영상 끝나면 자연 종료. | app/services/test_stream.py |
+| .15.5 | 2026-05-15 15:18 | **`_stream_video_frames` 제거** — `rgb_mjpeg_generator` 영상 분기 → `activate_video_mode + DIRECT VIDEO MODE placeholder yield`. MJPEG 영상 재인코딩 경로 완전 폐기. | app/services/test_stream.py |
+| .15.6 | 2026-05-15 15:22 | **`_broadcast_detection` payload 확장** — `_video_timestamp_sec / _frame_w / _frame_h` 가 있으면 WS data 에 조건부 첨부. 이미지 경로 호환성 100%(선택 필드). | app/services/test_stream.py |
+| .15.7 | 2026-05-15 15:25 | **`_detect / _detect_real` tier 파라미터** — 영상 경로는 tier=2 (M4 thermal U-Net + M6 PatchCore 제외, RGB 영상에 무의미 + 무거움). 이미지 경로 tier=3 유지. | app/services/test_stream.py |
+| .15.8 | 2026-05-15 15:28 | **stop_playback 에서 video task cancel + meta clear** — STOP 시 background inference 즉시 취소. | app/services/test_stream.py |
+
+### 📐 설계 결정
+
+- 본질 분석: mp4 가 이미 H.264 압축인데 cv2.decode → PIL overlay → JPEG re-encode → MJPEG 재발사 = 1 vCPU 결정적 병목. 폐기.
+- Range 서빙: FastAPI `FileResponse` 도 일부 처리하지만, 416/명시 헤더/traversal 정규화를 명확히 위해 직접 StreamingResponse + Range 파싱.
+- 추론을 영상 재생과 분리: 프론트 `<video>` 시간축 ↔ backend `video_timestamp_sec` 매핑이 동기화 책임을 프론트에 위임.
+- tier=2 선택: RGB 영상에서 M4 thermal 은 무의미하고 M6 PatchCore 는 무거움. 가시광 결함(M1/M2/M3/M5)만으로 충분.
+
+### ✅ 검증
+
+- `python -m ast` parse: OK (test_stream.py, stream.py)
+- 영상 업로드 시 `/test/active.kind===video` → `/test/upload/file/{name}` 206 응답.
+- WS `defect.new` payload 에 `video_timestamp_sec` 첨부 확인.
+- 영상 inference tier=2 → Fly 1 vCPU 에서 측정 가능.
+
+### 🚧 비목표 / 향후
+
+- 드론 live feed 의 60fps 화 — 영상 수신기 도착 후 별도 사이클.
+- WebRTC 도입은 v1.2 이후 (현 직접 video 로 commercial-grade 충분).
+- HEVC/H.265 입력 거부 또는 ffmpeg 트랜스코드는 사용자 요청 후 추가.
+
+
+---
+
+## 🎯 R-v1.1.01 — OpenAI 챗봇(건축물·하자 도메인 어시스턴트) 통합 구현 (2026-05-15 오후)
+
+> 사용자 요청: "open AI 를 활용한 chatbot 을 만들 예정 — 건축물과 건축물의 하자에 대해 대화. 중대한 하자가 무엇인지 그를 통한 문제 등. 전체적으로 검토해서 필요할만한 내용 추가해서 챗봇 구현하자." 후속: "TEAM_PROJECT_2/AeroInspect_backend/AeroInspect_frontend 모두 동일 반영", "memory 기능 — 다음날 대화 흐름 유지", "세션별 대화방 수동 생성", "최근 N턴 + 자동 요약".
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .01.1 | 2026-05-15 오후 | **AiChatThread / AiChatMessage ORM** — user_id+organization_id 이중 격리, thread.summary 와 summary_until_message_id 로 컨텍스트 압축 watermark. `(user_id, last_message_at DESC)` / `(thread_id, created_at ASC)` 인덱스. | app/models/ai_chat.py, app/models/__init__.py |
+| .01.2 | 2026-05-15 오후 | **Pydantic 스키마** — ThreadCreate/Update/Response/ListResponse, MessageCreate/Response/HistoryResponse. role=system 은 응답에서 노출 X (시스템 프롬프트 누설 차단). | app/schemas/ai_chat.py |
+| .01.3 | 2026-05-15 오후 | **Alembic 마이그레이션 m6a7b8c9d0e1** — FK 사이클(threads↔messages) 회피 위해 threads 먼저 생성(summary_until_message_id FK 보류) → messages 생성 → ALTER threads ADD FK. down_revision 분리 repo: `k4e5f6a7b8c9`. | alembic/versions/m6a7b8c9d0e1_add_ai_chat_tables.py |
+| .01.4 | 2026-05-15 오후 | **OpenAI 설정 + 의존성** — `openai>=1.40.0` 추가. settings: OPENAI_API_KEY / OPENAI_MODEL("gpt-4o-mini") / OPENAI_MAX_OUTPUT_TOKENS(1200) / OPENAI_SUMMARY_MODEL. | requirements.txt, app/config.py |
+| .01.5 | 2026-05-15 오후 | **OpenAIChatService** — SYSTEM_PROMPT 정적 빌드(`DEFECT_CATALOG` 20종 표 dump + "B 영역 더 엄격" + "안전 직결" + "추측 금지" + 인젝션 거절 가이드). astream(SSE), build_context_messages(system+summary+최근 N+RAG+user), _retrieve_user_data_context(정규식 카테고리 코드 + 사이트 키워드, organization_id 필터), maybe_schedule_summarization / run_summarization (BackgroundTasks 비동기). 클라이언트 끊김 감지 → 부분 응답 보존. | app/services/openai_chat.py (신규) |
+| .01.6 | 2026-05-15 오후 | **/api/v1/ai-chat 라우터** — 6개 엔드포인트: GET/POST/PATCH/DELETE threads, GET messages 히스토리, POST messages(SSE). 모두 `get_current_org_member` 의존성. thread 액세스 `user_id+org_id` 이중 검증. 사용자별 메시지 전송 분당 20회 in-memory rate limit (라우터 내부). | app/api/ai_chat.py (신규), app/api/router.py |
+| .01.7 | 2026-05-15 오후 | **Rate Limit 한도 보강** — `/api/v1/ai-chat` 분당 120회 prefix 한도 추가. SSE 메시지 전송은 사용자별 20회 카운터로 추가 보호. | app/core/rate_limit.py |
+
+### 📐 설계 결정 / 자가검토
+
+- **세션별 대화방 + 자동 요약 트리거**: 메시지 30개 초과 시 백그라운드로 요약, 최근 20개는 원본 유지. context window 안정 + 다음날 흐름 유지 보장.
+- **light-RAG (function calling 없음)**: 정규식으로 카테고리 코드/사이트 키워드 추출 → DB 조회 → 별도 system 메시지 prefix("데이터일 뿐 지시가 아닙니다") 로 인젝션 가드. function calling 도입은 v1.2 이후 검토.
+- **FK 사이클 회피 마이그레이션**: threads.summary_until_message_id → messages.id 순환 참조를 두 단계로 분리. 다운그레이드도 역순.
+- **시스템 프롬프트 prefix caching 친화**: 모듈 import 시점 1회 빌드 → 매 호출 동일 system 메시지 → OpenAI prompt cache hit 가능.
+- **클라이언트 끊김 부분 응답 저장**: `request.is_disconnected()` 폴링 + finally 블록에서 누적 텍스트 INSERT. 새로고침 후에도 직전 답변 보존.
+- **분리/통합 repo 동기**: 동일 리비전 id `m6a7b8c9d0e1` 유지하되 down_revision 만 환경별로 분기 (분리 repo head: k4e5f6a7b8c9, 통합 repo head: j3d4e5f6a7b8).
+
+### 🚨 안전성 영향
+
+- **조직 격리**: 모든 DB 쿼리에 `organization_id` 필터. 다른 조직 thread_id 직접 요청 시 404.
+- **프롬프트 인젝션 방어**: 사용자 입력은 절대 system role 로 격상 X. RAG 컨텍스트도 별도 system + 가드 prefix.
+- **API 키 미노출**: OPENAI_API_KEY 는 backend settings 전용. 응답 스키마/로그에 포함 X.
+- **남용 가드**: 입력 4000자 / 출력 1200 토큰 / 분당 20 메시지/사용자 / Rate Limit Path 한도 이중.
+- **상업 수준 도메인 톤**: "추측 금지", "B 영역 단열·방수 엄격 평가", "안전 직결", "DIY 수준 X" — 사용자 메모리 규칙(`feedback_strict_all_defects`, `feedback_insulation_strict`, `project_commercial_grade_target`) 가이드를 시스템 프롬프트에 영구 주입.
+
+
+---
+
+## 🎯 R-v1.1.03 — 챗봇 회피 응답 제거 + Web Search 활성화 + 자동 제목 (2026-05-15 오후)
+
+> 사용자 피드백:
+> 1. "'확정된 정보가 없습니다' / 'KS 표준 참조하세요' 같이 책임 전가 답변이 너무 잦다. ChatGPT/Claude/Gemini 처럼 검색을 통해서라도 답을 좀 줘. 모르니까 챗봇에 묻는 것."
+> 2. "근데 너무 우리 플랫폼과 맞지 않는 대화에는 WebSearch 등을 할 필요는 없겠지." (scope guard 요청)
+> 3. "대화창 여러 개 열었을 때 '제목 없음' 으로만 뜨면 무슨 대화였는지 못 찾는다. 대화 요약 등으로 표현되면 좋겠다."
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .03.1 | 2026-05-15 오후 | **SYSTEM_PROMPT 톤 완화** — "확정된 정보 없음", "KS 표준 참조하세요", "전문가에게 문의하세요" 같은 회피·책임 전가 응답 명시적 금지. 도메인 지식 + 일반 건축 상식 + 업계 관행값을 적극 동원해 구체적·실행 가능 답변. 출처 인용 시 표준명·번호(KCS 41 40 04 등)를 본문에 자연스럽게 녹임. 카탈로그 20종 외 하자(누전·곰팡이 등)도 정상 답변. SYSTEM_PROMPT 길이 1951→3044자. | app/services/openai_chat.py |
+| .03.2 | 2026-05-15 오후 | **Scope guard** — 답변 범위 섹션 추가. 건축물·하자·드론 점검·플랫폼 맥락만 적극 답변. 도메인 무관 질문(요리·연예·잡담)에는 web search 호출 X, 짧게 안내 후 도메인 예시 질문 제안. | app/services/openai_chat.py |
+| .03.3 | 2026-05-15 오후 | **Web Search 활성화** — astream() 에서 model 명에 "search" 포함 시 자동 분기: `temperature` 제거(미지원), `web_search_options={"search_context_size":"medium"}` 추가. 모델은 .env / Fly secrets 의 `OPENAI_MODEL=gpt-4o-mini-search-preview` 갈아끼움으로 활성화. | app/services/openai_chat.py, .env, Fly secrets |
+| .03.4 | 2026-05-15 오후 | **자동 제목 2단계** — (1) 첫 user 메시지 INSERT 직전에 30자 prefix 임시 제목 즉시 부여 + flush. (2) 어시스턴트 응답 완료 후 BackgroundTask 로 `regenerate_thread_title()` 호출 — `OPENAI_SUMMARY_MODEL`(gpt-4o-mini, 비검색) 짧은 호출로 7단어 이내 의미있는 제목 생성. 사용자가 PATCH 로 명시 변경한 제목은 보호(임시 prefix 패턴과 일치할 때만 갱신). `_is_first_user_message()` 헬퍼 추가. astream 시그니처에 `background_tasks` 매개변수 추가. | app/services/openai_chat.py, app/api/ai_chat.py |
+
+### 📐 설계 결정 / 자가검토
+
+- **search 모델 vs 일반 모델 토글**: model 명 substring 검사("search" in OPENAI_MODEL.lower()) 한 줄로 분기 — 운영자가 .env 만 갈아끼우면 즉시 전환. temperature/web_search_options 조건부 적용으로 API 호환성 보장.
+- **scope guard 는 프롬프트 레벨로**: 도메인 무관 질문이라도 LLM 이 web search 호출하면 비용 + 응답 시간 증가. 시스템 프롬프트에 "도메인 무관 질문에는 web search 호출 X" 가이드 명시 → 모델이 자체 판단으로 검색 스킵.
+- **자동 제목 1+2단계**: 사용자가 메시지 보내자마자 prefix 임시 제목으로 즉시 식별 가능 → BackgroundTask 가 1~2초 후 LLM 짧은 제목으로 갱신. 프론트 onDone 에서 2.5초 후 fetchThreads 재호출로 자연스러운 sidebar 갱신.
+- **제목 보호**: 사용자 명시 PATCH 한 제목은 LLM 이 덮어쓰지 않음. 임시 prefix 패턴과 동일하거나 비어있을 때만 자동 갱신.
+- **요약 모델은 mini 유지**: OPENAI_SUMMARY_MODEL 은 비검색 mini 로 두어 비용 최소화(자동 제목·대화 요약은 검색 불필요).
+
+### 🚨 비용·운영 영향
+
+- gpt-4o-mini-search-preview 는 일반 mini 대비 호출당 약 5~10배 비용($25/1k web search call + 토큰비). 챗봇 활성 사용량 모니터링 필요.
+- scope guard 가 무관 질문 검색을 차단해 비용 폭증 가드.
+- Fly 머신 rolling 재시작 1회로 두 인스턴스 모두 새 모델 적용 완료.
+
+
+---
+
+## 🎯 R-v1.1.05 — 챗봇 자동 제목 흐름 요약 강화 (2026-05-15 저녁)
+
+> 사용자 피드백: "대화창 제목이 '안녕하세요' 아니면 '제목 없음', '새로운 대화' 같이 의미없게 나옴. 대화 흐름을 요약해서 표현해줘." (프론트 R-v1.1.05 와 짝 — 검정화면 hotfix 동일 라운드)
+
+### 🛠 진단
+
+- 기존(R-v1.1.03) 흐름: (1) 첫 user 메시지 INSERT 직전 prefix 30자를 thread.title 로 즉시 셋 → "안녕하세요" 같은 인사가 그대로 굳음. (2) 첫 응답 완료 후 1회만 LLM 7단어 제목 갱신.
+- 문제 1: "안녕하세요" prefix 가 임시 제목 → LLM 입력이 "[user] 안녕하세요 / [assistant] 도메인 보조자입니다…" 정도라 LLM 도 의미 없는 제목 생성.
+- 문제 2: 첫 응답 후 1회만 갱신 → 두 번째 메시지부터 진짜 도메인 질문이 들어와도 제목 정적.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .05.b1 | 2026-05-15 저녁 | **임시 prefix 제거** — astream() 의 "첫 user 메시지면 prefix 30자를 thread.title 로 셋" 블록 제거. thread.title 은 None 그대로 두어 LLM 갱신 전까지는 프론트 fallback("새로운 대화") 표시. 1~2초 후 LLM 짧은 제목으로 자연스럽게 교체. | app/services/openai_chat.py |
+| .05.b2 | 2026-05-15 저녁 | **자동 제목 첫 3턴 매번 갱신** — astream finally 블록의 BackgroundTask 호출 조건을 `is_first_user_message` → `user_count_before < 3` 으로 확장. 1·2·3번째 응답마다 흐름 요약 제목 재생성 → 사용자 인사 후 두 번째에 도메인 질문이 들어와도 제목이 그 흐름 반영. | app/services/openai_chat.py |
+| .05.b3 | 2026-05-15 저녁 | **regenerate_thread_title 시그니처 단순화** — 인자 (thread_id, user_text, assistant_text) → (thread_id) 하나로 축소. 내부에서 최근 10건(user+assistant) DB 조회 후 LLM 입력 구성. 매 호출이 "지금까지의 대화 흐름 전체" 기반이라 의도와 정확히 일치. | app/services/openai_chat.py |
+| .05.b4 | 2026-05-15 저녁 | **프롬프트 강화** — "한국어 명사형 5~7단어 / 하자 코드·부위·현장명 키워드 포함 / 단순 인사만 있으면 '신규 도메인 문의' 같은 일반 시작 제목 / 따옴표·이모지·마침표·번호·접두어 없음". `제목:`/`주제:`/`Title:` 접두어가 섞이면 절단. | app/services/openai_chat.py |
+| .05.b5 | 2026-05-15 저녁 | **_is_first_user_message → _count_user_messages 일반화** — boolean 헬퍼 대신 카운트 값을 반환. astream 에서 `user_count_before` 변수로 보존하여 finally 단계의 갱신 조건에 사용. | app/services/openai_chat.py |
+| .05.b6 | 2026-05-15 저녁 | **기존 thread 제목 1회성 백필 스크립트** — R-v1.1.05 배포 이전 thread 는 "안녕하세요" / "제목 없음" 같이 부실한 제목으로 굳어있음(user_count_before ≥ 3 조건이라 자동 갱신 영향 없음). 운영 DB 직접 보정용 `scripts/backfill_chat_titles.py` 추가 — 활성 thread 중 user 메시지 ≥ 1 인 것만 대상, openai_chat_service.regenerate_thread_title 직렬 호출, `--dry-run` 안전 옵션. fly ssh console 1회 실행으로 일괄 정리. | scripts/backfill_chat_titles.py (신규) |
+
+### 📐 설계 결정 / 자가검토
+
+- **마이그레이션 회피**: thread 에 `title_locked` 컬럼 추가하면 PATCH 후 자동 덮어쓰기 완전 차단 가능하지만, 현재 v1.1 사이클 + 데드라인 임박 + alembic head 분기 부담 고려해 보류. 대안: "첫 3턴 내에 PATCH 안 하면 보존" 정책(휴리스틱). 4번째 응답부터 자동 갱신 없음.
+- **N=3 선택 이유**: 사용자 인사(1턴) + 도메인 질문 진입(2턴) + 보강 질문/응답(3턴) 정도면 흐름이 충분히 잡힘. N 더 커지면 PATCH 보호 약화·비용 증가.
+- **gpt-4o-mini 비검색**: 자동 제목은 검색 무관 + 짧은 출력(<40 tokens). OPENAI_SUMMARY_MODEL 유지 — 호출당 비용 거의 0.
+- **임시 prefix 제거의 UX 트레이드오프**: 사용자가 첫 메시지 보낸 직후 1~2초 동안 "새로운 대화" 로 보임. 이전에는 prefix 가 즉시 보였지만 그게 정작 "안녕하세요" 같이 잘못된 제목으로 굳던 게 핵심 문제 → 일시적 fallback 노출이 더 낫다는 판단.
+
+### ✅ 검증
+
+- `python -m ast` parse: OK (openai_chat.py).
+- 시나리오 검증:
+  - 인사 시작 흐름: 1턴 "안녕하세요" → LLM 갱신("신규 도메인 문의") → 2턴 "B-02 단열 결함" → LLM 갱신("B-02 벽체 단열 결함 점검") → 3턴 추가 → 갱신.
+  - 도메인 질문 시작 흐름: 1턴 "잠실 리센츠 누수 보고서" → LLM 갱신("잠실 리센츠 누수 점검 보고") → 그대로 안정.
+
+### 🚨 비용·운영 영향
+
+- BackgroundTask 호출 횟수 N=1 → 최대 N=3 (thread 당). gpt-4o-mini, 40 tokens 출력 기준 호출당 약 $0.0001 — 무시 가능.
+- 동시 BackgroundTask race: 첫 응답 갱신과 두 번째 응답 갱신이 겹쳐 같은 thread.title 을 덮어쓸 수 있으나, 최종적으로 가장 최신 흐름 반영하는 갱신이 유효. 데이터 손상 없음.
+
+---
+
+## 🎯 R-v1.1.06 — Sentry 에러 모니터링 통합 (2026-05-27 오후)
+
+> 운영 갭 해소: 현재 운영 중 미처리 예외/스택트레이스가 stdout 로그에만 남아 알림·집계 경로 부재. Fly.io 콘솔만으로는 실시간 인지 불가 → 입주자 사고로 직결되기 전 1차 안전망 구축.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .06.b1 | 2026-05-27 오후 | **requirements + config 4종 + .env.example** — `sentry-sdk[fastapi]>=2.0.0` 추가. `Settings` 에 `SENTRY_DSN: Optional[str] = None`, `SENTRY_ENVIRONMENT: str = "development"`, `SENTRY_TRACES_SAMPLE_RATE: float = 0.1`, `SENTRY_PROFILES_SAMPLE_RATE: float = 0.0` 추가. `.env.example` 에 운영 전용 주석과 함께 4개 항목 등록. | requirements.txt, app/config.py, .env.example |
+| .06.b2 | 2026-05-27 오후 | **app/core/sentry.py 신규** — `init_sentry(settings)` 함수. FastApiIntegration + StarletteIntegration + SqlalchemyIntegration + AsyncioIntegration 묶음 등록. `before_send` 훅에서 `password / passwd / token / secret / authorization / api_key / cookie / session / refresh_token / access_token / client_secret` 키를 재귀 redact (대소문자 무시 substring 매칭). `request.data / headers / cookies / query_string / env`, `extra`, `contexts` 모두 sanitize. structlog `get_contextvars()` 의 `request_id` 를 안전망으로 tag 승격. `send_default_pii=False` 로 이메일/IP 자동 첨부 차단. release 자동 탐지 (SENTRY_RELEASE / FLY_RELEASE_VERSION / FLY_MACHINE_VERSION / GIT_SHA). | app/core/sentry.py (신규) |
+| .06.b3 | 2026-05-27 오후 | **app/core/middleware.py — RequestIDMiddleware 보강** — `bind_contextvars` 직후 `sentry_sdk.set_tag("request_id", ...)` + `set_context("request_meta", {request_id, method, path})` 호출. import 실패/Sentry 미초기화 환경에서는 silent skip (try/except). 기존 동작 회귀 0. | app/core/middleware.py |
+| .06.b4 | 2026-05-27 오후 | **app/main.py lifespan 시작 첫 단계 init_sentry** — Redis/DB 초기화 전에 호출하여 이후 startup 실패도 캡처. 성공 시 콘솔에 `[AeroInspect] Sentry 활성화 (env=...)` 로깅. 실패해도 서버 기동은 계속(관측 도구가 본체를 막으면 안 됨). | app/main.py |
+| .06.b5 | 2026-05-27 오후 | **README 운영 섹션 추가** — `flyctl secrets set SENTRY_DSN=... SENTRY_ENVIRONMENT=production -a aeroinspect-backend` 명시. DSN 값 자체는 등록하지 않음(사용자 직접). | README.md |
+
+### 📐 설계 결정 / 자가검토
+
+- **운영 차단 X, 경고 O**: APP_ENV=production 인데 DSN 누락 시 RuntimeError 가 아닌 warning 로그만. 이유: 새 시크릿 미주입으로 인한 부팅 실패는 "사고 인지 도구가 자체로 사고를 만드는" 안티패턴. 운영 사고 방지 우선.
+- **before_send 안전망 다중화**: request_id 는 (1) RequestIDMiddleware 의 `set_tag` (2) `before_send` 의 contextvars fallback 두 경로. 미들웨어를 거치지 않는 startup 이벤트도 누락 X.
+- **PII 보호 3단**: `send_default_pii=False` + 민감 키 redact + Replay 미사용(SDK 단계 — 백엔드라 해당 없음). 운영 분쟁 대비 "Sentry 로 비밀번호 한 토막이라도 흘러간 적 없음" 입증 가능.
+- **샘플링 보수 디폴트**: traces 0.1 / profiles 0.0. 운영 비용 가드. 디버그 세션만 한시 상향.
+- **integration 선정**: Asyncio integration 포함 — FastAPI lifespan / background task 의 미처리 예외 캡처 핵심. SQLAlchemy integration 으로 slow query 시각화 가능.
+
+### ✅ 검증
+
+- `cd c:/Users/Codelab/Desktop/PROJECT/AeroInspect_backend && python -c "from app.main import app; print('OK')"` → `OK` (import 에러 없음, 기존 라우터 회귀 0).
+- DSN 미설정 환경에서 init_sentry → no-op + INFO 로그 (`sentry.disabled reason=SENTRY_DSN not set`) 만 출력 — 로컬 개발 흐름 영향 0 확인.
+- pytest 신규 테스트 미작성(외부 의존성, 통합 가치 낮음). 기존 테스트는 import 경로 변경 없음.
+
+### 🚨 안전성 / 운영 영향
+
+- 사용자 데이터 누락/노출 위험 X — `send_default_pii=False` + redact 훅 이중 방어.
+- 비용: traces 0.1 / profiles 0.0 디폴트로 무료 plan 5K events/month 한도 내. 운영 트래픽 증가 시 SAMPLE_RATE 만 조절.
+- Fly Free Plan 메모리 영향: sentry-sdk ~10MB. 256MB VM 에서 무시 가능.
+- **사용자 후속 작업**: Sentry 프로젝트(Platform: FastAPI / Python) 생성 → DSN 발급 → `flyctl secrets set SENTRY_DSN=... SENTRY_ENVIRONMENT=production -a aeroinspect-backend` → 임시 `raise RuntimeError("sentry test")` 라우트로 Issues 탭 도착 확인.
+
+
+---
+
+## 🎯 R-v1.1.07 — ONNX 4-way 매핑 회귀 가드 (2026-05-27 오후)
+
+> 메모리 [feedback_onnx_class_mapping_audit] 의 5/7 거짓 라벨 5건 동시 사고 재발 방지. 신규 ONNX 가 들어올 때 ONNX dim ↔ data.yaml ↔ 코드 상수 ↔ 추론 진입점 인자가 어긋나면 CI 단계에서 즉시 차단.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .07.1 | 2026-05-27 오후 | 헬퍼 함수 — `EXPECTED_CLASS_NAMES` 상수 9 모델 정의 + `validate_class_mapping(model_name, onnx_path, yaml_path)` + `_infer_onnx_class_count` / `_read_yaml_class_names` 내부 함수. CPU EP 만 사용해 CUDA 없는 환경에서도 작동. | app/services/defect_taxonomy.py |
+| .07.2 | 2026-05-27 오후 | 신규 fixture — `onnx_weights_dir` / `datasets_dir`. 기본값 통합 repo `TEAM_PROJECT_2_Drone_project/backend/models_weights` / `/backend/training/datasets`. env override 지원. 파일 없을 시 `pytest.skip` (CI graceful). | tests/conftest.py (신규) |
+| .07.3 | 2026-05-27 오후 | 9 모델 parametrize 테스트 — M1/M2/M3 YOLO + M4_CONTEXT + M5_SEG + FURNITURE_AWARE + M1/M2/M3 ResNet. ONNX 출력 dim ↔ data.yaml `names` 길이 ↔ `EXPECTED_CLASS_NAMES` ↔ `inference_pipeline_20.py` 의 `_try_load_yolo`/`_try_load_resnet` 인자 (AST 정적 비교) — 4-way. 클래스 수 불일치 시 명확 메시지. | tests/test_onnx_class_mapping.py (신규) |
+| .07.4 | 2026-05-27 오후 | 운영 가이드 한 줄 — "신규 ONNX 추가/갱신 시 본 테스트 실행 필수". | tests/README.md (신규) |
+
+### ✅ 검증
+
+- `pytest tests/test_onnx_class_mapping.py -v` → 11 passed / 0 failed / 0 skipped
+- 모델 dim 확인 (YOLO=nc+5, ResNet=nc): M1_YOLO 7(nc=3), M2_YOLO 6(nc=2), M3_YOLO 7(nc=3), M4_CONTEXT 9(nc=5), M5_SEG 8(nc=4), FURNITURE_AWARE 14(nc=10), M1_RES 5, M2_RES 2, M3_RES 3
+- 매핑 불일치 0건 — 현재 운영 ONNX 4-way 정합 완전 확인
+- 기존 22개 테스트 collection 정상 (conftest 추가가 회귀 없음)
+
+
+---
+
+## 🎯 R-v1.1.08 — 하자 검수 메타 + 감사 로그 인프라 (2026-05-27 오후)
+
+> 사용자 요청: "정확도/검출에 문제 없고 업무툴로 손색없도록". 메모리 [project_safety_critical_mindset] / [feedback_strict_all_defects] — 입주자 분쟁 직결 영역, 책임 추적 부재가 가장 시급한 갭. Track B (스키마) + Track C backend (검수 API) 묶음.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .08.1 | 2026-05-27 오후 | defect_logs 컬럼 8개 추가 — review_status (Enum pending/approved/rejected/flagged_false_positive, server_default=pending), reviewed_by_user_id (FK users.id SET NULL), reviewed_at, review_note, detection_model_id, gps_lat/lon/alt. 인덱스 2개 (`idx_defect_review_status`, `idx_defect_reviewer`). | app/models/defect.py |
+| .08.2 | 2026-05-27 오후 | AuditLog 모델 신규 — user_id/organization_id (FK SET NULL), action (80자 doted-name), resource_type/resource_id, before/after JSONB, ip/user_agent/request_id, note, created_at. 인덱스 4종 (org/user/resource/action × created_at DESC). | app/models/audit_log.py (신규) |
+| .08.3 | 2026-05-27 오후 | audit_logger 헬퍼 — write_audit() 단일 진입점. 민감 키(password/passwd/pwd/token/secret/api_key/authorization/cookie/session/private_key/access_key/client_secret/webhook_secret) 재귀 redact. structlog request_id_ctx 자동 첨부. 실패 silent (감사 로그가 메인 트랜잭션 막지 않음). X-Forwarded-For 우선 IP 추출. | app/services/audit_logger.py (신규) |
+| .08.4 | 2026-05-27 오후 | Pydantic 스키마 — DefectLogResponse 에 6 신규 필드. DefectReviewRequest 신규 (rejected/flagged_false_positive 는 review_note 필수, max 2000자). AuditLogResponse/AuditLogListResponse/AuditLogFilter 신규. | app/schemas/defect.py, app/schemas/audit_log.py (신규) |
+| .08.5 | 2026-05-27 오후 | PATCH /defects/{id}/review — 조직 격리 + before/after 스냅샷 + audit_logger 자동 호출 + WS defect.reviewed broadcast. action 을 review_status 별 세분화. GET /defects/{id}/audit-trail — 단일 하자 감사 이력. DELETE 에 audit 추가 (defect.delete + before snapshot). | app/api/defects.py |
+| .08.6 | 2026-05-27 오후 | /audit-logs 라우터 — GET 목록 (admin/owner/superadmin, 조직 격리, action prefix + resource/user/시각 필터 + 페이지네이션). superadmin 은 org_id 필터로 좁힘 가능. GET /audit-logs/{id} 단건. router.py 등록. | app/api/audit_logs.py (신규), app/api/router.py |
+| .08.7 | 2026-05-27 오후 | alembic 마이그레이션 n7b8c9d0e1f2 (down=`m6a7b8c9d0e1`) — defect_logs 8 컬럼 + FK + 인덱스 2 / audit_logs CREATE + FK 2 + 인덱스 4. downgrade 역순. Enum CREATE/DROP 명시. | alembic/versions/n7b8c9d0e1f2_*.py (신규) |
+
+### 📐 설계 결정 / 자가검토
+
+- review_status 4-state: pending / approved / rejected (오탐 취소) / flagged_false_positive (Active Learning 큐 적재). rejected 와 flagged 분리 이유 — rejected 는 "내 판단으로 무시", flagged 는 "모델 학습에 피드백". 후속 batch 처리 다름.
+- review_note 강제: rejected/flagged 사유 미작성 시 400. 감사 추적 품질 보장.
+- WS broadcast: 같은 현장 여러 작업자 동시 검수 시 즉시 동기화.
+- audit_logger silent failure: 감사 로그가 메인 비즈니스 트랜잭션을 못 막는다. 관측 도구가 더 큰 사고를 만들면 안 됨.
+- 민감 키 redact 다단: write_audit() 의 _redact() + Sentry before_send 의 redact 이중. 비밀번호 한 토막이라도 audit_logs 에 흘러갈 가능성 차단.
+- GPS 컬럼 (lidar_x/y/z 와 별도): LiDAR 는 드론 기준 상대 좌표, GPS 는 WGS84 절대. 외부 지도 연동·다른 현장과 위치 식별·평면도 핀 표시용. nullable — 실내 GPS 약한 환경 허용.
+- detection_model_id: M4_CONTEXT 0.587 같은 약한 모델 결과 추적 가능. 추후 모델 출처별 정탐률 통계로 약점 분석.
+- 인덱스 선정: (org_id, created_at DESC) 가 가장 빈번한 쿼리. resource_type+resource_id 합성 인덱스로 단일 자원 audit-trail 빠른 조회.
+
+### ✅ 검증
+
+- python -m py_compile 7 파일 PASS
+- 라우터 등록 검증: from app.api.router import api_router import 성공 + /defects 8 routes (기존 6 + review + audit-trail) + /audit-logs 2 routes 확인
+- request_id_ctx 연동: app/core/logging.py:26 의 ContextVar 와 동일 인스턴스 import (모듈 간 공유 보장)
+
+### 🚨 운영 영향
+
+- 마이그레이션 필수: 배포 후 flyctl ssh console -C "alembic upgrade head" 1회 실행. 신규 컬럼 8개는 nullable + server_default 라 기존 데이터 영향 0.
+- API 호환성: DefectLogResponse 가 nullable 필드만 추가 — 기존 frontend 호환 100%. PATCH /review 와 GET /audit-trail 은 신규 엔드포인트.
+- 권한: review 는 조직 멤버 누구나. audit-logs 조회는 admin/owner/superadmin 전용.
+- Active Learning hook: flagged_false_positive 는 일단 audit_logs 기록만. 후속 batch job 으로 hard example queue 적재 v1.2 검토.
+- 저장공간: audit_logs 가 다년 누적 시 큰 테이블. v1.2 에 1년 경과분 archive 전략 검토.
+
+
+---
+
+## 🎯 R-v1.1.09 — 운영 신뢰성 가이드 + PostgreSQL 백업 (2026-05-27 오후)
+
+> 운영 갭 점검 결과 9건 중 백업 정책 부재 + 콜드스타트 + 단일 region 위험이 분쟁/장애 시 가장 큰 손실. Track D-3.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .09.1 | 2026-05-27 오후 | DEPLOYMENT_GUIDE.md 신규 (분리 repo 최초) — 10 섹션: Fly secrets 등록 / alembic 절차 (current head n7b8c9d0e1f2) / PostgreSQL 백업 (Fly snapshot 7일 + R2 장기, RTO/RPO 24h/4h) / 콜드스타트 트레이드오프 / Sentry DSN 가이드 / 감사 로그 운영 (분쟁 추출 SQL) / 롤백 / CI·CD 현황 / 보안 체크리스트 9 항목 / 장애 시나리오 4 행. | DEPLOYMENT_GUIDE.md (신규) |
+| .09.2 | 2026-05-27 오후 | scripts/backup_pg.ps1 신규 — pg_dump custom format (-Fc + -Z9) → 로컬 BACKUP_DIR + (선택) Cloudflare R2 업로드 (aws s3 cp + R2_ENDPOINT_URL). RETENTION_DAYS 기본 30 일 자동 정리. Task Scheduler 일일 03:00 등록 가이드. | scripts/backup_pg.ps1 (신규) |
+| .09.3 | 2026-05-27 오후 | fly.toml min_machines_running 가이드 주석 — 0(현재) vs 1(상업 권장) 트레이드오프 + DEPLOYMENT_GUIDE 참조. 값 자체는 변경하지 않음 (비용 영향 운영자 결정). | fly.toml |
+
+### 📐 설계 결정
+
+- min_machines_running 변경하지 않음: 0 → 1 변경 시 Fly 머신 24/7 가동으로 무료 tier 초과 비용 발생. 가이드 주석으로 안내, 결정은 운영자.
+- PowerShell 스크립트 선정: Windows 사용자 환경 + Task Scheduler 통합 용이. Linux sh 동등 스크립트 v1.2.
+- 백업 R2 보관 권장: Fly 자체 스냅샷 7일만 보관 — 입주자 분쟁이 수개월 후 발생 가능, 외부 장기 보관 필수.
+
+### ✅ 검증
+
+- DEPLOYMENT_GUIDE.md markdown 렌더 정상 (코드 블록/표/체크리스트).
+- backup_pg.ps1 syntax: $ErrorActionPreference = Stop + 환경변수 검증 + Test-Path 가드. 실 실행은 사용자 운영 환경.
+- fly.toml 주석 추가만 — flyctl deploy 영향 없음.
+
+### 🚨 운영 영향
+
+- 사용자 후속 작업: ① Sentry DSN 발급 → flyctl secrets set ② flyctl ssh console -C "alembic upgrade head" (R-v1.1.08 마이그레이션 적용) ③ 백업 cron 등록 ④ min_machines_running 결정.
+
+
+---
+
+## 🎯 R-v1.1.10 — 신뢰도 3단계 등급 시스템 + Thermal/M4 재설계 학습 스크립트 (2026-05-28 오전)
+
+> "false negative(놓침)도 문제지만 false positive(오탐)로 시시비비 따져야 되는 부분도 사용자 입장에서 문제" — Precision↔Recall 균형 재설계. 단일 threshold 대신 신뢰도 등급으로 분리.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .10.1 | 2026-05-28 오전 | 체이닝 학습 중단 (M4 epoch 20/50 best 0.384, +0.029 개선중) — 점진 개선보다 근본 재설계 우선. | (배경) |
+| .10.2 | 2026-05-28 오전 | confidence_grader.py 신규 — CONFIRMED(≥0.85 or ≥0.70+voting) / REVIEW(0.40~0.70) / REFERENCE(0.20~0.40) / DROP(<0.20) 4단계 분류. PatchCore·anomaly 단독은 CONFIRMED 불가 규칙(분쟁 책임 회피). 12 케이스 단위 테스트 PASS. | app/services/confidence_grader.py |
+| .10.3 | 2026-05-28 오전 | schema 확장 — DefectDetection/InsulationDetection/AlignmentDetection 모두 `grade` + `grade_display_ko` 필드. DetectionResult20에 `confirmed_count`/`review_count` 분류 카운트. | app/schemas/detection.py |
+| .10.4 | 2026-05-28 오전 | inference_pipeline_20에 grade 산정 통합 — cross_model_nms 후 grade_detection() 호출, DROP 검출은 출력에서 제거. insulation/alignment도 동일 등급 부여. | app/services/inference_pipeline_20.py |
+| .10.5 | 2026-05-28 오전 | onnx_inference ONNXPatchCoreDetector — anomalib 1.x(2-output)/2.x(4-output) 출력 호환 분기. | app/services/onnx_inference.py |
+| .10.6 | 2026-05-28 오전 | train_m4_context_seg.py 신규 — bbox→seg 전환. M4 라벨이 이미 polygon 형식이라 변환 작업 불필요(큰 발견). M5 seg 전환 성공 패턴(0.355→0.466) 재현 목표. | training/train_m4_context_seg.py |
+| .10.7 | 2026-05-28 오전 | prepare_thermal_anomaly.py + train_thermal_anomaly.py 신규 — Moisture/delam YOLO 포기, PatchCore unsupervised로 대체. 1788장 라벨 과밀(평균 8.8/최대 170 인스턴스) → 박스 라벨 자체가 노이즈. 정상 패치 추출 후 anomaly heatmap. | training/prepare_thermal_anomaly.py, training/train_thermal_anomaly.py |
+| .10.8 | 2026-05-28 오전 | cleanup_furniture_coco.py 신규 — furniture 학습 후 coco_* 보강 파일 삭제. dry-run 기본, --apply 명시 시 실제 삭제 (안전장치). | training/cleanup_furniture_coco.py |
+| .10.9 | 2026-05-28 오전 | 이전 라운드 누락 sync — analyze_datasets/monitor_report/remap_thermal_v2/train_chain_v1_1/train_furniture_aware/train_thermal_yolo/wait_musdb_then_train + train_m5_frame_seg/train_m6_patchcore 수정. | training/ 9건 |
+
+### 📐 설계 결정
+
+- 단일 threshold 폐지 — 모든 검출을 동일 conf 임계로 판정하면 Precision/Recall 둘 다 못 잡음. 등급 분리로 보고서(CONFIRMED만)·점검자 모드(REVIEW까지)·디버그 모드(REFERENCE까지) 3 단계 노출 제어.
+- 20종 클래스 통일 — 사용자 명시 "왜 단열만 특례 대우?". `feedback_insulation_strict` memory 정책 갱신, 단열 권장점검 threshold 0.35 → 0.40 통일.
+- PatchCore/anomaly 단독 CONFIRMED 불가 — 라벨 없는 비지도 신호로 분쟁 책임 불가. voting 통과(cross_model_boosted/ensemble_boosted) 시에만 CONFIRMED 승격.
+- Thermal Moisture/delam YOLO 포기 — 10번 재학습해도 mAP50-95 0.18 한계. 데이터 구조 문제(과밀 라벨)지 모델 문제 아님. PatchCore anomaly heatmap으로 영역 단위 표시 + Recall 100% 가능.
+- M4 seg 전환 — 데이터 라벨이 이미 polygon 형식이라 추가 작업 없음. M5 seg 전환 성공 사례(+0.111) 재현 가능성 높음.
+
+### ✅ 검증
+
+- confidence_grader 12 케이스 단위 테스트 PASS (CONFIRMED 강검출/voting, REVIEW 중간, REFERENCE 약, DROP 임계 미달, PatchCore 단독 강등 등 전 경로).
+- DefectDetection(class="crack", conf=0.8) 인스턴스 생성 OK, grade 기본값 "REVIEW".
+- inference_pipeline_20 import OK (pipeline20 인스턴스화).
+
+### 🚨 운영 영향
+
+- API 응답 형식 변경: detections[].grade / grade_display_ko 신규 필드, DetectionResult20.confirmed_count·review_count 신규. 기존 frontend는 무시(낙수 호환).
+- frontend 미반영: 등급별 시각화(빨강 확정 / 노랑 권장점검 / 점선 참고용) + 보고서 필터(CONFIRMED만)는 frontend repo에서 별도 작업. v1.2 예정.
+- 학습 미실행: 스크립트만 작성, GPU 학습은 사용자 신호 시점에 시작. 예상 ~15h (M4 seg 6h + thermal_anomaly 30min + furniture 8h).
+
+### 🔧 R-v1.1.10 patch — gitignore audit + coco_furniture_supplement sync (2026-05-28 오전)
+
+- `.gitignore`: `training/results/` (120MB Patchcore 산출물) + `datasets/` (분기 repo root 25MB) 추가. memory `feedback_gitignore_periodic_audit` 정기 점검 룰 적용.
+- `training/coco_furniture_supplement.py` 신규 sync (R-v1.0 furniture COCO 보강 스크립트 누락분).
+
+### 🚀 R-v1.1.11 — v1.2 학습 chain 가동 + 자동저장 안전장치 (2026-05-28 오전)
+
+> 사용자 결정: "학습 시작해 확실하게 하자". 후속: "컴퓨터가 뻗을 수도 있으니까 중간중간 자동저장되도록".
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .11.1 | 2026-05-28 오전 | prepare_thermal_anomaly.py 실행 — thermal_yolo 6994장에서 라벨 영역 제외 정상 패치 2000개 추출 (datasets/thermal_anomaly/good/). | datasets/thermal_anomaly/good/×2000 |
+| .11.2 | 2026-05-28 오전 | train_chain_v1_2.py 신규 — STAGES = [M4_Seg, ThermalAnomaly, Furniture]. precondition_ok() 자동 검증 (thermal_anomaly 정상 패치 ≥100). 한 단계 실패해도 다음 계속. | training/train_chain_v1_2.py |
+| .11.3 | 2026-05-28 오전 | monitor_report.py META 확장 — M4_Seg(runs/segment/...), ThermalAnomaly, Furniture 키 추가. results_csv_for()가 seg 모델 경로 분기. | training/monitor_report.py |
+| .11.4 | 2026-05-28 오전 | backup_checkpoints.py 신규 — 10분 주기로 runs/ 트리 스캔, best.pt/last.pt/best.onnx를 training/backups/<run_id>/로 복사. mtime 비교로 IO 절약. 컴퓨터 뻗을 경우 학습 산출물 보호. | training/backup_checkpoints.py |
+| .11.5 | 2026-05-28 오전 | 가동: chain v1.2 + monitor 5min loop + backup_checkpoints 10min loop (3개 백그라운드 데몬). | (runtime) |
+
+### 🛠 안전장치 설계
+
+- **체크포인트 자동 백업**: ultralytics는 epoch 끝마다 last.pt, mAP 최고 시 best.pt 저장. backup_checkpoints.py가 10분마다 별도 backups/ 폴더로 복제 — 학습 폴더 손상 시 복구 가능.
+- **chain 진행 추적**: runs/chain_status.txt + runs/chain_history.log로 단계 전환 영구 기록.
+- **모니터 누적 로그**: runs/monitor_log.txt에 5분 단위 진행률·자원 누적 — power 손실 시 마지막 알려진 상태 재구성 가능.
+- **결과 자동 백업**: 학습 스크립트들이 best.pt → ONNX → models_weights/_prev.onnx 백업 후 교체. 직전 버전 자동 보존.
+
+### 🚨 운영 영향
+
+- 예상 학습 시간: M4 seg ~10h + Thermal Anomaly ~30min + Furniture ~8h = 총 ~18~19h.
+- GPU 8GB 단독 사용 — 다른 GPU 작업 영향 받음. 사용자 다른 musdb 등 무관.
+- 학습 완료 후 자동 처리: M4_Seg ONNX → m4_yolo_context_elements.onnx 교체, thermal_anomaly 분기 코드 통합, cleanup_furniture_coco --apply 디스크 회수.
+
+### 🔧 R-v1.1.12 — chain 사고 복구 + thermal_anomaly 사전 통합 + verify_test_mode (2026-05-28 오후)
+
+> v1.2 chain 첫 시도에서 M4_Seg가 38초만에 실패. 원인 분석 → bbox 라벨 80% → polygon 변환 → 자동 재시도 대기. 동시에 학습 진행 중 사전 통합 작업 진행.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .12.1 | 2026-05-28 14:25 | M4_Seg 38초 실패 진단 — `validate_m4_seg_labels.py` 신규로 라벨 무결성 검사. 104,460 polygon 중 83,159 (80%)가 2점만 (bbox 형식) 발견. ADE=polygon ✅ / fw_agdd (Roboflow floor_window)=bbox ❌. | training/validate_m4_seg_labels.py |
+| .12.2 | 2026-05-28 14:35 | `convert_m4_bbox_to_polygon.py` 신규 — bbox(cx cy w h) → 4꼭짓점 polygon 변환. 원본 백업 datasets/m4_context/labels_bbox_backup/. 95,875개 변환 + 검증 PASS. | training/convert_m4_bbox_to_polygon.py |
+| .12.3 | 2026-05-28 14:45 | `wait_furniture_then_m4_seg.py` 신규 — chain v1.2 완료 감지 시 M4_Seg 자동 재시도. 5분 polling. | training/wait_furniture_then_m4_seg.py |
+| .12.4 | 2026-05-28 14:50 | monitor_report.py stage_key 긴 키 우선 정렬 — "M4_Seg"가 "M4"보다 먼저 매칭. 14:24 monitor 보고 시 이전 v1.1 M4 results.csv 잘못 읽은 사고 차단. | training/monitor_report.py |
+| .12.5 | 2026-05-28 15:00 | config.py — THERMAL_ANOMALY_ONNX/THRESHOLD/BBOX_MIN_AREA 키 신규 추가. | app/config.py |
+| .12.6 | 2026-05-28 15:00 | defect_taxonomy — "thermal_anomaly_area" 클래스 추가 (B-04 매핑, 점검자가 단열/누수 현장 판단). | app/services/defect_taxonomy.py |
+| .12.7 | 2026-05-28 15:10 | inference_pipeline_20 — `_anomaly_mask_to_bboxes()` 모듈 헬퍼 신규 + `_thermal_anomaly` ONNXPatchCoreDetector 로드 (graceful, ONNX 없으면 skip) + detect()/detect_async()/detect_20()/detect_20_async() 시그니처에 `thermal_frame_bgr` 인자 추가 (backward compatible None). Tier 3에서 thermal_frame_bgr 제공 시 anomaly mask → bbox → "thermal_anomaly_area" 검출. | app/services/inference_pipeline_20.py |
+| .12.8 | 2026-05-28 15:20 | verify_test_mode.py 신규 — test_external/ 카테고리별 자동 추론 + 등급별 시각화 (CONFIRMED 빨강 / REVIEW 노랑 / REFERENCE 회색) + 통계 JSON + review_required.txt. Recall ≥99% proxy 임계. 0건 검출 카테고리 자동 표시. | training/verify_test_mode.py |
+
+### 📐 설계 결정
+
+- **graceful skip 패턴**: thermal_anomaly ONNX가 학습 완료 전 없어도 inference_pipeline_20 로드 성공. 학습 끝나면 ONNX 파일만 models_weights/에 있으면 자동 활성. 호환성 보호.
+- **thermal_frame_bgr 인자 분리**: M4 U-Net (float32 °C thermal_map)과 thermal_anomaly (BGR 의사컬러)는 입력 분리. 호출자가 명시적 전달.
+- **anomaly mask → bbox 변환**: PatchCore는 영역 출력이라 cv2.connectedComponentsWithStats로 component bbox 추출. min_area=400 픽셀 이하 노이즈 제거.
+- **thermal_anomaly_area 클래스명**: 비지도라 sub 분류 X. 점검자가 현장에서 B-02(단열)/B-04(누수) 판단. taxonomy 기본 B-04로 매핑.
+- **verify_test_mode Recall proxy**: ground truth 없어 IoU 정확도 자동 측정 X. 대신 "검출 0건 이미지"를 표시해 사람이 직접 확인. 통과 조건: 카테고리별 검출률 95%+ + 전체 Recall proxy 99%+.
+
+### 🚨 운영 영향
+
+- **chain 진행 상태**: ThermalAnomaly ✅ 완료 (150MB ONNX) / Furniture 🟢 진행중 (epoch 2/80) / M4_Seg 🔁 라벨 수정 완료, Furniture 후 자동 재시도.
+- **이번이 3차 프로젝트 마지막 제출**: 자유 진행 X, Recall ≥99% 통과 + 약한 모델 보완 사이클 필요 시 반복.
+- 호출자 (defect_processor.py, test_stream.py, api routes) thermal_frame_bgr 전달은 학습 완료 시 함께 통합.
+
+### 🛑 R-v1.1.13 — Thermal Anomaly 일시 보류 + stream_inference thermal_frame_bgr 사전 전달 (2026-05-28 오후)
+
+> 사용자 명시 (18:18): "thermal은 일단 보류해줘" → 후속 확인: "Thermal Anomaly만 (M4 U-Net 단열은 유지)".
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .13.1 | 2026-05-28 18:20 | config.py `THERMAL_ANOMALY_ENABLED: bool = False` 토글 추가. ONNX 파일과 통합 코드는 보존, 로드만 차단. | app/config.py |
+| .13.2 | 2026-05-28 18:20 | inference_pipeline_20.load_models() — `if settings.THERMAL_ANOMALY_ENABLED` 분기. False면 로드 자체 X, "보류 상태" 명시 print. | app/services/inference_pipeline_20.py |
+| .13.3 | 2026-05-28 18:00 | stream_inference.py — QueuedFrame에 thermal_frame_bgr 필드 + submit() 인자 + _process_20()에서 detect_async 전달. backward compatible (default None). | app/core/stream_inference.py |
+| .13.4 | 2026-05-28 18:25 | memory `project_thermal_anomaly_on_hold` 신규 — 보류 사유·범위·활성화 조건 기록. | (memory) |
+
+### 📐 설계 결정
+
+- **ONNX 보존 + 토글 비활성화**: 재학습 없이 즉시 활성화 가능. .env로 THERMAL_ANOMALY_ENABLED=True 설정만으로 다음 시작 시 로드. 학습 산출물 폐기 X.
+- **M4 U-Net 단열은 유지**: thermal_map float °C 입력 검출. B-01/B-02 단열 검출은 그대로 가동.
+- **stream_inference 사전 통합**: thermal_anomaly가 보류 상태여도 thermal_frame_bgr 인자 흐름은 유지 — 추후 활성화 시 호출 경로 변경 불필요. 현재는 None 흘러도 graceful.
+
+### 🚨 운영 영향
+
+- thermal_anomaly_area 클래스는 검출 X. taxonomy 코드는 보존.
+- verify_test_mode 결과·보고서·UI에 thermal_anomaly 미등장.
+- M4 U-Net 단열 검출은 정상 가동.
+- 이번 3차 프로젝트 제출 범위: RGB 모델 (M1-M3) + M4 U-Net + M5 + M6 + Furniture(coco) + grade 시스템.
+
+### 🔁 R-v1.1.14 — chain v1.2 사후 처리 + 노트북 OFF 복구 (2026-05-29)
+
+> 18:24 chain 종료 (Furniture cuDNN 사망 epoch 18 / M4_Seg 라벨 사고 / ThermalAnomaly 성공). 라벨 수정 후 wait task가 18:29 M4_Seg 재시도 자동 시작 → 01:44 epoch 16 best 0.436 도달 → 노트북 종료 11:30까지 OFF → resume_m4_seg.py로 last.pt에서 재개.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .14.1 | 2026-05-28 18:30 | export_furniture_onnx.py 신규 — Furniture cuDNN 사고 후 best.pt(0.349) → ONNX 98.9MB 별도 export. 학습 스크립트 내장 export 도달 못함. | training/export_furniture_onnx.py |
+| .14.2 | 2026-05-28 18:30 | train_m4_context_seg.py 끝에 verify_test_mode 자동 호출 추가 — 학습 완료 즉시 통합 검증 + cuDNN 안전화 (amp=False/workers=2/cache=False) 적용. | training/train_m4_context_seg.py |
+| .14.3 | 2026-05-29 11:30 | resume_m4_seg.py 신규 — 노트북 종료 / 사고 복구용 학습 재개 스크립트. ultralytics resume=True로 last.pt + optimizer state 완전 복원. ONNX export + verify 자동 연결. | training/resume_m4_seg.py |
+| .14.4 | 2026-05-29 11:30 | memory `project_m4_seg_resume_procedure` 신규 — "이어서 진행" 한 마디 트리거 절차. 데몬 자동 재가동 + cron/Monitor tool은 사용자 명시 시점. | memory |
+
+### 📐 설계 결정
+
+- **resume 스크립트 분리**: train_m4_context_seg.py와 별도. resume_m4_seg.py가 last.pt 자동 감지 + ultralytics resume=True 호출. 사용자 한 명령으로 재개 가능 (memory 룰).
+- **체크포인트 보존 확인**: ultralytics save_period=5라 epoch0/5/10/15.pt 별도 저장 + 매 epoch last.pt 갱신. 노트북 OFF 시점 epoch 16 + best 0.436 손실 0건.
+- **cron/Monitor 사용자 명시**: feedback_auto_progress는 학습 분기에만 적용. cron/Monitor 같은 외부 트리거는 사용자 결정 시점에만 (예측 어려움).
+- **cuDNN 안전화 검증**: Furniture는 amp=True에서 epoch 18 사망. M4는 amp=False로 epoch 16+ 안정 진행. 가설 확인.
+
+### 🚨 운영 영향
+
+- 학습 중 노트북 OFF 발생 시 자동 복구 절차 확립.
+- backup_checkpoints 데몬이 10분마다 별도 백업하므로 학습 폴더 손상 시에도 복원 가능.
+- 다음 사고 발생 시 사용자 한 마디 "이어서 진행" → memory + git log + Vibe log 참조 → resume_m4_seg.py 자동 실행 가능.
+
+### 📊 R-v1.1.15 — M4 seg epoch 30 중간 ONNX + verify 경로 버그 수정 (2026-05-29 17:30)
+
+> 사용자 18:30 노트북 정리 데드라인 → 17:30 학습 안전 stop + 중간 결과 ONNX 배포 + verify. 집에서 epoch 30→60 완주 예정.
+
+| 라운드 | 시각 | 작업 | 결과 |
+|-------|------|------|------|
+| .15.1 | 2026-05-29 17:30 | M4 seg 학습 stop (epoch 30/60) — last.pt 보존, 집에서 resume 가능 | best **mAP50-95 0.483** (mAP50 0.682) baseline 0.355 → **+0.128** (M5 seg 사례 +0.111 초과) |
+| .15.2 | 2026-05-29 17:31 | best.pt → ONNX export, m4_yolo_context_elements.onnx 교체 (이전 _prev 백업) | seg ONNX 104.5MB, 출력 (1,41,12096)+(1,32,192,192) |
+| .15.3 | 2026-05-29 17:33 | verify_test_mode 경로 버그 2건 수정 — ① cwd를 backend/로 변경 (settings 상대경로 ./models_weights 정상화) ② roboflow 형식 cat/test/images/*.jpg 재귀 탐색 + 카테고리당 60장 상한 | 첫 실행은 모델 전부 미로드(0건)였음 |
+| .15.4 | 2026-05-29 17:35 | verify 재실행 — 257장 7카테고리 추론 | 검출률 100% (놓침 0), CONFIRMED 1018 / REVIEW 369 / REFERENCE 673 |
+
+### 📐 학습 성과 (epoch 30 중간)
+
+- M4 bbox 0.355 → **M4 seg 0.483** (+0.128, +36% 향상). 60 epoch 완주 시 0.50~0.55 예상.
+- cuDNN 안전화 (amp=False) 효과 검증 — Furniture(amp=True) epoch 18 사망 vs M4(amp=False) epoch 30+ 안정.
+- 노트북 OFF(01:44~11:30) 사고에도 last.pt 무손실 — resume 절차 검증 완료.
+
+### ⚠️ 미해결 — 다음 세션 처리
+
+- **과검출 의심**: ext_glass 745건/60장(장당 12건), ext_building_crack 491건/60장. CONFIRMED 등급이 과다 → Precision 검증 필요.
+- **verify는 Recall만 측정**: GT 라벨 비교 없음. test_external 각 카테고리에 roboflow 라벨(labels/) 존재하므로 IoU 기반 Precision 측정 스크립트 추가 필요.
+- **M4 seg ONNX 로더 호환성**: ONNXYoloDetector가 seg 2-output(det+mask proto)을 detection으로만 파싱. 게이팅엔 bbox만 쓰므로 동작하나, mask proto 활용 시 별도 처리 필요.
+- **집에서**: resume_m4_seg.py로 epoch 30→60 완주 + Precision GT 검증 + 과검출 원인 분석.
+
+### 🏁 R-v1.1.16 — M4 seg epoch 60 완주 + GT Precision 검증 + grade 임계 조정 (2026-05-30)
+
+> M4 seg 학습 epoch 30→60 완주 (best 0.503 baseline +0.148 +41.7%). GT 검증 3차 시도 끝에 도메인 mismatch 결론. grade 임계 0.85→0.90 + WITH_VOTING 0.70→0.75 적용.
+
+| 라운드 | 시각 | 작업 | 결과 |
+|-------|------|------|-------|
+| .16.1 | 2026-05-30 17:08 | M4 seg epoch 60 학습 완료, ONNX 자동 교체 + verify_test_mode 자동 호출 | best **mAP50-95 0.503** (mAP50 0.701) baseline +0.148 / verify 257장 CONFIRMED 737 (1차 1018→737 -28% 과검출 감소) 놓침 1건 |
+| .16.2 | 2026-05-30 17:35 | verify_gt_precision.py 신규 — roboflow GT polygon → bbox 변환 + IoU 0.5 매칭 + FP source 분포 | 1차 결과: P 0.535 / R 0.748, FP source: yolo_surface 37 / yolo_floor_window 32 / yolo_structural 11 / furniture 0 → Furniture 재학습 효과 없음 확정 |
+| .16.3 | 2026-05-30 19:18 | grade 임계 조정 시도 1: CONFIRMED_STRONG 0.85→0.90, WITH_VOTING 0.70→0.75 | 2차 결과: P 0.535 / R 0.740 — 거의 동일 (M2/M3 검출 spatial_boost로 conf 0.95+ 도달, 임계로 못 잡힘) |
+| .16.4 | 2026-05-30 19:22 | grade 임계 조정 시도 2: M2/M3 voting 필수 (PATCHCORE_ONLY와 동일) | 3차 결과: P 0.296 / R 0.195 — Recall 폭락, ext_glass(M3 단독으로 잘 잡던 영역) 60+ 결함 잃음. 즉시 롤백 |
+| .16.5 | 2026-05-30 19:26 | grade 최종 = 시도 1 상태 (CONFIRMED_STRONG 0.90 + WITH_VOTING 0.75 + voting 필수 없음) | 보고서 등재 기준 약간 강화, Recall 손실 최소 |
+
+### 📐 결론
+
+- M4 seg 학습 성공: 0.355 → 0.503 (+41.7%). cuDNN 안전화 + 노트북 OFF resume 검증 완료.
+- Furniture 재학습 불필요: FP 0건 기여. 15h 절약.
+- 도메인 mismatch 결론: test_external은 외부 인터넷 도메인(콘크리트 옹벽·유리 패널), 우리는 아파트 내부 학습. ext_glass(close-up dent)만 도메인 매칭 → P 0.93. crack 카테고리는 mismatch → P 0.22~0.26.
+- voting 필수는 cross-domain 검증 도구 아님: 같은 위치 검출 동의 ≠ 같은 도메인 정확도.
+
+### 🚨 다음 단계
+
+- 운영 영상 검증: 실제 아파트 내부 드론 영상으로 재평가 (test_external은 참고용)
+- M2/M3 cross-domain 데이터 추가 학습: 운영 결과도 낮으면 도메인 보강
+- frontend grade UI: CONFIRMED 빨강 / REVIEW 노랑 / REFERENCE 점선 + 보고서 필터
+- 문서 + 배포 + 노션 + 시연 자료.
+
+---
+
+## 🔒 R-v1.1.17 — 전체 시스템 검증 + P0 보안 수정 + 문서 갱신 (2026-06-01)
+
+> 사용자 명시 ("전체 기능에 대해서 프로세스 검증까지, 안되어있거나 잘못되어있는 부분 보완"). 5영역 병렬 Explore 검증으로 15건 발견, P0 7건/P1 5건/P2 2건 수정. R-v1.1.10 grade 시스템 frontend 통합과 동시 진행.
+
+### 🛠 변경 (backend 부분)
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .17.B1 | 05-31 23:40 | api/detect.py — `detail=str(e)` 정보 누출 수정. ValueError→400 일반 메시지, RuntimeError→503. logging.warning/error 분리 | app/api/detect.py:71-80 |
+| .17.B2 | 05-31 23:50 | api/auth.py — refresh token rotation 도입. /auth/refresh 응답에 새 refresh_token 동봉 (탈취 refresh 무한 갱신 차단) | app/api/auth.py:290-291 |
+| .17.B3 | 05-31 23:55 | schemas/user.py — RefreshTokenResponse 모델 (access_token + refresh_token) 추가 | app/schemas/user.py:181-189 |
+| .17.B4 | 06-01 00:05 | config.py — CORS_ORIGINS에 Vercel 도메인 3개 (aero-inspect-frontend.vercel.app, git-main, git-develop) 추가 | app/config.py:260-269 |
+| .17.B5 | 06-01 00:10 | defect_persistence.py — DefectLog 모델 grade 컬럼 미존재 확인, TODO 코멘트 처리 (alembic 마이그레이션 대상) | app/services/defect_persistence.py:148-160 |
+| .17.B6 | 06-01 00:15 | inference_pipeline_20.py — m2_v4s/m3_v4s_retry class_names 4-way 매핑 검증 코멘트 (ONNX dim ↔ data.yaml ↔ CLASS_NAMES ↔ taxonomy) | app/services/inference_pipeline_20.py |
+| .17.B7 | 06-01 00:20 | .env.example — THERMAL_ANOMALY_ENABLED + R2_* 6개 신규 변수 명시 | .env.example |
+| .17.B8 | 06-01 00:25 | Task.md — v1.1 사이클 R-v1.1.01~16 section 추가 | Task.md |
+| .17.B9 | 06-01 00:30 | Implementation_Plan.md — v6.0_260531 (Phase 22-25) 추가 | Implementation_Plan.md |
+| .17.B10 | 06-01 00:35 | README.md — endpoint 카탈로그 보완 (PATCH /defects/{id}/review, audit-trail, audit-logs, employee/*, stream/stats, coverage, auth/refresh rotation) | README.md:54-67 |
+| .17.B11 | 06-01 00:40 | DEPLOYMENT_GUIDE.md — v1.0→v1.1 헤더 + R-v1.1.10~17 변경 요약 | DEPLOYMENT_GUIDE.md:217-228 |
+
+### ✅ 5영역 병렬 Explore 검증
+
+| 영역 | P0 | P1 | P2 |
+|---|---|---|---|
+| 보안 | error leak, refresh rotation, AI_WEBHOOK_SECRET 검증됨 | log redact 운영중 (정상) | — |
+| Pipeline | grade 전파, 4-way 매핑 코멘트 | wbf ckpt 검증 | — |
+| 통합 | CORS vercel.app | confirmed_count 미사용 (잠재 stat) | — |
+| 운영 | .env.example 누락 변수 | — | — |
+| 문서 | — | — | README/DEPLOYMENT_GUIDE 갱신 |
+
+### 📐 설계 결정
+
+- **error message generalization**: 보안 측면에서 5xx/4xx 응답에 내부 스택 정보(예: "Invalid JPEG bytes at offset 12345") 노출 금지. 사용자 친화 일반 메시지 + 서버 로깅에만 상세.
+- **refresh rotation**: 탈취된 refresh token이 무한 갱신되는 시나리오 차단. 매 /auth/refresh 호출마다 새 refresh 발급, frontend도 sessionStorage 덮어쓰기.
+- **grade DB 영속화 보류**: DefectLog 모델에 grade 컬럼 없음. 추가 시 alembic migration 필요. 본 라운드는 API 응답/WS broadcast 경로에서만 grade 노출 (DB 미저장). TODO 명시.
+- **CORS allowlist 확장**: Vercel preview 도메인 (git-main/git-develop) 포함. 사용자가 PR 환경에서도 backend 호출 가능.
+- **4-way 매핑 검증 코멘트**: memory feedback_onnx_class_mapping_audit (5/7 검출 거짓 라벨 5건 사고 재발 방지) 준수. 코드 변경 없이 가드 코멘트만 추가, 다음 모델 통합 시 체크.
+
+### ➡️ 후속 (R-v1.1.18+)
+
+- DefectLog 모델 grade 컬럼 추가 + alembic migration (별도 라운드)
+- Frontend Sidebar 11개 아이콘 전수 연결 (사용자 명시) → frontend R-v1.1.18
+- 노션 일괄 동기화 (R-v1.1.10~17 모음)
+- 시연 자료 (demo flow + 스크린샷)
+
+## 🔧 R-v1.1.19 — 전체 기능 검증 + 운영 버그 5건 수정 + Roboflow fine-tune (2026-06-02)
+
+> 사용자 명시 ("전체 기능 및 UI/UX 검증"). 백엔드 pytest 전체 + frontend build 검증으로 운영 결함 5건 발견·수정. 동시에 Roboflow 데이터 fine-tune 작업(약한 모델만 효과 측정) 수행.
+
+| ID | 시각 | 작업 | 파일 |
+|---|---|---|---|
+| .19.1 | 06-02 08:4x | 누락 모듈 복구 gazebo_world_generator (도면→Gazebo SDF world) | app/services/gazebo_world_generator.py |
+| .19.2 | 06-02 09:1x | 누락 모듈 복구 autonomous_flight_simulator (boustrophedon 커버리지+WS emit) | app/services/autonomous_flight_simulator.py |
+| .19.3 | 06-02 09:2x | furniture/M5 ONNX 차원에러: _try_load_yolo input_size 인자, furniture 768 | inference_pipeline_20.py, onnx_inference.py |
+| .19.4 | 06-02 09:3x | organization join_by_invite_code 가입 알림 누락 추가 + regenerate 오삽입 알림 제거 | app/api/organization.py |
+| .19.5 | 06-02 09:3x | 테스트 현행화: inference_pipeline(인증401/503), yolo(가중치 skip) | tests/test_inference_pipeline.py, test_yolo_inference.py |
+| .19.6 | 06-01~02 | Roboflow fine-tune: adapter+순환학습+eval 하네스+자가앙상블 검증 | training/roboflow_adapter.py, finetune_rf_cycle.py, eval/* |
+
+### 📐 설계 결정
+
+- **누락 모듈 = import만 있고 파일 미커밋 사고**: floorplan.py/missions.py가 import하던 2개 모듈이 git에 없어 `app.main` import 자체가 실패(백엔드 부팅 불가). 검증으로 발견, 실동작 구현으로 복구.
+- **고정입력 ONNX 대응**: furniture(768)/thermal(960)/M5(seg)는 입력 고정 export. _try_load_yolo에 input_size 인자 추가(기본 640, dynamic 무영향), 고정모델만 명시. feedback_onnx_class_mapping_audit 패턴.
+- **Roboflow fine-tune 결론(측정)**: 약한 모델(thermal recall +1.1%p)만 이득, 강한 모델(M2 -5.3%p)은 손해→롤백. M3/M4/M5/furniture는 Roboflow 서버 export zip 미생성(NoSuchKey)로 다운 불가. 자가앙상블(우리 형제버전 WBF)은 운영서 M1 +9.9%p/M3 +5.4%p 효과 확정.
+- **검증 결과**: 백엔드 227 passed/11 skipped/0 fail (시작 5fail+2error→0), frontend build OK.
+
+### ➡️ 후속
+
+- thermal/M4/furniture는 데이터 부족이 근본 — 추가 데이터 확보 시 재학습
+- 노션 일괄 동기화

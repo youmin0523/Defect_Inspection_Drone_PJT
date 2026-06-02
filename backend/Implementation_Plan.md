@@ -232,9 +232,99 @@ core/stream_inference.py ──→ services/inference_pipeline.py
 - [x] tasks 8개 문서 팀명 `다마코더 → AeroInspect` 일괄 교체
 - [x] `CHANGES_2026-05-03.md` 신설 — 내일 Claude 웹 문서 변환용 산출물 목록 + 변환 프롬프트 템플릿 + DB 시드 결과 요약
 
+### Phase 22. Sentry 에러 모니터링 통합 (R-v1.1.06, 2026-05-27)
+- [x] requirements: `sentry-sdk[fastapi]>=2.0.0`
+- [x] `app/config.py`: SENTRY_DSN/ENVIRONMENT/TRACES_SAMPLE_RATE/PROFILES_SAMPLE_RATE
+- [x] `app/core/sentry.py` 신규: init_sentry() — FastAPI/Starlette/SQLAlchemy/Asyncio integration, before_send 민감 키 redact, structlog request_id 자동 첨부, send_default_pii=False
+- [x] `app/core/middleware.py`: RequestIDMiddleware 에 sentry_sdk.set_tag 전파 (silent skip)
+- [x] `app/main.py`: lifespan 시작 첫 단계 init_sentry 호출
+- [x] `.env.example`: 4 항목 + 운영 전용 주석
+- [x] README 운영 섹션: flyctl secrets set 가이드
+
+### Phase 23. ONNX 4-way 매핑 회귀 가드 (R-v1.1.07, 2026-05-27)
+- [x] `app/services/defect_taxonomy.py`: EXPECTED_CLASS_NAMES 상수 + validate_class_mapping() 헬퍼 + _infer_onnx_class_count + _read_yaml_class_names
+- [x] `tests/conftest.py` 신규: onnx_weights_dir/datasets_dir fixture, env override (ONNX_WEIGHTS_DIR/DATASETS_DIR), CI graceful skip
+- [x] `tests/test_onnx_class_mapping.py` 신규: 9 모델 parametrize (ONNX dim ↔ data.yaml ↔ 상수 ↔ inference 인자 AST 비교)
+- [x] `tests/README.md` 신규: 신규 ONNX 추가 시 본 테스트 필수 명시
+- [x] **검증 결과**: 11 passed / 0 failed / 0 skipped — 운영 ONNX 매핑 불일치 0건
+
+### Phase 24. 하자 검수 메타 + 감사 로그 인프라 (R-v1.1.08, 2026-05-27)
+- [x] `app/models/defect.py`: 컬럼 8개 추가 (review_status Enum, reviewed_by_user_id FK, reviewed_at, review_note, detection_model_id, gps_lat/lon/alt) + 인덱스 2개
+- [x] `app/models/audit_log.py` 신규: AuditLog ORM (user_id/org_id FK SET NULL, action doted-name, resource_type/id, before/after JSONB, ip/UA/request_id) + 인덱스 4종
+- [x] `app/services/audit_logger.py` 신규: write_audit() — 민감 키 재귀 redact, structlog request_id_ctx 자동 첨부, silent failure
+- [x] `app/schemas/defect.py`: DefectLogResponse 6 필드 + DefectReviewRequest 신규
+- [x] `app/schemas/audit_log.py` 신규: AuditLogResponse/ListResponse/Filter
+- [x] `app/api/defects.py`: PATCH /defects/{id}/review + GET /defects/{id}/audit-trail + DELETE 에 audit.delete 첨부
+- [x] `app/api/audit_logs.py` 신규: GET /audit-logs (admin/owner/superadmin, 조직 격리 + 5 필터 + 페이지네이션), GET /audit-logs/{id}
+- [x] `app/api/router.py`: /audit-logs 등록 (tags=Audit)
+- [x] alembic `n7b8c9d0e1f2_add_defect_review_and_audit_logs.py` (down=`m6a7b8c9d0e1`): defect_logs 8 컬럼 + audit_logs CREATE + FK 3 + 인덱스 6
+- [x] **검증**: py_compile PASS, 라우터 등록 검증 (defects 8 + audit 2 routes)
+
+### Phase 25. 운영 신뢰성 가이드 + PostgreSQL 백업 (R-v1.1.09, 2026-05-27)
+- [x] `DEPLOYMENT_GUIDE.md` 신규 (분리 repo 최초): 10 섹션 — Fly secrets / alembic / 백업·복구 RTO·RPO / 콜드스타트 / Sentry / 감사 로그 운영 / 롤백 / CI·CD / 보안 체크리스트 / 장애 시나리오
+- [x] `scripts/backup_pg.ps1` 신규: pg_dump -Fc + R2 업로드 + RETENTION_DAYS 자동 정리
+- [x] `fly.toml`: min_machines_running 가이드 주석 (0 vs 1 트레이드오프)
+- [ ] **운영자 후속 결정**: min_machines_running 0→1 변경 (비용 vs 가용성), 백업 cron 등록, Sentry DSN 발급 + flyctl secrets set
+
 ---
 
 ## Revision History
+
+### v6.5_260527 (작성자: @youminsu0523 / branch: MS)
+- **Phase 22~25 신설** — Sentry 통합(R-v1.1.06) / ONNX 4-way 매핑 회귀 가드(R-v1.1.07) / 하자 검수 메타 + 감사 로그 인프라(R-v1.1.08) / 운영 신뢰성 가이드 + PostgreSQL 백업(R-v1.1.09).
+- 19 모델 → **21 모델** (AuditLog + DefectLog 컬럼 확장) , 12 alembic 리비전 → **13 리비전** (n7b8c9d0e1f2), 63+ 엔드포인트 → **66+** (audit-logs 2 + defects review/audit-trail 2). 운영 관점 "프로토타입 → 초기 운영" 전환 — 감사 추적 + 에러 모니터링 + 회귀 가드 + 백업·복구 인프라 동시 정착.
+
+### v6.1_260515 (작성자: @youminsu0523 / branch: MS)
+- **Phase 24 보강 — 챗봇 자동 제목 흐름 요약 (R-v1.1.05)** — `openai_chat.py` 의 임시 prefix 제목 부여 코드 제거(astream 의 첫 user 메시지 분기), BackgroundTask 호출 조건을 `user_count_before < 3` 으로 확장하여 1·2·3번째 응답마다 LLM 흐름 요약 제목 재생성. `regenerate_thread_title(thread_id)` 단일 인자로 단순화 — 내부에서 최근 10건 DB 조회 후 LLM 입력 구성. 프롬프트는 한국어 명사형 5~7단어, 하자 코드/현장명 키워드 포함, 단순 인사 시 일반 시작 제목 부여. `_is_first_user_message` → `_count_user_messages` 일반화. 마이그레이션 없음.
+
+### v6.0_260515 (작성자: @youminsu0523 / branch: MS)
+- **Phase 24 신설 — OpenAI 챗봇 백엔드 통합 (R-v1.1.01)** — 통합 repo 와 동일. 분리 repo head 가 `k4e5f6a7b8c9` 이므로 마이그레이션 `m6a7b8c9d0e1` down_revision 만 `k4e5f6a7b8c9` 로 분기.
+  - DB 모델 2: AiChatThread / AiChatMessage. 멀티테넌트 user_id + organization_id 이중 격리. summary watermark 로 컨텍스트 압축.
+  - 서비스 `OpenAIChatService` — SYSTEM_PROMPT(DEFECT_CATALOG 20종 표 + B영역 엄격 + 안전 직결 + 추측 금지 + 인젝션 거절). SSE 스트리밍. light-RAG(정규식 카테고리 코드 + 사이트 키워드, organization_id 필터). 30턴 초과 시 BackgroundTasks 자동 요약.
+  - API `/api/v1/ai-chat` 6엔드포인트. `get_current_org_member` 의존성 + thread.user_id·org_id 이중 검증 + 사용자별 분당 20 메시지 라우터 내부 카운터.
+  - settings 4(OPENAI_API_KEY/MODEL/MAX_OUTPUT_TOKENS/SUMMARY_MODEL), requirements `openai>=1.40.0`, rate_limit `/api/v1/ai-chat`:120/min.
+
+### v6.0_260531 (작성자: @youminsu0523 / branch: MS) — v1.1 사이클 종합
+
+**Phase 22 — 신뢰도 등급 시스템 (R-v1.1.10)**
+- `confidence_grader.py` (CONFIRMED ≥0.90 / REVIEW 0.40~0.90 / REFERENCE 0.20~0.40 / DROP <0.20)
+- PatchCore·anomaly 단독 CONFIRMED 불가 (voting 동반 시 승격)
+- DefectDetection / InsulationDetection / AlignmentDetection grade 필드 + DetectionResult20 confirmed_count/review_count 분류 카운트
+- inference_pipeline_20 grade 산정 통합 + DROP 자동 필터링
+- 20종 클래스 통일 (단열 특례 폐지)
+
+**Phase 23 — M4 bbox→seg 전환 + Thermal Anomaly 도입 (R-v1.1.10~16)**
+- M4 Context bbox(yolov8m) → segmentation(yolov8m-seg) 전환. 라벨 변환 95,875개 bbox→4꼭짓점 polygon.
+- 학습: epoch 60 완주, best mAP50-95 **0.503** (baseline 0.355 +0.148 **+41.7%**). M5 seg 전환 사례 +0.111 초과 달성.
+- Thermal Anomaly PatchCore (Moisture/delam YOLO 대체) — `prepare_thermal_anomaly.py` (라벨 영역 제외 정상 패치 2000개) + `train_thermal_anomaly.py` (anomalib Folder + Patchcore wide_resnet50_2).
+- ONNX 출력: thermal_anomaly.onnx 150MB. config.py THERMAL_ANOMALY_ENABLED=False 보류 토글 (사용자 명시 5/28).
+- defect_taxonomy thermal_anomaly_area 클래스 (B-04 매핑). `_anomaly_mask_to_bboxes` 헬퍼 + thermal_frame_bgr 시그니처 확장.
+
+**Phase 24 — 학습 인프라 + 사고 복구 (R-v1.1.11~14)**
+- `train_chain_v1_2.py` orchestrator (STAGES=[M4_Seg, ThermalAnomaly, Furniture] + precondition_ok 자동 검증)
+- `backup_checkpoints.py` 10분 cycle best.pt/last.pt → training/backups/
+- `monitor_report.py` META 확장 (M4_Seg/ThermalAnomaly/Furniture + seg 모델 경로 분기 + stage_key 긴 키 우선)
+- `resume_m4_seg.py` (ultralytics resume=True last.pt 복구) — 노트북 OFF 사고 무손실 검증
+- cuDNN 안전화 (amp=False/workers=2/cache=False) — Furniture epoch 18 cuDNN_STATUS_EXECUTION_FAILED 사망 후 적용
+- `validate_m4_seg_labels.py` + `convert_m4_bbox_to_polygon.py` (라벨 무결성 검사 + bbox→polygon 변환)
+
+**Phase 25 — GT 검증 + grade 임계 조정 (R-v1.1.16)**
+- `verify_test_mode.py` (roboflow test/images 카테고리별 추론 + 등급별 시각화 + 통계 JSON + Recall proxy)
+- `verify_gt_precision.py` (GT polygon → bbox + IoU 0.5 매칭 + FP source 분포)
+- GT 검증 3차 결과: 1차 P 0.535/R 0.748 → 2차 (임계 0.85→0.90) P 0.535/R 0.740 → 3차 (M2/M3 voting 필수) P 0.296/R 0.195 (Recall 폭락 즉시 롤백)
+- 최종 grade: CONFIRMED_STRONG 0.90, WITH_VOTING 0.75, voting 필수 X
+- 결론: test_external 도메인 mismatch (외부 인터넷 콘크리트 옹벽/유리 패널 vs 우리 아파트 내부)
+
+**모델 현황 (v1.1 사이클 종료 시점)**
+- M1 구조·방수: 0.78 mAP50-95
+- M2 마감·표면: 0.82 (WBF 7-way)
+- M3 바닥·창호: 0.86 (WBF 6-way)
+- **M4 Context Seg**: **0.503** (v1.0 0.355 → +41.7%)
+- M5 frame seg: 0.576
+- M6 PatchCore: 작동
+- Furniture: 0.349 (cuDNN epoch 18 멈춤, 재학습 보류 — GT FP 0건 기여)
+- Thermal Anomaly: AUROC 0.85~0.92 예상 (보류 토글)
+- Thermal YOLO Crack: 0.38
 
 ### v5.1_260503 (작성자: @youminsu0523 / branch: MS)
 - Phase 20 추가 완료(alembic 분기 head 병합 `89b53c16de85` + 누락 컬럼 10건 ALTER 보정 + seed_demo_data 실 적용 sites=8/defects=315/reports=12/schedules=3) + Phase 21 신설(tasks 문서 양식 정정 — 부록 → 인라인, 파일 rename, 팀명 일괄, 가이드 3종 문서이력 위치, CHANGES md 신설)

@@ -33,11 +33,6 @@ anomalib
 onnxruntime
 ensemble-boxes  # multi-checkpoint WBF (M3/M2 0.85 mAP 도달 핵심)
 
-# ── 자율비행(Indoor Autonomous Inspection v1.1) ──
-scipy           # ICP / signal / morphology 보조
-shapely         # 폴리곤 클리핑 / 안쪽 buffer / 라인 교집합
-msgpack         # Pi WS 메시지 직렬화 (옵셔널)
-
 # ── Hardware ───────────────────────────────
 pyserial
 pymavlink
@@ -45,6 +40,7 @@ pymavlink
 # ── LLM ────────────────────────────────────
 anthropic
 google-generativeai
+openai>=1.40.0  # AsyncOpenAI + chat.completions stream — 도메인 챗봇용
 
 # ── Utilities ──────────────────────────────
 python-dotenv
@@ -56,6 +52,7 @@ aiofiles
 # ── Monitoring / Logging ───────────────────
 prometheus_client
 structlog
+sentry-sdk[fastapi]>=2.0.0  # 운영 에러 모니터링 — DSN 미설정 시 no-op
 
 # ── Test ───────────────────────────────────
 pytest

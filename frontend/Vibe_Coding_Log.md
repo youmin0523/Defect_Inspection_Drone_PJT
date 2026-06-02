@@ -2434,68 +2434,11 @@ LandingHeader: `fixed top-0 ... z-50`. 기존 ContactModal: `fixed inset-0 z-[10
 - **/employee 가 아닌 /employee/dashboard 등으로 가지 않은 이유**: `EmployeeLanding.jsx` 가 `/employee` 의 진입 페이지로 사무실 허브 역할(스케줄/KPI/활동/관리). 이게 가장 "허브" 의미에 부합. 추후 사용자가 "더 구체적인 페이지로" 를 원하면 별도 round.
 - **모바일 hover 클래스의 의미**: 터치 디바이스에서 `hover:` 가 발화되지 않지만, `cursor-pointer` 와 `transition` 은 데스크탑/태블릿 마우스 사용자에게 클릭 가능 어포던스 제공. 모바일은 어차피 탭 시 즉시 동작하므로 시각적 피드백 부재가 UX 손상 아님.
 
+
+
 ---
 
-### R30 — 객체감지 모드 시퀀스 UX (스캔→탐지) + SVG bbox 오버레이 (2026-05-07 10:05)
-
-> 사용자 피드백 (1차 배포 후 실사용 중): "bbox·객체 감지의 위치가 정확하지 않은데", "전체 모델이 다 그런데 들인 시간에 비해 표시되는 게..", 그리고 R30 백엔드 수정 직후 "객체감지모드에서 객체가 감지되는 것보다 그냥 하자부위에 도장을 찍어놓은 듯한 느낌이었어서.. 스캔을 통한 하자가 객체감지모드에서 걸러져야되는 게 맞지 않나 싶은데". 추가: "두개 다 적용해" (TEST MODE + 현장점검). 사용자 선택: 1+2단계 풀 구현 (스캔 sweep + SVG bbox 모션 + naturalWidth 보정 + confidence 카운트업).
-
-진단 (백엔드 측): 사용자가 본 좌표 어긋남은 backend test_stream 의 프레임 드리프트 버그 (다음 프레임 JPEG 에 이전 프레임 bbox 페어링) — 백엔드 R30 에서 수정 (snapshot 굳히기). 프론트 측 추가 작업은 정확도 회복 후 "AI 작업 중" 인지 신호 부재 → 정적 도장 → AI 스캔 시퀀스로 시각 본질화.
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R30.1 | 2026-05-07 10:05 | **CSS 키프레임 6종 전역 등록** — `scanSweep`, `scanGridPulse`, `detectPulse`, `detectGlow`, `detectLabelIn`, `detectCornerIn`. 컴포넌트 인라인 `<style>` 회피해서 재렌더 비용 0. | `frontend/src/index.css` |
-| R30.2 | 2026-05-07 10:05 | **LiveVideoFeed 페이즈 머신** — `detectionPhase` ∈ {idle, raw(0–1.0s), scan(1.0–2.2s), detected(보존)}. selectedDefect 변경 시 `setTimeout` 2개로 전이 + cleanup 으로 timer 회수. backend 에 `?mode=raw` 요청 (오버레이 없는 원본) → SVG 가 박스 일체 그림. | `frontend/src/components/video/LiveVideoFeed.jsx` |
-| R30.3 | 2026-05-07 10:05 | **naturalWidth viewBox SVG 오버레이** — `imgRef` + `onLoad` 에서 naturalWidth/Height 캡처. SVG `viewBox=`naturalW/H + `preserveAspectRatio` 를 img 의 `object-cover/contain` 과 일치 → 풀스크린/16:9/리사이즈 모두 자동 정렬. bbox 픽셀 좌표가 viewBox 와 1:1 매핑. | 같음 |
-| R30.4 | 2026-05-07 10:05 | **시각 자산 — 격자/sweep/box/마스크/코너/라벨** — scan 페이즈: 시안 격자 pulse + 위→아래 sweep 라인(glow shadow 24px) + SCANNING ping dot. detected 페이즈: 반투명 fill 12% + stroke pulse + glow filter + 4코너 브래킷 in + 카테고리 라벨 박스 translate-y in. | 같음 |
-| R30.5 | 2026-05-07 10:05 | **심각도 컬러링** — HIGH=red-500 / MED=orange-500 / LOW=yellow-500. SVG `currentColor` 패턴으로 stroke/fill/glow 일관 적용. 폰트 크기 = `imgNatural.w * 0.018` 로 1080p/4K 모두 자연. | 같음 |
-| R30.6 | 2026-05-07 10:05 | **confidence 카운트업 chip** — `requestAnimationFrame` 으로 0 → conf% 700ms cubic ease-out. fill 모드 좌상단 DEFECT VIEW 배지 옆 emerald chip. tabular-nums 로 자릿수 흔들림 방지. cleanup 으로 rAF 회수. | 같음 |
-| R30.7 | 2026-05-07 10:05 | **source-agnostic URL 분기** — `defectFrameUrl` 을 `isTestMode` 분기로 명시 분리하면서, 모든 UX 발화는 `isDefectView`/`isDetectionMode` 만 보고 결정. 영상 수신기 도착 후 RealStream backend 가 `/api/v1/stream/defect/{id}/{channel}?mode=...` 만 노출하면 한 줄 추가로 동일 UX 가동 (React 수정 0). | 같음 |
-
-### 📐 설계 결정 사항
-
-- **detection 모드만 시퀀스 적용, bbox 모드는 그대로**: 사용자 원본 피드백 정확히 detection 모드 한정 ("객체감지모드에서"). bbox 모드는 "단순 위치 표시 — 빠른 확인" 의도라 시퀀스를 걸면 의도 손상. 모드별 책임 분리.
-- **백엔드 raw 분기 vs 프론트 SVG 분리**: detection 모드 진입 시 backend `?mode=raw` → 박스 없는 JPEG → SVG 가 박스 일체 렌더. burned-in box + SVG box 두 겹이면 미세 어긋남 + 시각 노이즈. raw 분리로 단일 박스, 단일 책임.
-- **viewBox 기반 좌표 자동 정렬**: SVG `viewBox` + `preserveAspectRatio` 를 img 와 일치 → DOM 리사이즈/풀스크린 토글 시 자동 재정렬. JS 로 `naturalWidth/displayWidth` 비율 계산 + ResizeObserver listener 안 써도 됨. SVG 표준이 무료로 처리.
-- **CSS 키프레임 전역 등록**: `index.css` 한 곳에 정의, 컴포넌트는 `style={{ animation: '...' }}` 참조만. 컴포넌트 인라인 `<style>` 패턴 회피 — 매 렌더마다 텍스트 재삽입 / 키프레임 중복 정의 경고 발생.
-- **timer cleanup 의 중요성**: 사용자가 1초 이내에 다른 하자 클릭 시 이전 timer 가 살아있으면 페이즈 꼬임. useEffect cleanup 에서 `clearTimeout` 2개 + confidence rAF `cancelAnimationFrame`. 지속적 안전성.
-- **두 modes 모두 적용 보장 (테스트/현장점검)**: 1차 배포 임시 정책상 "현장 점검" = `setIsTestMode(true)` 위장 → R30 UX 가 자동으로 발화. real backend 도착 후엔 위 R30.7 source-agnostic 설계로 즉시 호환. v1.1 사이클 동안 frontend 추가 작업 불필요.
-
-
-
-### R32 — 자율비행 v1.1 — missionStore + R3F 4개 레이어 + AutonomousMissionControl + 면적/커버리지 UI (2026-05-07 13:00)
-
-> 백엔드 R32(자율비행 통합 구현)와 동시 진행. 프론트 측은 (a) WS 채널 7종 흡수(missionStore), (b) BuildingScene L3 에 4개 R3F 레이어(점군/경로/커버리지/차이영역) 통합, (c) AutonomousMissionControl 컨트롤+VERIFICATION+면적 요약 UI.
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R32.1 | 2026-05-07 13:00 | missionStore.js — 자율비행 전역 상태(phase/verification/cells/path/pointcloudFrames/areaSummary) + REST(applyState/applyCoverageGrid/applyAreaSummary) + WS 흡수(ingestMissionPhase/Path/CellCaptured/PointcloudDelta/VerificationResult/Alert/AreaSummary) + cellIdx 보존 | src/store/missionStore.js |
-| R32.2 | 2026-05-07 13:00 | useWebSocket.js — messageHandlers 에 mission.* / coverage.* / pointcloud.delta 7종 핸들러 추가 | src/hooks/useWebSocket.js |
-| R32.3 | 2026-05-07 13:00 | missionApi.js — REST 클라이언트(start/abort/estop/rtl/pause/state/missionState/coverageGrid/coverageSummary) + 토큰/조직 인터셉터 | src/api/missionApi.js |
-| R32.4 | 2026-05-07 13:00 | PointCloudLayer — colored point cloud(BufferGeometry vertex color), 모든 frame 누적 합성, 폴백 회색 | src/components/map3d/PointCloudLayer.jsx |
-| R32.5 | 2026-05-07 13:00 | MissionPathLayer — face별 색상(wall=시안, ceiling=노랑, floor=초록, window=마젠타, discrepancy=빨강) + WP 도트 + captured 셀 어둡게 | src/components/map3d/MissionPathLayer.jsx |
-| R32.6 | 2026-05-07 13:00 | CoverageHeatmapLayer — 셀 단위 patch(captured=초록/미수집=빨강) + face별 회전(floor/ceiling 수평, wall/window 수직) | src/components/map3d/CoverageHeatmapLayer.jsx |
-| R32.7 | 2026-05-07 13:00 | DiscrepancyOverlay — 차이영역 폴리곤 평면 + 위쪽 라인(실루엣) + kind별(added=빨강, missing=주황) | src/components/map3d/DiscrepancyOverlay.jsx |
-| R32.8 | 2026-05-07 13:00 | BuildingScene 통합 — phase ≠ idle 또는 level=3 일 때 4개 레이어 자동 표시. L1/L2 코드 무손상 | src/components/map3d/BuildingScene.jsx |
-| R32.9 | 2026-05-07 13:00 | AutonomousMissionControl — START/PAUSE/RTL/E-STOP 버튼 + VERIFICATION verdict/IoU/차이영역 + 라이브 커버리지/검사 면적/분양면적 비율/면별 면적 디테일. PATH_PLAN 진입 시 coverageGrid/Summary 자동 GET | src/components/dashboard/AutonomousMissionControl.jsx |
-
-### 📐 설계 결정 사항 (프론트엔드)
-
-- WS 멀티플렉싱 — 단일 연결: 백엔드가 broadcast_all 로 type 부착 송신 → useWebSocket 의 messageHandlers 가 type 디스패치. 별도 WS 연결 추가 X. defects/telemetry 도메인 무손상.
-- vertex color point cloud: BufferGeometry attribute 'color' 사용 → Three.js Points + pointsMaterial vertexColors=true. 색상 누락 프레임은 폴백 회색. 정점 수 통제는 missionStore 가 max 30 frame.
-- face별 시각 분리 — wall/ceiling/floor/window 색상 + 회전: 사용자가 한눈에 어떤 면을 검사 중인지 파악. captured 셀은 어둡게 표시 → 미수집 셀이 시각적으로 눈에 띔.
-- cellIdx 보존 — store ingestPath 가 cell_idx 보존 + MissionPathLayer 가 (roomIdx:cx:cy:cz) 키로 cellsByKey 매칭 → 라이브 captured 갱신.
-- AutonomousMissionControl coverageGrid 자동 GET: PATH_PLAN/COVERAGE_FLY/ROOM_TRANSITION/COMPLETE 진입 시 missionApi.coverageGrid 자동 호출 → 셀 시드. WS 끊겼다 살아난 직후에도 reconcile.
-- VERIFICATION 시각화: verdict 색상(ok=emerald / marginal=amber / divergent=rose) + IoU% + 차이영역 개수. 사용자가 "도면 vs 실측" 차이를 즉시 인지.
-- E-STOP 버튼 항상 활성: 어떤 phase 에서도 즉시 LAND. 빨강 ring 강조 + confirm 다이얼로그.
-
-### 🚨 안전성 영향
-
-- E-STOP UI 직결 → 백엔드 safety_monitor.trigger_estop → INAV LAND 강제. 사용자 1클릭 즉시 안전 회피.
-- 라이브 커버리지율 표시 → 검사 누락 즉시 인지 + 비행 중 보강 결정 가능.
-- VERIFICATION divergent 알람 → 도면 ↔ 실측 큰 차이 발생 시 사용자 PAUSE 후 재검토 가능.
-
-### R-hooks — git hook 활성화 (Vibe 로그 강제 + Conventional Commits) (2026-05-07 13:30)
+### R30 — git hook 활성화 (Vibe 로그 강제 + Conventional Commits) (2026-05-07 13:30)
 
 > 통합 repo 의 R32 작업 후, 분리 repo 에도 동일 정책을 적용하기 위한 hook 도입.
 > 각 repo 의 .githooks/ 는 독립 working tree 라 중복처럼 보여도 git 표준 패턴 (husky / lefthook / pre-commit 도 동일).
@@ -2515,80 +2458,49 @@ LandingHeader: `fixed top-0 ... z-50`. 기존 ContactModal: `fixed inset-0 z-[10
 - 우회: SKIP_VIBE_LOG_CHECK=1 / SKIP_COMMIT_MSG_CHECK=1 (긴급용, 사후 보강).
 - MS 브랜치까지만 작업 commit. develop / main / 배포는 사용자 명시 시점.
 
-### R31 — 콜드 스타트 완화 (Fly.io 워밍 핑 + bcrypt asyncio 오프로드) (2026-05-07 17:00)
-
-> 사용자 피드백: "로그인할 때 '로그인중...' 이 생각보다 오래 걸려" → Fly.io `auto_stop_machines='stop'` + `min_machines_running=0` 설정으로 idle 후 머신이 완전 정지 → 첫 요청이 콜드 스타트(컨테이너 + Python + FastAPI + DB 풀 부팅) 비용 다 먹음. 두 번째부터 빠르다는 사용자 확인으로 콜드 스타트 100% 확정.
-
-| 라운드 | 시각 | 작업 | 산출물 |
-|-------|------|------|-------|
-| R31.1 | 2026-05-07 17:00 | Login.jsx mount 시 root `/` 핑 1회 — 사용자가 ID/PW 입력하는 동안 머신 부팅 진행 → 실제 로그인 요청은 따뜻한 머신을 만남 | frontend/src/pages/Login.jsx |
-| R31.2 | 2026-05-07 17:00 | Landing.jsx mount 시 root `/` 핑 1회 — 랜딩 → 로그인 가는 동안 머신 미리 깨움 (직접 /login 진입 시는 R31.1이 잡음) | frontend/src/pages/Landing.jsx |
-
-### 📐 설계 결정
-
-- root `/` 엔드포인트 사용: `{"status":"ok"}` 만 반환하는 가장 가벼운 엔드포인트. `/health` 는 모델 상태/카메라/스트림 워커까지 검사해서 무겁고 503 가능성도 있어 워밍 핑용으로 부적합.
-- fire-and-forget: `.catch(() => {})` 로 실패해도 무시 — 워밍 목적이라 응답 결과 사용 안 함. 콘솔 노이즈/UX 영향 0.
-- min_machines_running=1 안 건드림: Fly 1GB 머신은 무료 한도 초과 가능성 → 비용 발생 우려. 사용자 명시 결정 필요.
-
-
 
 
 ---
 
-### R33 — 3D 드론 모델 실측 비율 적용 (Cinelog35 V3 + HolyBro S500) (2026-05-07 18:00)
+### R31 — 1차 배포 후속 보완: 사업자번호 모바일 + 객체감지 SVG 오버레이 + 콜드 스타트 워밍 핑 (2026-05-07 17:00)
 
-> 사용자 명시: "3D 모델링 되는 상황에서의 드론의 형태 및 사이즈 표시는 (1) GEPRC GEP-CL35 V3 / Cinelog35 V3 / O4 Pro RC FPV (Cinewhoop 프리스타일 레이싱용), (2) HolyBro S500 으로 적용. 드론 사이즈와 모델링된 사이즈 비율이 정확하게 맞도록".
-> 추가: "drone-01=Cinelog35 실내, drone-02=S500 외부. 이건 dashboard 의 drone1 RGB / drone2 THERMAL 매핑과는 별개 차원".
-
-**기존 상태**: DroneMarker 가 cone(0.18 radius, 0.5 height) + 4 cylinder propeller(±0.35) 추상 형태. 외곽 ~1m → 어떤 실드론보다도 큰 비현실적 사이즈. BuildingMesh 단위계가 미터(WIDTH=10, HEIGHT=3 → "m" 라벨)인데 드론은 단위 무관 추상. 사용자가 비율 확인 시 명확한 위화감.
-
-**진단**: 사이즈 환산 표(미터 단위) ─
-
-| 모델 | wheelbase | 외곽 | 두께/높이 | 프로펠러 직경 |
-|------|-----------|-----|----------|---------------|
-| Cinelog35 V3 | 0.142 | 0.188 | ~0.07 | 0.0889 (3.5") |
-| HolyBro S500 | 0.480 | 0.480 | 0.196 (다리 포함) | 0.254 (10") |
-
-S500 / Cinelog35 외곽 비 ≈ 2.55배. BuildingMesh 10m 가로의 1/55(Cinelog) ~ 1/21(S500) 사이즈 — 실내(10×8m) 공간 대비 자연스러움.
+> 1차 배포(2026-05-06) 후 실사용 피드백 3건 일괄 보강.
+> 통합 repo 의 R30(객체감지 시퀀스 UX) + ContactModal 모바일 반응형 + R31(콜드 스타트 완화) 작업물을 분리 repo 로 동기화.
+> 자율비행(R32) 관련 변경은 사용자 명시로 본 배포에서 제외.
 
 | 라운드 | 시각 | 작업 | 산출물 |
 |-------|------|------|-------|
-| R33.1 | 2026-05-07 18:00 | **DRONE_MODEL_MAP 추가** — drone-01→cinelog35, drone-02→s500. 카메라 매핑(DRONE_CAMERA_MAP)과 별 차원으로 분리 명시 (페이로드 ≠ 기체). | DroneMarker.jsx |
-| R33.2 | 2026-05-07 18:00 | **SPECS 표 — 미터 단위 실측 사양** — wheelbase/outerSize/frameHeight/propRadius/labelOffsetY 등 모델별 상수. 추후 사양 변경 시 한 곳만 수정. | 같음 |
-| R33.3 | 2026-05-07 18:00 | **Cinelog35Body 컴포넌트** — 4 덕트 hoop(torus, ductOuterRadius=0.048) + 내부 propeller disc + 모터 + 중앙 frame stack(0.05×0.025×0.05) + O4 Pro RC 카메라 박스 + 렌즈(emissive accent) + VTX 안테나(빨강). wheelbase 0.142m 정확. | 같음 |
-| R33.4 | 2026-05-07 18:00 | **HolyBroS500Body 컴포넌트** — 4 X-arm 박스(rotation 으로 비스듬히) + 모터(cylinder 0.018r) + 모터 캡(emissive) + 10" 프로펠러 disc(0.127r) + frame plate 샌드위치(top/bottom) + 중앙 stack + GPS 마운트+dome(시안) + 짐벌 카메라 + 4 landing gear + 가로 스키드. 480mm 정확. | 같음 |
-| R33.5 | 2026-05-07 18:00 | **labelOffsetY 모델별 분리** — Cinelog35 0.18m / S500 0.45m. 사이즈 비례 라벨 위치로 두 기체 모두 가독성 유지. ID 라벨에 모델명 부제 (CINELOG35 V3 / HOLYBRO S500) 추가. | 같음 |
-| R33.6 | 2026-05-07 18:00 | **카메라 vs 모델 매핑 별 차원 주석** — DRONE_MODEL_MAP 위에 "기체 모델 = 사이즈/용도, 카메라 매핑 = 페이로드. 두 매핑은 우연히 같은 selectedDroneId 키 공유할 뿐 인과 무" 명시. 추후 페이로드 가변 시 분리 가이드. | 같음 |
+| R31.1 | 2026-05-07 (오전) | **사업자번호 검색란 모바일 반응형** — input 의 기본 size(~150px) 가 flex-grow 와 무관하게 min-width 로 작용해 "진위 확인" 버튼을 밖으로 밀어내고 좌우 스크롤바 유발. `size={1}` + `min-w-0` + 버튼 `shrink-0` + 모바일 패딩 축소 (`px-3 sm:px-5`) 로 input 자유 축소 + 균형. | src/components/landing/ContactModal.jsx |
+| R31.2 | 2026-05-07 10:05 | **객체감지 모드 시퀀스 UX (스캔→탐지)** — `detectionPhase` ∈ {idle, raw(0–1.0s), scan(1.0–2.2s), detected}. backend `?mode=raw` 요청 → SVG 가 박스 일체 렌더(burned-in box 회피). naturalWidth viewBox 기반 자동 정렬, 스캔 sweep + 격자 pulse + bbox 페이드인 + confidence 카운트업 chip + 심각도 컬러링(HIGH/MED/LOW). | src/components/video/LiveVideoFeed.jsx |
+| R31.3 | 2026-05-07 10:05 | **CSS 키프레임 6종 전역 등록** — `scanSweep`, `scanGridPulse`, `detectPulse`, `detectGlow`, `detectLabelIn`, `detectCornerIn`. 컴포넌트 인라인 `<style>` 회피로 재렌더 비용 0. | src/index.css |
+| R31.4 | 2026-05-07 17:00 | **Login.jsx 콜드 스타트 워밍 핑** — useEffect mount 시 `${VITE_API_BASE_URL}/` 핑 1회. 사용자가 ID/PW 입력하는 동안 Fly.io 머신 부팅 진행 → 실제 로그인 요청은 따뜻한 머신을 만남. `.catch(() => {})` fire-and-forget. | src/pages/Login.jsx |
+| R31.5 | 2026-05-07 17:00 | **Landing.jsx 콜드 스타트 워밍 핑** — 동일 패턴. 랜딩 → 로그인 가는 동안 머신 미리 깨움 (직접 /login 진입은 R31.4 가 잡음). | src/pages/Landing.jsx |
 
 ### 📐 설계 결정 사항
 
-- **미터 단위 정확 적용**: BuildingMesh 가 이미 미터 단위(WIDTH=10, "m" 라벨). R3F 1 unit = 1m. 드론 사양도 mm → m 환산해서 그대로 적용 → 실내(10×8m) 공간에 들어갔을 때 Cinelog35 가 시각적으로 "탁구공 정도", S500 이 "농구공 정도"로 자연 스케일.
-- **모델 매핑과 카메라 매핑 차원 분리**: 사용자 명시 — "drone-01=Cinelog35, drone-02=S500" 은 기체. "drone-01=RGB, drone-02=THERMAL" 은 카메라. 우연히 selectedDroneId 키 공유. 추후 같은 S500에 RGB 페이로드 교체 같은 가변 시점에 카메라 매핑만 분리 이관, 기체 매핑은 그대로.
-- **실모델 디테일 vs 성능 균형**: torus + cylinder + box 같은 primitive 만 사용 (GLB 로드 X). 실드론 인지 가능한 핵심 시각 자산만 (Cinewhoop 의 4 덕트, S500 의 X-arm + 다리 + GPS dome). 텍스처 0, vertex 수 최소화 — 비행 중 60fps 유지.
-- **emissive accent 사용**: 미션 phase(idle gray vs flying emerald) 가 카메라 렌즈/모터 캡 같은 작은 액센트로 발화 → 멀리서 봐도 비행 상태 즉시 인지. 본체는 다크(#0f172a)로 두어 액센트 강조.
-- **랜딩 기어/안테나 등 비대칭 디테일**: S500 은 GPS 가 뒤(-X), 짐벌 카메라가 앞(+X). 이 비대칭이 yaw 회전 시 "전후 방향" 시각 인지 도움 → 사용자가 드론이 어디 보고 있는지 즉시 파악.
-- **고도 라인 + 경로 폴리라인 보존**: 기존 R3F 자산(고도 점선, 비행 경로, 그림자 투영)은 그대로 유지 — 드론 형태만 교체. 텔레메트리 흐름 무손상.
-
-### 🚨 안전성 영향
-
-- **사이즈 정확성 = 충돌 회피 시뮬 정확성**: Cinelog35 외곽 188mm 가 정확히 표시되어야 좁은 복도/문틀 통과 가능 여부를 사용자가 시각적으로 판단 가능. S500 480mm 도 동일. 추상 1m 표시 시 실드론보다 더 큰 위험 인지로 잘못된 PAUSE 발생 가능성 — 정확한 비율로 해소.
-- **모델 매핑 명확화 = 잘못된 기체 출동 방지**: 외부 점검 미션에 실내용 Cinelog35 가 표시되면 사용자가 "이 미션엔 S500" 이라고 즉시 인지 가능. 드론 선택 실수 사고 예방.
+- **모바일 input 의 기본 size 함정**: HTML `<input>` 은 `size` 속성 기본값이 ~20 chars (~150px) 이고 이것이 flex 컨테이너 안에서 min-width 처럼 작용 → flex-grow 가 무력화되고 형제 요소를 밖으로 밀어냄. `size={1}` 로 명시 축소 + `min-w-0` 으로 flex min-content 무시.
+- **객체감지 detection 모드만 시퀀스, bbox 모드는 그대로**: 사용자 원본 피드백이 "객체감지모드에서" 한정. bbox 모드는 "단순 위치 표시 — 빠른 확인" 의도라 시퀀스 적용 시 의도 손상.
+- **백엔드 raw 분기 + 프론트 SVG 분리**: detection 모드 진입 시 backend `?mode=raw` → 박스 없는 JPEG → SVG 가 박스 일체 렌더. burned-in box + SVG box 두 겹이면 미세 어긋남 + 시각 노이즈.
+- **viewBox 기반 좌표 자동 정렬**: SVG `viewBox` + `preserveAspectRatio` 를 img 와 일치 → DOM 리사이즈/풀스크린 토글 시 자동 재정렬.
+- **워밍 핑 root `/` 사용**: `{"status":"ok"}` 만 반환하는 가장 가벼운 엔드포인트. `/health` 는 모델 상태/카메라까지 검사해서 무겁고 503 가능성도 있어 워밍용 부적합.
+- **fire-and-forget 패턴**: `.catch(() => {})` 로 실패해도 무시. 워밍 목적이라 응답 결과 사용 안 함, 콘솔 노이즈/UX 영향 0.
+- **min_machines_running 안 건드림**: Fly 1GB 머신은 무료 한도 초과 가능성 → 비용 발생 우려. 사용자 명시 결정 필요. 워밍 핑만으로도 첫 로그인 체감속도 5~10초 단축 예상.
 
 ---
 
-## 🎯 R34 — 체감 속도 + 드래그앤드랍 + onError 자동 retry (2026-05-07 19:00)
+## 🎯 R29 — 체감 속도 + 드래그앤드랍 + onError 자동 retry (2026-05-07 19:00)
 
-> 사용자 피드백 (배포 후 실사용 중): "전체적으로 체감 속도가 너무 느리다. 로그인 최초 10초+, 업로드/재생도 마찬가지. 다른 플랫폼 가면 된다는 생각이 드는 순간 망한 거다. 사용자 기다림 최소화. 드래그앤드랍도 가능하게."
+> 사용자 피드백: "전체적으로 체감 속도가 너무 느리다. 로그인 최초 10초+, 업로드/재생도 마찬가지. 다른 플랫폼 가면 된다는 생각이 드는 순간 망한 거다. 사용자 기다림 최소화. 드래그앤드랍도 가능하게." 통합 repo R-postdeploy.12 + R34 작업물 동기화.
 
 ### 🛠 변경
 
 | 라운드 | 시각 | 작업 | 산출물 |
 |-------|------|------|-------|
-| R34.1 | 2026-05-07 19:00 | **HTML preconnect / dns-prefetch** — `index.html` 에 backend 도메인(aeroinspect-backend.fly.dev) 등록. 브라우저가 페이지 로드 즉시 DNS resolve + TCP/TLS handshake 미리 완료 → 첫 fetch가 ~200-500ms 더 빠름. | index.html |
-| R34.2 | 2026-05-07 19:00 | **Login 다층 워밍 (mount + 5s + 12s + focus)** — 단발 워밍은 사용자가 빠르게 입력+제출 시 같은 부팅 큐에 합류해 콜드 비용을 그대로 부담. 3-tier 시간 + input focus 추가 핑으로 부팅 완료 시점을 사용자 인지 시간 안에 확실히 끌어들임. 영구 polling은 안 함 (비용 제어). | Login.jsx |
-| R34.3 | 2026-05-07 19:00 | **Dashboard mount 시 `/test/init` 사전 호출** — backend 워밍 + ONNX 11모델 로드를 dashboard 진입 즉시 백그라운드에 트리거. 사용자가 START 누를 시점엔 이미 모델 준비 완료 상태 → 첫 frame 즉시 흐름. fire-and-forget. | Dashboard.jsx |
-| R34.4 | 2026-05-07 19:00 | **드래그앤드랍 업로드 + 자동 재생** — Dashboard 전역 dragenter/over/drop 리스너. drop 시 (1) source='upload' 자동 전환 → (2) /test/upload 업로드 → (3) /test/start 자동 호출까지 일괄. 시각적 dropzone 오버레이 (드래그 중/업로드 중 노출). 파일 첨부 버튼 동선 클릭 0회로 단축. | Dashboard.jsx |
-| R34.5 | 2026-05-07 19:00 | **`<img>` onError 자동 재시도 (5초 × 12회 = 60초)** — Fly.io 콜드 스타트 + 11모델 로드(~25-40초) 동안 backend 응답 못해 onError → hasError 영구 고정. 사용자 클릭 없이도 머신 깨어나면 자연 연결. MAX_RETRIES=12 로 무한 retry 차단. | LiveVideoFeed.jsx |
+| R29.1 | 2026-05-07 19:00 | **HTML preconnect / dns-prefetch** — `index.html` 에 backend 도메인(aeroinspect-backend.fly.dev) 등록. 브라우저가 페이지 로드 즉시 DNS resolve + TCP/TLS handshake 미리 완료 → 첫 fetch가 ~200-500ms 더 빠름. | index.html |
+| R29.2 | 2026-05-07 19:00 | **Login 다층 워밍 (mount + 5s + 12s + onFocus)** — 단발 워밍은 사용자가 빠르게 입력+제출 시 같은 부팅 큐에 합류해 콜드 비용을 그대로 부담. 3-tier 시간 + input focus 추가 핑으로 부팅 완료 시점을 사용자 인지 시간 안에 확실히 끌어들임. 영구 polling은 안 함 (비용 제어). | Login.jsx |
+| R29.3 | 2026-05-07 19:00 | **Dashboard mount 시 `/test/init` 사전 호출** — backend 워밍 + ONNX 11모델 로드를 dashboard 진입 즉시 백그라운드에 트리거. 사용자가 START 누를 시점엔 이미 모델 준비 완료 상태 → 첫 frame 즉시 흐름. fire-and-forget. | Dashboard.jsx |
+| R29.4 | 2026-05-07 19:00 | **드래그앤드랍 업로드 + 자동 재생** — Dashboard 전역 dragenter/over/drop 리스너. drop 시 (1) source='upload' 자동 전환 → (2) /test/upload 업로드 → (3) /test/start 자동 호출까지 일괄. 시각적 dropzone 오버레이 (드래그 중/업로드 중 노출). 파일 첨부 버튼 동선 클릭 0회로 단축. | Dashboard.jsx |
+| R29.5 | 2026-05-07 19:00 | **`<img>` onError 자동 재시도 (5초 × 12회 = 60초)** — Fly.io 콜드 스타트 + 11모델 로드(~25-40초) 동안 backend 응답 못해 onError → hasError 영구 고정. 사용자 클릭 없이도 머신 깨어나면 자연 연결. MAX_RETRIES=12 로 무한 retry 차단. | LiveVideoFeed.jsx |
 
 ### 📐 설계 결정
 
@@ -2604,41 +2516,598 @@ S500 / Cinelog35 외곽 비 ≈ 2.55배. BuildingMesh 10m 가로의 1/55(Cinelog
 
 ---
 
-## 🎯 R35 — 체감 속도 측정 도구 + delayed spinner + 클라이언트 압축 + upload progress (2026-05-07 20:00)
+## 🎯 R30 — 체감 속도 측정 도구 + delayed spinner + 클라이언트 압축 + upload progress (2026-05-07 20:00)
 
-> 사용자 피드백: "구글/네이버/쿠팡은 '로그인 중' 문구가 뜨기도 전에 로그인이 완료된다. 영상 업로드도 사용자 대기 최소화. 도구 붙여서 테스트 진행하자."
+> 사용자 피드백: "구글/네이버/쿠팡은 '로그인 중' 문구가 뜨기도 전에 로그인 완료. 영상 업로드도 사용자 대기 최소화. 도구 붙여서 테스트 진행." 통합 repo R35 작업물 동기화.
 
 ### 🛠 변경
 
 | 라운드 | 시각 | 작업 | 산출물 |
 |-------|------|------|-------|
-| R35.1 | 2026-05-07 20:00 | **perfTimer 유틸** — `perfStart/perfEnd(label)` 패턴 + sessionStorage 누적 + window 이벤트 발화. Performance API 기반 ms 단위. 핵심 사용자 액션의 정확한 시간 측정. | utils/perfTimer.js |
-| R35.2 | 2026-05-07 20:00 | **PerfTimerWidget** — 화면 우하단 측정 표시 (`?perf=1` 또는 localStorage.perfWidget='1' 활성). 구글/네이버 비교용 시각 검증. 운영에 박혀 있어도 일반 사용자엔 안 보임. | components/dev/PerfTimerWidget.jsx, App.jsx |
-| R35.3 | 2026-05-07 20:00 | **Login delayed spinner (300ms)** — `loading=true` 후 300ms 이내 응답이면 "로그인 중..." 문구 자체를 안 띄움. 머신 깨어있는 정상 케이스(~100-200ms)에선 사용자 체감 = 즉시 로그인 완료. 구글/네이버 패턴. | Login.jsx |
-| R35.4 | 2026-05-07 20:00 | **클라이언트 이미지 다운샘플 (4K → 1280)** — canvas drawImage 리사이즈 + JPEG 0.85 인코딩. 이미지 사이즈 80~95% 절감. 영상은 그대로(ffmpeg.wasm은 ~30MB 다운로드 + 초기 로딩 무거워 단발 ROI 낮음). long-edge ≤ 1280이면 원본 그대로(불필요 변환 회피). | utils/imageDownsample.js |
-| R35.5 | 2026-05-07 20:00 | **uploadWithProgress 유틸** — XHR 기반 multipart 업로드 + progress callback. fetch API는 upload progress 표준 미지원이라 XMLHttpRequest 사용. percent/speedKbps/etaSeconds 실시간 제공. | utils/uploadWithProgress.js |
-| R35.6 | 2026-05-07 20:00 | **Dashboard 드래그앤드랍 강화** — drop 시 (0) 다운샘플 → (1) source 전환 → (2) progress 추적 업로드 → (3) 자동 START. dropzone 오버레이에 진행률 바 + 속도(KB/s) + ETA + 압축 효과(MB 절감) 실시간 표시. 각 단계 perf 측정. | Dashboard.jsx |
-| R35.7 | 2026-05-07 20:00 | **TestModeBar 파일첨부 강화** — 동일 패턴(다운샘플 + progress + perf). 버튼 라벨에 "업로드 중 75%" 형태로 진행률 인라인 표시. | TestModeBar.jsx |
+| R30.1 | 2026-05-07 20:00 | **perfTimer 유틸** — `perfStart/perfEnd(label)` + sessionStorage 누적 + window 이벤트. Performance API 기반 ms 측정. | utils/perfTimer.js |
+| R30.2 | 2026-05-07 20:00 | **PerfTimerWidget** — 화면 우하단 측정 표시 (`?perf=1` 활성). 운영에 박혀 있어도 일반 사용자엔 안 보임. 노션 동기화용 스크린샷 캡처 시 측정값 그대로 첨부 가능. | components/dev/PerfTimerWidget.jsx, App.jsx |
+| R30.3 | 2026-05-07 20:00 | **Login delayed spinner (300ms)** — `loading=true` 후 300ms 이내 응답이면 "로그인 중..." 안 띄움. 머신 깨어있는 정상 케이스(~100-200ms)에선 사용자 체감 = 즉시 로그인 완료. 구글/네이버 패턴. | Login.jsx |
+| R30.4 | 2026-05-07 20:00 | **클라이언트 이미지 다운샘플 (4K → 1280)** — canvas drawImage + JPEG 0.85. 사이즈 80~95% 절감. 영상은 그대로(ffmpeg.wasm은 ROI 낮음). | utils/imageDownsample.js |
+| R30.5 | 2026-05-07 20:00 | **uploadWithProgress XHR 유틸** — fetch는 upload progress 표준 미지원. XMLHttpRequest .upload.onprogress로 percent/speedKbps/etaSeconds 실시간 제공. | utils/uploadWithProgress.js |
+| R30.6 | 2026-05-07 20:00 | **Dashboard 드래그앤드랍 + TestModeBar 파일첨부** 강화 — 다운샘플 + progress + perf 통합. dropzone 오버레이에 진행률 바 + 속도 + ETA + 압축 효과 실시간. | Dashboard.jsx, TestModeBar.jsx |
 
 ### 📐 설계 결정
 
-- **Delayed spinner — 구글/네이버 패턴**: 사용자 체감 속도의 본질은 응답 시간이 아니라 "기다림 인지 시간". 300ms 이내 응답이면 spinner 자체를 안 띄워서 인지 시간 0. 응답이 느릴 때만 시각적 피드백. macOS/iOS의 progress indicator도 같은 패턴.
-- **이미지만 다운샘플 / 영상은 그대로**: ffmpeg.wasm은 단발 ROI 낮음. 이미지는 canvas 네이티브 리사이즈로 가볍고 빠름. 4K 콘크리트 이미지 → 1280으로 줄여도 균열 검출 정확도엔 영향 미미(M1-YOLO imgsz 640~1024 기준). 사이즈는 80~95% 절감.
-- **XHR vs fetch — upload progress**: fetch는 ReadableStream 우회로 upload 측 progress 가능하지만 호환성 X (Safari, 일부 모바일 브라우저). XHR `.upload.onprogress`는 표준 + 호환성 100% — 단순함이 ROI.
-- **perf 위젯 활성화 — query param + localStorage**: 운영 배포에 박혀 있어도 일반 사용자엔 안 보이게 + 개발자/QA는 `?perf=1`로 즉시 활성화. 노션 동기화용 스크린샷에 측정값 그대로 첨부 가능.
+- **Delayed spinner — 구글/네이버 패턴**: 사용자 체감 속도의 본질은 응답 시간이 아니라 "기다림 인지 시간". 300ms 이내면 spinner 자체를 안 띄워서 인지 시간 0. 응답이 느릴 때만 시각적 피드백.
+- **이미지만 다운샘플 / 영상은 그대로**: ffmpeg.wasm은 ~30MB 다운로드 + 초기 로딩 무거워 단발 ROI 낮음. 이미지는 canvas 네이티브 리사이즈로 가볍고 빠름. 1280 long-edge는 M1/M2/M3 YOLO 학습 imgsz(640~1024) 대비 충분.
+- **XHR vs fetch — upload progress**: fetch는 ReadableStream 우회로 가능하지만 호환성 X. XHR `.upload.onprogress`는 표준 + 100% 호환.
+- **perf 위젯 활성화 — query param + localStorage**: 운영 배포에 박혀 있어도 일반 사용자엔 안 보이게 + 개발자/QA는 즉시 활성화.
 
 ### 🚨 안전성 영향
 
-- 검출 정확도 영향 0 — 이미지 다운샘플은 클라이언트 측 시각 자료에만 적용. backend는 받은 그대로 ONNX 추론.
-- 1280 long-edge는 M1/M2/M3 YOLO 학습 imgsz(640~1024) 대비 충분 — 모델 입력 단계에서 다시 letterbox.
-- delayed spinner는 시각적 변경뿐 — 실제 응답 시간이 1.5초 넘어가면 정상적으로 "로그인 중..." 표시되어 사용자 인지 보장.
-- 압축 후 SVG/HEIC/손상 파일은 원본 그대로 통과 (createImageBitmap 실패 시 fallback) — 데이터 손실 없음.
+- 검출 정확도 영향 0 — 이미지 다운샘플은 클라이언트 측 시각 자료에만 적용.
+- 1280 long-edge는 학습 imgsz 대비 충분 — 모델 입력 단계에서 다시 letterbox.
+- delayed spinner는 시각적 변경뿐 — 응답 시간이 1.5초 넘어가면 정상적으로 "로그인 중..." 표시.
+- 압축 후 SVG/HEIC/손상 파일은 원본 그대로 통과 — 데이터 손실 없음.
 
-### 📊 측정 라벨 (`?perf=1` 위젯 또는 sessionStorage `perfTimer_records`)
+### 📊 측정 라벨 (`?perf=1` 위젯)
 
-- `login` — 로그인 API 응답 시간 (목표: <300ms로 spinner 안 뜨기)
-- `dashboard-warm-root` — `/` 워밍 핑 응답 시간 (콜드 스타트 진단)
-- `dashboard-warm-init` — `/test/init` 모델 로드 시간 (목표: 첫 START 전까지 완료)
-- `upload-downsample` — 클라이언트 다운샘플 시간
-- `upload-network` — 실제 multipart 전송 시간
-- `upload-total` — 다운샘플 + 전송 + 자동 START 누적
+- `login` (목표: <300ms로 spinner 안 뜨기)
+- `dashboard-warm-root`, `dashboard-warm-init` (콜드 스타트 진단)
+- `upload-downsample`, `upload-network`, `upload-total`
+
+---
+
+## 🎯 R31 — CAD/평면도 → 3D 모델링 정확도 + L3 자율비행 LiDAR 실시간 시각화 (2026-05-13 17:30)
+
+> 사용자 피드백: "지금 캐드 이미지를 3D 모델링하거나 평면도 이미지를 3D 모델링하는 거에 있어서 부족한 부분 자가검토하고 보완해. 스케일 및 치수 관련해서 정확한지 확인해. L3는 Gazebo를 이용해서 드론의 시뮬레이션 비행을 통한 3D 모델링을 할거야 — 자율비행이니까 참고해서 진행해. 실시간 자율비행 프로세스도 검증."
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R31.1 | 2026-05-13 16:00 | **floorplanApi axios 래퍼 + 클라이언트 사전 검증** — analyze/validate/upload+process 통합. `preflightFloorplanFile()` 가 image(50KB-25MB)/cad(.dxf/.dwg/.ifc, 50MB) 사전 거름. axios `onUploadProgress` + 서버 처리 단계 추정으로 진행률 0-100 통합. 기존 raw fetch 의 "25%/60%/90% 가짜 단계" 제거. | src/api/floorplanApi.js |
+| R31.2 | 2026-05-13 16:15 | **BuildingMesh 종횡비 보존 + 치수 출처 표시** — 하드코딩 `WIDTH=10, DEPTH=8` 제거, `deriveSceneSize({imageWidth, imageHeight, scalePxPerMeter, outline})` 도입. 우선순위: calibrated(scale_px_per_meter) > aspect(이미지 종횡비) > outline bbox > fallback. 가로 1500×세로 1000(3:2) 평면도가 5:4 로 강제되던 왜곡 제거. 치수 라벨에 "실측/추정" 출처 표기. | src/components/map3d/BuildingMesh.jsx |
+| R31.3 | 2026-05-13 16:20 | **L1 (CAD) 데이터 기반 렌더** — `LevelOneMesh` 가 항상 하드코딩 4벽만 그리던 문제 제거. wallsData 있으면 `WallMeshes` + `OutlineBoundary`, 없으면 `FourWallsFallback`. DXF 백엔드 추출 결과가 즉시 시각화됨. | src/components/map3d/BuildingMesh.jsx |
+| R31.4 | 2026-05-13 16:25 | **store 필드 확장 — imageWidth/imageHeight/scalePxPerMeter** — sessionStore + preModelStore 둘 다. selectPreModel/setLevel/reset/partialize 일관 처리. BuildingScene 가 sessionStore → BuildingMesh 로 전달. | src/store/sessionStore.js, src/store/preModelStore.js, src/components/map3d/BuildingScene.jsx |
+| R31.5 | 2026-05-13 16:40 | **PreWork 전면 재작성** — raw fetch → axios. L1 가짜 `setTimeout(2000)` mock 제거하고 실제 `uploadAndProcessCad()` 호출 (DXF 만 수용, DWG/IFC 차단). L2 는 `validateFloorplan()` 품질 게이트 추가 (rejected 차단, warning 통과). `readImageDimensions()` 로 imageWidth/imageHeight 사전 추출 → preModel 저장. 외곽 윤곽선 폴백 안내. | src/pages/employee/PreWork.jsx |
+| R31.6 | 2026-05-13 17:00 | **missionApi + droneStore lidarPoints 인프라** — startAutonomousScan/cancelMission/getMissionStatus/listMissions axios 래퍼. droneStore 에 lidarPoints (Float32Array, 불변 갱신) + lidarPointCount + lidarMissionStatus + 5개 액션 (begin/append/finish/fail/reset) 추가. | src/api/missionApi.js, src/store/droneStore.js |
+| R31.7 | 2026-05-13 17:10 | **useWebSocket — lidar/mission 이벤트 라우팅** — `lidar.points` → droneStore.appendLidarPoints, `mission.completed` → finishLidarMission, `mission.failed` → failLidarMission. (이후 사용자가 다중 채널 구독 + slam.created/updated/thermal.analysis 까지 확장) | src/hooks/useWebSocket.js |
+| R31.8 | 2026-05-13 17:20 | **LevelThreeMesh 실 LiDAR 점군 우선** — droneStore.lidarPoints 가 있으면 좌표축 매핑(LiDAR z↔Three y) 후 시각화, 없으면 5000점 랜덤 폴백 유지. lidarMissionMeta.worldW/worldD 로 씬 크기 산출. 데이터 출처 라벨 ("실측 스캔 중/완료" vs "미시작 폴백"). | src/components/map3d/BuildingMesh.jsx |
+| R31.9 | 2026-05-13 17:25 | **SessionModeling 자율비행 트리거** — L3 시작 버튼이 백엔드 `startAutonomousScan()` 호출 → WS 점 누적. 취소 시 `cancelMission()` 동시 호출. 진행 상태/에러 표기. | src/pages/session/SessionModeling.jsx |
+| R31.10 | 2026-05-13 17:30 | **L3 폴백 walls 패치** — 검증 중 발견: wallsData=null (도면 없는 정상 시나리오) 시 백엔드 미션 호출이 SKIP 되어 자율비행 자체가 발화 안 함. 8×6m 빈 사각형 walls/outline 즉석 생성으로 폴백 → 시뮬레이션 항상 동작. 빌드 후 빈 환경 테스트 1,512점 누적 + mission.completed 확인. | src/pages/session/SessionModeling.jsx |
+
+### 📐 설계 결정
+
+- **종횡비 보존 우선순위 4단**: calibrated 가 가장 정확하지만 사용자가 calibrate 단계를 거의 안 거침 → aspect ratio 폴백이 실질 default. 하드코딩 10×8 은 모든 평면도에 동일 비율 강제하는 "보이지 않는 왜곡" — 사용자가 치수 라벨 "10.0m/8.0m" 를 진짜 수치로 오인할 위험.
+- **치수 출처 라벨 노출**: "실측/추정/기본값" 을 3D 위에 띄워 사용자가 정확도 신뢰 수준을 즉시 인지. calibrate 안 했으면 "추정" 명시 → 후속 calibration 동기 부여.
+- **L1 데이터 기반 + 폴백 유지**: DXF 만 백엔드 처리 가능하고 DWG/IFC 는 향후 지원. 폴백 4벽은 "벽체 추출 실패해도 화면이 비지 않는" 안전망. 사용자 의도("CAD 도 의미있는 3D")와 백엔드 한계 사이의 타협.
+- **품질 게이트 — rejected 차단 / warning 통과**: 흐린 이미지 그대로 처리하면 OpenCV 가 거의 빈 walls 반환 → 사용자가 "내가 잘못 했나" 혼란. validate 가 7개 항목(해상도/선명도/대비/직선비율/직각/기울기/벽체수) 종합 점수 → rejected 면 명시 차단, warning 은 경고 후 진행.
+- **Float32Array + 불변 갱신**: appendLidarPoints 가 매 batch 마다 새 Float32Array 생성 (기존 + 신규 합쳐서 set). useMemo 가 reference 변경 감지해 BufferGeometry 재생성. 점이 누적될수록 비용 증가하지만 boustrophedon 1회 스캔 ~3000점 수준이라 허용 범위.
+- **L3 폴백 walls — 데모/실 비행 분리 정신**: "도면 없는 현장" 이 L3 의 정상 시나리오인데 walls 가 없으면 raycast 시뮬이 의미 없음. 두 갈래: (a) UI 변경해서 사용자가 가상 환경 명시 선택, (b) 백엔드/프론트가 묵시적 폴백. (b) 채택 — 사용자 동선에 단계 추가 안 하고 데모 모드 항상 작동. 실 ROS2/Gazebo 환경 도입 시 해당 분기는 제거.
+- **WS 채널 — 시뮬레이터가 'defects' 발행**: 현재 useWebSocket 이 'defects' 단일 채널 구독 (이후 다중 채널로 확장). 모든 이벤트(lidar/mission 포함) 를 'defects' 에 일괄 발행해 채널 추가 없이 라우팅. 의미상 'lidar' 분리가 깨끗하지만 현재 단순화 우선.
+
+### 🚨 안전성 영향
+
+- 종횡비 보존 변경은 시각/측정 영역 — 검출 정확도 영향 0.
+- L1 폴백 제거 안 함 → wallsData 없을 때 동일 화면 보장 (회귀 위험 0).
+- L3 폴백 walls 는 "데모 환경" 명시 의도. 실제 드론 비행 흐름에는 영향 없음 — 그 경우 프론트가 sessionStore.wallsData 를 가지고 있을 것.
+- 빌드: `npm run build` 13.10s 통과. 백엔드 시뮬레이터 종합 테스트(L2 환경 4032점, 빈 환경 1512점) 모두 100% 완주 + mission.completed 발행 확인.
+
+### 🔍 자가검토 발견 갭 (보완 완료)
+
+| # | 갭 | 보완 |
+|---|---|---|
+| 1 | 하드코딩 10×8 m → 모든 평면도 왜곡 | deriveSceneSize 4단 우선순위 |
+| 2 | L1 LevelOneMesh 가 wallsData 무시 | 데이터 기반 분기 + 4벽 폴백 |
+| 3 | /validate 엔드포인트 미사용 | PreWork L2 진입 시 호출, rejected 차단 |
+| 4 | raw fetch + 가짜 진행률 | axios 래퍼 + 실 onUploadProgress |
+| 5 | 클라이언트 사전 검증 부재 | preflightFloorplanFile (크기/타입) |
+| 6 | LevelThreeMesh 가 항상 랜덤 5000점 | droneStore.lidarPoints 우선, 폴백 유지 |
+| 7 | L3 진입 시 백엔드 미션 트리거 없음 | SessionModeling.handleStartDroneScan |
+| 8 | walls=null 시 자율비행 SKIP (검증 중 발견) | 8×6m 폴백 walls 즉석 생성 |
+
+---
+
+## 🎯 R32 — 전체 프로세스 검증 & 통합 미스매치 보완 (2026-05-13 16:00)
+
+> 사용자 피드백: "현재 프로젝트의 전체적인 프로세스 검증해줘. 로그인부터 시작해서 모든 기능들 전체 다. 누락된 부분이 있거나 보완이 필요한 부분이 있으면 정리해서 알려주면 순차적으로 진행하자." → 프론트/백 동시 audit 후 P0(보안)·P1(미구현)·P2(통합 미스매치) 정리, 사용자 확인 후 순차 수정·검증·다음 단계 반복. 통합 repo TEAM_PROJECT_2 도 동일 코드/ENV 동기화.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R32.1 | 2026-05-13 14:30 | **useWebSocket 다중 채널 구독** — 기존 `?channel=defects` 단일 구독 → `?channels=defects,telemetry,camera,thermal` 콤마 분리. 백엔드가 `telemetry`/`camera`/`thermal` 채널로 분리 broadcast 하는데 프론트가 못 받던 미스매치 해결. autonomous_flight_simulator 는 'defects' 채널로 발행해 미션 중에는 작동했지만, 일반 카메라 모드 전환·열화상 분석·텔레메트리 POST 결과는 화면에 안 떴음. | src/hooks/useWebSocket.js |
+| R32.2 | 2026-05-13 14:35 | **WS JWT 토큰 attach + 본인 채널 자동 구독** — authStore.token/user.id 를 useCallback deps 로 받아 로그인 시 `?token=...&channels=...,notifications:{uid},user:{uid}` 형태로 자동 갱신. 로그아웃 또는 사용자 전환 시 기존 소켓 close → 새 채널로 재연결. mountedRef + retryDelayRef 로 race 차단. | src/hooks/useWebSocket.js |
+| R32.3 | 2026-05-13 14:35 | **defect.batch 핸들러 추가** — 백엔드 `/ai/batch` 가 `defect.batch` 발행하는데 프론트는 `defect.new` 만 처리 → 배치 탐지가 모두 묵살되던 사고. `data.items.forEach(d => pushDefect(d))` 로 단건과 동일 경로 합류. | src/hooks/useWebSocket.js |
+| R32.4 | 2026-05-13 14:40 | **thermalStore 신설 + useThermalData 셀렉터 래퍼** — 기존 `useThermalData` 가 컴포넌트별 useState 라 useWebSocket 핸들러에서 직접 push 불가 (인스턴스 분리). Zustand 모듈 싱글톤 store 로 옮기고, 기존 훅은 셀렉터로 호환 유지 → ThermalGraph 무수정. | src/store/thermalStore.js (신규), src/hooks/useThermalData.js |
+| R32.5 | 2026-05-13 14:45 | **WS thermal/slam 이벤트 라우팅** — `thermal.frame`, `thermal.analysis` → thermalStore.pushReading. `slam.created`, `slam.updated` console.log (3D 미니맵 향후 hook 지점). `connection.established` 에서 거부된 채널(rejected) 워닝 로그. | src/hooks/useWebSocket.js |
+| R32.6 | 2026-05-13 15:10 | **ThermalOverlay 실제 HUD 구현** — 기존 placeholder Canvas + TODO 주석 → thermalStore.readings 최신값(max/avg/min) 우상단 컴팩트 패널. Δ(max-avg)≥3°C 면 빨간 펄스 ALERT 보더 + shadow. LiveVideoFeed 에 `cameraMode === 'thermal' \|\| 'blend'` 일 때 표시. | src/components/video/ThermalOverlay.jsx, src/components/video/LiveVideoFeed.jsx |
+| R32.7 | 2026-05-13 15:25 | **ContactModal → /api/v1/contact 연동** — 기존 `alert(접수됨)` + TODO 주석으로 백엔드 미연결. submitContactInquiry() axios POST → 슈퍼어드민 notification 발송. submitting 상태로 더블 제출 차단, 실패 시 detail 표시. | src/api/contactApi.js (신규), src/components/landing/ContactModal.jsx |
+| R32.8 | 2026-05-13 16:48 | **로컬 .env 작성 (운영 secret 미러)** — Vercel/Fly 환경변수만 두지 말고 로컬 .env 에도 동일 정리 요청. 운영값 미러 + dev 기본값(API_BASE/WS_URL localhost) + OAuth client id 동기. VITE_ODCLOUD_SERVICE_KEY / VITE_KAKAO_JS_KEY 는 통합 repo TEAM_PROJECT_2 frontend/.env 에서 동기화. | .env (신규, .gitignore 포함) |
+| R32.9 | 2026-05-13 17:30 | **통합 repo TEAM_PROJECT_2 동기화** — 분리 repo 의 7개 frontend 변경 파일(useWebSocket / useThermalData / thermalStore / ThermalOverlay / LiveVideoFeed / ContactModal / contactApi)을 통합 repo 에 그대로 복사. 통합 .env 는 이미 ODCLOUD/KAKAO_JS 가 채워져 있어 분리 repo placeholder 백필 소스로 사용. | TEAM_PROJECT_2_Drone_project/frontend/ |
+
+### 📐 설계 결정
+
+- **다중 채널 단일 연결 vs 채널당 소켓**: 후자는 N WebSocket 동시 보유 — Fly free tier 머신 메모리 + 클라이언트 브라우저 자원 낭비. 단일 연결로 콤마 분리 구독 (백엔드가 `register()` 분리로 accept 중복 없이 추가 등록) 채택 → 코드 단순 + 동일 핸드셰이크 비용.
+- **JWT 토큰 URL 쿼리 vs Subprotocol**: WebSocket 핸드셰이크에서 Bearer 헤더 추가가 표준 브라우저 API 로 불가능. 쿼리 파라미터 토큰은 로그/프록시 캐시 위험이 있지만 wss(TLS) + 단기 access token + 본인 채널만 검증이라 위험 작음. Sec-WebSocket-Protocol 우회는 표준 외이고 클라이언트/서버 모두 복잡 — 미채택.
+- **deps 에 token/userId 포함 → 재연결**: 로그아웃 시 본인 채널 구독을 즉시 해제하지 않으면 다음 사용자 로그인 시까지 이전 사용자 알림이 떠 있을 수 있음. useCallback deps 로 reactive 재연결 강제. mountedRef 로 언마운트 race 차단.
+- **defect.batch 가 단건처럼 forEach**: 배치 vs 단건 처리를 분기하면 testMediaReady 게이트 로직(시뮬레이션 첫 프레임 대기 큐) 이 두 군데 중복. pushDefect 단일 함수로 통합 → 게이트 통과 후 동일 경로.
+- **thermalStore 슬라이딩 윈도우 120 샘플**: 1fps × 120 = 2분 그래프. 더 길면 메모리 증가 + Recharts 렌더 비용. ThermalOverlay 는 latest 1건만 쓰지만, 동일 store 를 ThermalGraph (charts/) 가 공유해 일관 데이터 소스.
+- **Thermal 임계값 +3°C — 단열 결함 판정선**: 도메인 가이드. 향후 사이트별 조정 가능하도록 alertThreshold prop 노출.
+- **ContactModal — 비로그인 호출**: 랜딩 페이지 사용자가 가입 전이라도 문의해야 함 → /contact 백엔드는 무인증 (rate limit 으로 abuse 차단). Authorization 헤더 없어도 동작.
+
+### 🚨 안전성 영향
+
+- WS JWT 인증 도입 — 로그아웃 후에도 옛 알림이 새 사용자에게 누설되던 잠재 사고 차단. user_id 미스매치 채널 구독 시 백엔드가 묵시적 거부 → rejected 배열로 디버깅 가능.
+- 기존 카메라 모드 sync (다른 사용자가 mode 변경 시 내 화면도 따라옴) 가 처음으로 동작. 운영 환경에서 동기 카메라 워크플로 가능.
+- 빌드: `npm run build` 14.61s 통과 (×5 회 검증). 번들 크기 +0.3KB.
+
+### 🔍 자가검토 발견 갭 (보완 완료)
+
+| # | 갭 | 보완 |
+|---|---|---|
+| 1 | useWebSocket 단일 채널 → telemetry/camera/thermal 누락 | 다중 채널 ?channels= |
+| 2 | 본인 채널(notifications/user) 구독 부재 | JWT token + uid 자동 attach |
+| 3 | defect.batch 핸들러 없음 → AI batch 묵살 | forEach pushDefect |
+| 4 | useThermalData hook-instance 라 WS push 불가 | thermalStore 모듈 싱글톤 |
+| 5 | ThermalOverlay TODO placeholder | 실제 max/avg/min HUD + ALERT |
+| 6 | ContactModal handleSubmit 가 alert 만 (백엔드 미연결) | /contact 백엔드 + axios |
+| 7 | 로컬 .env 없음 → 환경변수 누락 시 dev 모드 부팅 실패 | 운영 secret 미러 + dev 기본값 |
+
+
+---
+
+## 🎯 R37 — test_mode 영상 60fps 아키텍처 (2026-05-15 15:30~15:45)
+
+> 사용자 피드백: "test mode 에서 첨부한 영상이 프레임 너무 낮은지 끊긴다" → MJPEG 재인코딩이 Fly 1 vCPU 결정적 병목임을 확인 → 원본 mp4 를 HTTP Range 로 직접 서빙 + `<video>` 네이티브 디코드 + SVG 오버레이로 전환. 사용자 추가 요청: "60fps + Fly 30fps 안정". 백엔드 R28 동기.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R37.1 | 2026-05-15 15:30 | **신규 컴포넌트 DetectionOverlay.jsx** — `<video>` 위 SVG bbox 레이어. testDetectionsStore detection 을 `video.currentTime ± 0.4s` 윈도우로 필터해 표시. `requestAnimationFrame` 33ms 폴링(timeupdate 250ms 보다 부드럽게). SVG viewBox = frame_w × frame_h 로 원본 좌표 1:1 매핑. | src/components/video/DetectionOverlay.jsx (신규) |
+| R37.2 | 2026-05-15 15:35 | **신규 hook useTestActiveMedia.js** — `/api/v1/stream/test/active` 2초 폴링. `{kind, filename, fps, duration, frame_w, frame_h}` 반환 + testDetectionsStore activeFilename 동기화(영상 교체 시 detection clear). | src/hooks/useTestActiveMedia.js (신규) |
+| R37.3 | 2026-05-15 15:38 | **신규 store testDetectionsStore.js** — video_timestamp_sec 키 detection 타임라인. ingest() 가 timestamp 정렬 + 중복 차단. defectStore 와 분리(카드 패널 vs 오버레이 책임 분리). | src/store/testDetectionsStore.js (신규) |
+| R37.4 | 2026-05-15 15:40 | **LiveVideoFeed isDirectVideoMode early-return + `<video>`** — active.kind===video && cameraMode===rgb && fill 이면 `<video src=/test/upload/file/{name}>` + `<DetectionOverlay>` 렌더. testPlayState (playing/paused/stopped) → video.play/pause/seek 동기화. onLoadedMetadata 에서 markTestMediaReady. 좌하단 `DIRECT · {fps}fps · {filename}` 디버그 뱃지. | src/components/video/LiveVideoFeed.jsx |
+| R37.5 | 2026-05-15 15:42 | **useWebSocket pushDefect 확장** — video_timestamp_sec 가 있으면 testDetectionsStore.ingest() 호출(기존 defectStore 라우팅 유지). | src/hooks/useWebSocket.js |
+
+### 📐 설계 결정
+
+- 카드 패널 store (defectStore) 와 오버레이 store (testDetectionsStore) 분리: 정렬 책임이 달라서 한 store 에 섞으면 깨지기 쉬움.
+- `<video>` autoPlay + muted + playsInline: 모바일/사파리 정책 허용 조건.
+- HEVC/H.265 비호환 mp4 는 일부 브라우저 디코드 불가 — H.264 baseline 권장.
+- Detection 누적 후 2회 재생 시 처음 구간에도 bbox 표시되는 게 의도(재시청 UX).
+
+### ✅ 검증
+
+- `vite build`: 15.66s OK, 4.85MB chunk.
+- 빌드 후 미디어가 영상이면 <video>, 이미지면 기존 MJPEG <img> 자동 분기.
+- 추론 결과 ±0.4s 윈도우 안에서만 오버레이 점멸.
+
+
+---
+
+## 🎯 R38 — AI Chatbot 프론트 컴포넌트 누락 분 + react-markdown 의존성 (2026-05-15 15:50)
+
+> R36 ai_chat 백엔드/스토어/API 는 동기됐으나 실제 화면 패널/버블/입력/플로팅 버튼 컴포넌트가 누락. App.jsx 의 GlobalFloatingChatbot 와이어업 + package.json react-markdown 추가. package-lock 재생성으로 Vercel npm ci 대비.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R38.1 | 2026-05-15 15:50 | **chatbot 8개 컴포넌트 신규** — ChatbotInput / ChatbotMessageBubble / ChatbotMessageThread / ChatbotPanel / ChatbotPanelHeader / FloatingChatbotButton / GlobalFloatingChatbot / ThreadList. | src/components/chatbot/*.jsx |
+| R38.2 | 2026-05-15 15:50 | **App.jsx GlobalFloatingChatbot 와이어업** — 기존 GlobalFloatingChat(채팅) 옆에 GlobalFloatingChatbot(AI) 추가. | src/App.jsx |
+| R38.3 | 2026-05-15 15:51 | **react-markdown ^9.0.1** — 챗봇 메시지 마크다운 렌더링. npm install 로 package-lock 재생성(Vercel npm ci 안전). | package.json, package-lock.json |
+
+### ✅ 검증
+
+- `vite build`: 18.13s OK.
+- package-lock 에 react-markdown 3 entries 등록 확인.
+
+
+---
+
+## 🎯 R-v1.1.01 — OpenAI 챗봇 UI 완전 통합 (2026-05-15 오후)
+
+> 사용자 요청: "open AI 를 활용한 chatbot 을 만들 예정 — 건축물·하자에 대한 도메인 대화" + "memory 기능 — 다음날도 흐름 유지" + "세션별 대화방 수동 생성" + "통합/분리 repo 모두 동일 반영". 이전 R38 로그는 분리 repo 만 부분 동기됐고 실제 컴포넌트/의존성이 누락 상태였음 — 이번 라운드는 통합/분리 repo 양쪽에 실제 8 컴포넌트 + aiChatApi + aiChatStore + App.jsx 마운트 + package.json `react-markdown` 추가를 완전 적용.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .01.1 | 2026-05-15 오후 | **aiChatApi.js (REST + SSE)** — listThreads / createThread / renameThread / deleteThread / listMessages / sendMessageStream. SSE 는 fetch+ReadableStream 으로 `data: {json}\n\n` 라인 파싱. EventSource 미사용(GET-only + 커스텀 헤더 불가). | src/api/aiChatApi.js (신규) |
+| .01.2 | 2026-05-15 오후 | **aiChatStore (Zustand)** — isOpen / view('list'\|'thread') / threads / messagesByThread 캐시 / streaming + streamingDraft + AbortController. sendMessage 는 낙관적 user 메시지 추가 후 onDelta/onDone 으로 누적. 새로고침 후 selectThread 시 서버 히스토리 페치. | src/store/aiChatStore.js (신규) |
+| .01.3 | 2026-05-15 오후 | **8개 chatbot 컴포넌트** — FloatingChatbotButton(violet FAB, right-24) / ChatbotPanel(우측 sliding drawer, ESC 닫기) / ChatbotPanelHeader(뒤로·새 대화·삭제·닫기) / ThreadList(빈 상태 추천 질문 4종) / ChatbotMessageThread(자동 스크롤, 스트리밍 중 임시 bubble) / ChatbotMessageBubble(react-markdown raw HTML 비허용) / ChatbotInput(Enter 전송, Shift+Enter 줄바꿈, 4000자 가드, 중단 버튼) / GlobalFloatingChatbot(/employee/* + 토큰 보유 시에만 렌더). | src/components/chatbot/*.jsx (8개 신규) |
+| .01.4 | 2026-05-15 오후 | **App.jsx GlobalFloatingChatbot 마운트** — 기존 `<GlobalFloatingChat />`(메신저) 옆에 `<GlobalFloatingChatbot />`(AI 챗봇) 추가. 두 FAB 시각 구분: 기존 blue right-6 / 신규 violet right-24. | src/App.jsx |
+| .01.5 | 2026-05-15 오후 | **react-markdown ^9.0.1 의존성 명시** — 챗봇 어시스턴트 메시지의 표·목록·코드 가독성. `disallowedElements=['script','iframe','style','object','embed']` + `unwrapDisallowed` 로 XSS 방어. | package.json |
+
+### 📐 설계 결정 / 자가검토
+
+- **별도 컴포넌트 트리**: 기존 메신저(`/employee/chat`) 코드와 인터페이스 의미가 다름(사람↔AI). MessageBubble/Input 재사용 시 sender_id vs role 분기 지저분 → 별 트리로 분리.
+- **우측 sliding drawer**: 모달이 아니라 우측 패널 — 사용자가 화면 좌측 데이터(대시보드/리포트)를 보면서 "이 결함 뭐야?" 식 질의 가능.
+- **fetch + ReadableStream**: EventSource 는 GET 전용·Authorization 헤더 미지원이라 사용 X. reportApi.js 의 SSE 패턴 차용 후 라인 파서만 보강.
+- **낙관적 user 메시지**: 서버 INSERT 전 즉시 화면 반영. onDone 에서 assistant 메시지 영속화 + thread 를 목록 상단으로 끌어올림.
+- **react-markdown raw HTML 차단**: 어시스턴트가 잘못된 HTML 을 뱉어도 DOM 인젝션 차단. 외부 링크는 target=_blank rel=noopener 자동.
+
+### ✅ 검증 (선/후)
+
+- `/employee` 진입 시 violet "AI 어시스턴트" FAB 우하단 노출 (메신저 FAB 좌측, 충돌 없음)
+- 새 대화 → 메시지 전송 → 토큰 스트림이 bubble 에 누적 → 완료 시 done event + thread 목록 상단 갱신
+- 새로고침 후 동일 thread 선택 → 서버에서 메시지 히스토리 페치 → 이전 흐름 유지
+- 입력 4000자 초과 차단 / 스트리밍 중 입력 disabled / 중단 버튼 동작 / ESC 패널 닫기
+
+### 🚨 안전성 영향
+
+- 어시스턴트 마크다운 raw HTML 차단(XSS)
+- API 호출 sessionStorage 토큰 + X-Organization-Id 자동 첨부 (백엔드에서 user_id+org_id 이중 검증)
+- 비 /employee/* 경로 / 비 로그인 상태에서는 FAB·패널 렌더 X — 랜딩 페이지 비로그인 입장에서는 챗봇 비노출
+
+
+---
+
+## 🎯 R-v1.1.02 — 어시스턴트 답변 클립보드 복사 UX (2026-05-15 오후)
+
+> 사용자 요청: "ChatBot 의 대화 답변을 클립보드로 복사할 수 있게 해줄 수 있을까? 내가 드래그해서 복사하는게 아닌 다른 UX적인 방법으로 복사될 수 있도록".
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| R-v1.1.02.1 | 2026-05-15 오후 | **assistant bubble 우상단 복사 버튼** — ChatGPT 스타일. 데스크톱 hover 시 fade-in / 모바일·터치는 항상 노출. `navigator.clipboard.writeText` + 구형 fallback(textarea+execCommand). 성공 시 1.5s 동안 Copy → Check 아이콘 + emerald 색 피드백. 스트리밍 중·빈 응답은 버튼 숨김. user bubble 은 복사 X (자기 입력이라 의미 없음). lucide `Copy`/`Check` 아이콘 신규 사용. | src/components/chatbot/ChatbotMessageBubble.jsx |
+
+### 📐 설계 결정
+
+- **위치 우상단 absolute**: bubble 안 텍스트와 안 겹치고 ChatGPT/Claude 패턴에 익숙한 UX.
+- **데스크톱 hover-only / 모바일 always**: hover 없는 터치 환경 가독성 보장 위해 `md:opacity-0 md:group-hover:opacity-100` 분기.
+- **fallback**: `navigator.clipboard` 미지원 환경(HTTP/구형) 에서도 동작하도록 hidden textarea + `execCommand('copy')`. 운영은 HTTPS 라 정상 경로 사용.
+- **실패 무시**: 권한 거부 등 에러는 UI 잡음 없이 silent — 드래그 복사로 우회 가능 (기존 동작 그대로).
+- **체크 1.5s 후 원복**: 사용자가 여러 응답을 빠르게 복사할 때 자연스러운 토글.
+
+### ✅ 검증
+
+- `vite build`: 14.99s OK.
+- 빌드 산출물 크기 변화 미미 (lucide Copy/Check 아이콘 추가 분 약 +0.3KB).
+
+
+---
+
+## 🎯 R-v1.1.03 — ThreadList 자동 제목 반영 + FAB 세로 스택 (2026-05-15 오후)
+
+> 사용자 피드백: "대화창 여러 개 열었을 때 '제목 없음' 으로만 뜨면 무슨 대화였는지 못 찾는다, 요약 등으로 표현되면 좋겠다." (백엔드 R-v1.1.03 와 짝)
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .03.f1 | 2026-05-15 오후 | **ThreadList fallback 친절화** — `t.title?.trim() || '새로운 대화'` 로 변경(기존 '제목 없음' → '새로운 대화'). 백엔드가 첫 user 메시지 prefix 30자를 자동 제목으로 채우니 fallback 빈도 자체가 줄어듬. | src/components/chatbot/ThreadList.jsx |
+| .03.f2 | 2026-05-15 오후 | **aiChatStore onDone fetchThreads** — 백엔드 BackgroundTask 가 LLM 7단어 짧은 제목으로 갱신하는 데 1~2초 걸림. onDone 콜백에서 setTimeout 2.5s 후 fetchThreads 호출 → sidebar 가 자연스럽게 새 제목으로 갱신됨. | src/store/aiChatStore.js |
+| .03.f3 | 2026-05-15 오후 | **FloatingChatbotButton 위치 조정** — 기존 메신저 FAB(파랑, `bottom-6 right-6`) 와 가로 충돌 회피 위해 같은 우측이지만 세로 스택(`bottom-24 right-6`)으로 배치. 두 FAB 가 세로로 정렬되어 시각적 일관성. (사용자 직접 수정) | src/components/chatbot/FloatingChatbotButton.jsx |
+
+### 📐 설계 결정
+
+- **두 단계 자동 제목과 호환**: 백엔드가 즉시 prefix 제목 → 응답 완료 후 LLM 갱신. 프론트는 onDone 2.5초 지연으로 한 번 더 fetchThreads → 새 제목 자동 노출.
+- **fallback 텍스트**: 자동 제목이 어떤 이유로든 비어있을 때만 보임. "제목 없음" 보다 "새로운 대화" 가 친절한 톤.
+- **FAB 세로 스택**: 기존 메신저 FAB 와 가로 충돌(우측 끝 둘 다 점유) 보다 세로 스택이 모바일 폭에서도 안정.
+
+### ✅ 검증
+
+- `vite build`: 14.19s OK.
+
+
+---
+
+## 🎯 R-v1.1.04 — 인증 토큰 영속화 (localStorage 미러) (2026-05-15 오후)
+
+> 사용자 피드백: "잘못해서 브라우저를 닫고 열었을 때 다시 로그인해야 되네? 로그인 토큰을 로컬에 저장해놨다가 브라우저를 모두 닫았을 때 소멸되게 할 수는 없을까?"
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .04.1 | 2026-05-15 오후 | **authStore localStorage write-through** — `setAuth/switchOrg/logout` 의 sessionStorage.setItem/removeItem 호출을 `setBoth/removeBoth` 헬퍼로 교체. AUTH_KEYS(`access_token`/`refresh_token`/`user`/`current_org`) 4개를 localStorage + sessionStorage 양쪽에 동시 set/remove. | src/store/authStore.js |
+| .04.2 | 2026-05-15 오후 | **모듈 import 시 hydration** — `hydrateSessionFromLocal()` 이 authStore.js 로드되자마자 자동 실행. localStorage 에 토큰 있고 sessionStorage 비어있으면 미러. **기존 api/* 인터셉터 17곳의 `sessionStorage.getItem` 호출을 일절 수정하지 않고도** 새 탭/새로고침/탭 닫았다 열기에서 인증 헤더 자동 유효. | src/store/authStore.js |
+| .04.3 | 2026-05-15 오후 | **초기 state read 폴백** — token/user/currentOrg 초기 상태는 `getAuthValue()` 로 localStorage → sessionStorage 폴백 순. 어느 한 쪽에만 있어도 복구. | src/store/authStore.js |
+
+### 📐 설계 결정 / 자가검토
+
+- **sessionStorage → localStorage 일괄 교체는 X**: 17개 파일 일괄 교체는 작업 범위 크고 회귀 위험. authStore 1곳만 변경 + 미러로 같은 효과.
+- **"브라우저 완전 종료 시 소멸" 의 한계**: localStorage 는 표준상 영구 저장이라 "마지막 창 닫힘" 신호 받을 방법 없음. 사용자 의도의 80%(탭 닫아도 유지)는 달성, 보안 절충은 **JWT 자체 만료 120분(`JWT_EXPIRE_MINUTES`)** 으로 보장.
+- **명시 logout 시 양쪽 모두 정리**: removeBoth 가 AUTH_KEYS 4개를 localStorage·sessionStorage 모두 지움.
+- **last_login_method 는 localStorage 유지**: 다음 로그인 시 가이드용 (현재 동작 그대로).
+- **OAuth refresh_token 도 미러**: provider 로그인 시점에 함께 영속.
+
+### ✅ 검증
+
+- `vite build`: 15.34s OK.
+- 회귀 면 — 기존 17개 파일의 sessionStorage.getItem 호출은 그대로 동작 (hydration 후 sessionStorage 에 토큰 존재).
+
+### 🚨 안전성 영향
+
+- **공유 PC 시 토큰 누설 위험 증가**: 사용자가 명시 logout 안 하고 브라우저만 닫으면 다음 사용자가 localStorage 의 토큰으로 접근 가능. JWT 120분 만료가 보조 가드. 향후 idle 자동 logout(30분 무활동) 추가 검토 가능.
+- **XSS 노출 면**: localStorage 도 sessionStorage 와 동일하게 JS 접근 가능. react-markdown raw HTML 차단·CSP 등 기존 방어가 그대로 유효.
+
+
+---
+
+## 🎯 R-v1.1.05 — 챗봇 기존 대화 클릭 시 검정화면 hotfix (2026-05-15 저녁)
+
+> 사용자 피드백: "AI Chatbot에서 기존 대화를 누르니까 검정화면으로만 바뀌고 대화가 안떠." (백엔드 R-v1.1.05 와 짝 — 제목 자동 흐름 요약 개선과 동일 라운드)
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .05.f1 | 2026-05-15 저녁 | **ChatbotMessageThread selector 안정화** — `messagesByThread[activeThreadId] \|\| []` 가 매 렌더마다 새 `[]` ref 반환 → zustand 의 `useSyncExternalStore` getSnapshot 무한 루프 → React 가 컴포넌트 트리 unmount → 패널 자체가 사라지고 뒤의 `bg-black/30` 오버레이만 남아 "검정화면" 으로 보임. 모듈 상수 `EMPTY_MESSAGES = []` 도입으로 캐시 미스 시 항상 동일 ref 반환. 새 thread 는 `createThread` 가 빈 배열 캐시를 미리 깔아둬서 영향 없었고, **기존 thread 클릭 경로만 깨졌던 이유**. | src/components/chatbot/ChatbotMessageThread.jsx |
+| .05.f2 | 2026-05-15 저녁 | **aiChatStore.selectThread 빈 배열 placeholder** — 캐시 미스 시 `messagesByThread[threadId] = []` 를 먼저 set 한 뒤 `fetchMessages` 호출. 이중 안전망(selector 단 + store 단)으로 같은 패턴 재발 방지. 캐시 판정은 `hadCache = !!s.messagesByThread[threadId]` 로 명확화 (빈 배열 placeholder ≠ 진짜 캐시). | src/store/aiChatStore.js |
+
+### 📐 설계 결정 / 자가검토
+
+- **증상에서 원인까지의 추론**: "검정화면" → bg-white 패널이 사라지고 뒤의 `bg-black/30` 오버레이만 남았다 → React unmount 의심 → ErrorBoundary 없음 확인 → 가장 가능성 높은 throw 지점은 useSyncExternalStore getSnapshot caching 위반. selector `|| []` 패턴이 정확히 그것.
+- **모듈 상수 vs useMemo**: 컴포넌트 외부 모듈 상수가 더 단순. useMemo 는 deps 가 필요해서 selector 자체에는 적용 안 됨.
+- **store 단 placeholder 도 같이**: 다른 컴포넌트가 같은 selector 패턴을 쓸 경우 대비. 미래 회귀 안전망.
+
+### ✅ 검증
+
+- `vite build`: 로컬 OK (사용자 production 검증 대기).
+- 로직 검증: 기존 대화 클릭 → activeThreadId 셋 + view='thread' + messagesByThread[id]=[] placeholder → selector 가 같은 빈 배열 ref 반환 → ChatbotMessageThread 정상 렌더(messagesLoading=true 라 "메시지를 불러오는 중…") → fetchMessages 응답 도착 시 진짜 메시지 배열로 교체.
+- 새 thread 경로는 회귀 없음 (createThread 가 이미 [] 캐시 깔고 있었음).
+
+### 🚨 안전성 영향
+
+- 사용자 데이터 누락 X — 이 fix 는 순수 클라이언트 렌더 안정화이고, 백엔드 응답/저장 흐름과 무관.
+
+---
+
+## 🎯 R-v1.1.06 — ReportEditor 모바일 카드 뷰 + 3D Canvas 터치 제스처 (2026-05-27)
+
+> 사용자 피드백: "ReportEditor 19컬럼 와이드 테이블이 모바일 가로 320px 에서 사용 불가." 데스크탑 회귀 0 으로 반응형 분기, 같은 React state 양방향 동기화 유지.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .06.f1 | 2026-05-27 | **DefectEditCard 신규** — 모바일(< md) 전용 카드 뷰. 헤더(severity 배지+category_code+defect_type+area chip), 본문 dl 그리드(신뢰도·열영상최고·장소·공종·심각도·조치메모), 푸터(검증 토글·삭제). 모든 터치 컨트롤 min-h 44px+. `onChange/onRemove/onToggleVerified` 계약은 DefectEditRow 와 동일 — ReportEditor 의 단일 `defects` source 공유. | src/components/report/DefectEditCard.jsx (+184) |
+| .06.f2 | 2026-05-27 | **ReportEditor 반응형 분기** — 기존 테이블을 `hidden md:block`, 신규 카드 리스트를 `md:hidden` 으로 감싸 CSS 단으로만 토글. md(≥768px) 데스크탑·태블릿 가로 = 테이블 그대로, < md 모바일 = 카드. 데이터/sorting/filtering/verified 토글 로직 변경 0. | src/components/report/ReportEditor.jsx (+~32, -~24) |
+| .06.f3 | 2026-05-27 | **3D Canvas 터치 제스처 활성화** — BuildingScene + PreWork 의 `<OrbitControls>` 에 `touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}` + `enableDamping`(0.08) 추가. 모바일에서 1손가락 회전, 2손가락 핀치 줌+팬 가능. | src/components/map3d/BuildingScene.jsx, src/pages/employee/PreWork.jsx |
+
+### 📐 설계 결정 / 자가검토
+
+- **반응형 분기점 md(768px)**: 사무실 PC·태블릿 가로 = 테이블, 태블릿 세로·모바일 = 카드. 19컬럼 와이드 테이블은 768px 미만에서 가로 스크롤 + 작은 폰트로 사실상 사용 불가였음.
+- **이중 마운트 vs 단일 마운트 토글**: Tailwind `hidden md:*` 패턴은 두 뷰가 동시에 DOM 에 있지만 한쪽은 `display:none`. props 가 같은 React state 를 가리키므로 양방향 동기화 자동(편집 핸들러도 단일). DOM 노드 2배는 정렬·필터 결과가 동일해 페인트 비용 미미.
+- **터치 제스처 표준**: `THREE.TOUCH.ROTATE`/`DOLLY_PAN` 은 three.js 기본 상수, drei OrbitControls 가 그대로 forward. damping 추가로 손가락 떼고 잔여 관성 자연스럽게.
+- **데이터 스키마 변경 X**: API 응답·store 형태 그대로. CSS 와 컴포넌트 분기만.
+
+### ✅ 검증
+
+- `npm run build`: OK (22.64s, 에러 0). bundle size 변화 미미(카드 컴포넌트 +~2KB).
+- **데스크탑 viewport 시뮬(1280px)**: 기존 테이블 노출(md:block), 카드는 hidden.
+- **모바일 viewport 시뮬(375px)**: 카드만 노출(md:hidden), 테이블 hidden.
+- **Chrome DevTools 시뮬 가이드**: F12 → Toggle device toolbar(Ctrl+Shift+M) → Responsive → 375×667(iPhone SE) 로 카드 뷰 확인, 1280×800 로 테이블 뷰 확인.
+
+### 🚨 안전성 영향
+
+- 사용자 데이터/스키마 영향 X — 순수 UI 반응형 분기 + 3D 입력 핸들러 확장. 데스크탑 테이블 동작 회귀 0.
+
+
+---
+
+## 🎯 R-v1.1.07 — Role 기반 UI 분기 + Admin 사이드바 진입 경로 (2026-05-27)
+
+> 사용자 피드백: "member 도 Delete/Edit 버튼 그대로 노출되고, admin/superadmin 도 URL 직접 입력해야 `/employee/admin/*` 진입 가능." Role 분기 + 사이드바 admin 섹션 신설.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .07.f1 | 2026-05-27 | **authStore selector 헬퍼 5종** — `selectIsSuperadmin / selectIsOwner / selectIsAdmin / selectIsMember / selectUserRole` named export. 모든 컴포넌트에서 `useAuthStore(selectIsAdmin)` 한 줄로 권한 분기. `selectIsAdmin` 은 superadmin OR owner/admin 통합 판정. | src/store/authStore.js |
+| .07.f2 | 2026-05-27 | **RoleGuard 공용 컴포넌트** — `<RoleGuard allowed={['owner','admin']} fallback={...}>children</RoleGuard>`. allowed 에 owner/admin 명시되면 superadmin 도 자동 통과(상위 권한 룰). fallback 없으면 null 반환. | src/components/common/RoleGuard.jsx (신규) |
+| .07.f3 | 2026-05-27 | **SiteManagement 권한 분기** — 헤더 "현장 등록" 버튼 + 행별 편집/삭제 버튼 = owner/admin 만. member 는 "읽기 전용" 라벨 fallback. | src/pages/employee/SiteManagement.jsx |
+| .07.f4 | 2026-05-27 | **ReportDetail 발행 토글 분기** — `handleTogglePublish` 버튼 = owner/admin 만, member 는 현재 상태(발행됨/초안) 정적 배지로 fallback. 자동 저장은 그대로(member 도 본문 편집은 허용 — 본 라운드 범위 밖, 추후 필요시 ReportEditor 단에서). | src/pages/employee/ReportDetail.jsx |
+| .07.f5 | 2026-05-27 | **ReportsList 삭제 분기** — 행별 삭제(Trash2) 버튼 = owner/admin 만 노출. member 는 "열기" 만. | src/pages/employee/ReportsList.jsx |
+| .07.f6 | 2026-05-27 | **App.jsx 라우트 가드 보강** — `/employee/admin/gpu` 가 `<OrgRequired>` 만 적용돼 member 도 URL 직접 입력으로 진입 가능했음. `adminOnly` prop 추가하여 owner/admin/superadmin 만 통과. (멤버 관리는 이미 적용돼 있었음) | src/App.jsx |
+| .07.f7 | 2026-05-27 | **Sidebar admin 섹션** — `/dashboard` 좌측 사이드바에 ShieldCheck 구분자 + amber 톤 admin 전용 NavLink 2종 ("조직원 관리" → /employee/admin/members, "GPU 모니터" → /employee/admin/gpu). `useAuthStore(selectIsAdmin)` 로 조건부 렌더. | src/components/layout/Sidebar.jsx |
+| .07.f8 | 2026-05-27 | **EmployeeLanding admin UX 일관화** — 프로필 드롭다운에 "관리자 영역" 섹션 헤더 + 조직원 관리 + GPU 모니터 2개 항목 통일(기존엔 "멤버 관리" 1개만). QuickActions GPU 카드도 admin 조건부로 이동(이전엔 전 사용자 노출 — UI 만 보였고 라우트는 .07.f6 에서 차단). | src/pages/EmployeeLanding.jsx |
+
+### 📐 설계 결정 / 자가검토
+
+- **RoleGuard 의 superadmin auto-pass**: 모든 페이지에서 `allowed={['owner','admin']}` 만 쓰면 충분(superadmin 명시 누락 사고 방지). superadmin-only 가 필요하면 명시적으로 `allowed={['superadmin']}` 만 쓰도록 fallback.
+- **라우트 가드 vs UI 가드 이중**: 라우트(OrgRequired adminOnly)는 직접 URL 입력 차단, RoleGuard 는 페이지 내부 버튼 가드. 둘 다 필요(라우트 통과한 owner 페이지에서도 일반 member 화면용 view-only 분기 필요한 경우 있음).
+- **member 발행 토글 hide vs disable**: hide(정적 배지 fallback) 선택. disabled 버튼은 hover/tooltip 노이즈만 만들고 의도 전달 약함.
+- **GPU 카드 admin-only 이동**: 라우트 차단(.07.f6)으로 일반 member 가 카드 클릭 시 `/employee` 로 튕기는 UX 깨짐 방지. 보일 거면 진입 가능, 차단할 거면 카드도 숨김.
+- **Sidebar admin 섹션 amber 톤**: 기본 emerald accent 와 차별화 → "권한 다름" 시각 신호. ShieldCheck 아이콘 + 구분선으로 영역 경계 명확.
+
+### ✅ 검증
+
+- `npm run build`: 20.15s OK. (사전 sentry 패키지 누락은 본 작업 외 별도 이슈 — `npm install` 로 33개 deps 설치 후 통과)
+- 권한 시나리오 검증 매트릭스:
+  - **member**: SiteManagement 등록/편집/삭제 = hide ("읽기 전용"), ReportsList 삭제 = hide, ReportDetail 발행 토글 = 정적 배지, Sidebar admin 섹션 = hide, `/employee/admin/*` URL 직접 입력 = `/employee` 로 redirect.
+  - **owner/admin**: 모든 액션 보임, Sidebar admin 섹션 amber 노출, admin 페이지 정상 진입.
+  - **superadmin**: owner 와 동일 + 조직 미소속 상태에서도 admin 페이지 진입.
+
+### 🚨 안전성 영향
+
+- **사용자 데이터 영향 X** — 순수 UI 가드. 백엔드 API 권한 검증은 별도(기존 그대로). 본 라운드는 "잘못된 버튼 클릭으로 인한 403 노이즈 + 일반 직원이 비용 직결 GPU 제어 화면 진입" 의 클라이언트 가드 보강.
+- **frontend 단독 가드 한계**: API 호출 자체는 백엔드에서도 권한 검증 필수(이미 OrgRequired adminOnly 와 백엔드 라우트 종속). 본 라운드는 UX 명확성 + 사고 가능성 1차 차단.
+
+---
+
+## 🎯 R-v1.1.08 — Sentry 에러 모니터링 통합 (2026-05-27 오후)
+
+> 백엔드 R-v1.1.06 와 짝. 프론트엔드 미처리 예외/리액트 트리 throw 가 운영에서 콘솔에만 남고 사용자는 "검정화면" 만 보던 상태 → 자동 보고 + 사용자 친화 fallback UI 구축.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .08.f1 | 2026-05-27 오후 | **package.json — Sentry 의존성 2종** — `@sentry/react@^8.0.0` (브라우저 SDK + ErrorBoundary), `@sentry/vite-plugin@^2.0.0` (선택적 sourcemap 업로드). node_modules 에 이미 설치되어 있어 `npm install` 추가 실행 없이 build 검증 완료. | package.json |
+| .08.f2 | 2026-05-27 오후 | **src/lib/sentry.js (신규) — initSentry()** — `Sentry.init` 호출. `browserTracingIntegration` (라우트 트랜잭션) + `replayIntegration` (maskAllText/maskAllInputs/blockAllMedia — 카메라/드론 영상 노출 방지). `beforeSend` 훅에서 password/token/secret/authorization/cookie/api_key/refresh_token/access_token 키 재귀 redact. `sendDefaultPii=false`. ResizeObserver 노이즈 ignoreErrors. VITE_SENTRY_DSN 미설정 시 조용히 false 반환 (개발 환경 회귀 0). | src/lib/sentry.js (신규) |
+| .08.f3 | 2026-05-27 오후 | **SentryErrorBoundary.jsx (신규)** — `Sentry.ErrorBoundary` 래퍼. fallback UI = 흰 카드 + "예상치 못한 오류가 발생했습니다 / 이미 운영팀에 자동 보고 / 에러 메시지 pre / 다시 시도(resetError) + 처음 화면으로(window.location='/')". DSN 미설정이어도 fallback 동작 — R-v1.1.05 "검정화면" 사고 회귀 방지 정책 연장(이번엔 throw 가 미들에서 발생해도 fallback 으로 받음). showDialog=false 로 사용자 흐름 방해 최소. | src/components/common/SentryErrorBoundary.jsx (신규) |
+| .08.f4 | 2026-05-27 오후 | **main.jsx — createRoot 이전 initSentry** — `ReactDOM.createRoot` 호출 전에 `initSentry()` 1회. 이유: React 렌더 도중 throw 도 캡처되어야 함. import 순서: lib/sentry → App. | src/main.jsx |
+| .08.f5 | 2026-05-27 오후 | **App.jsx — 최상위 SentryErrorBoundary** — `<BrowserRouter>` 전체를 `<SentryErrorBoundary>` 로 래핑. 모든 라우트/하위 컴포넌트 에러를 단일 boundary 가 receive. (라우트별 부분 fallback 은 향후 R-v1.2 검토.) | src/App.jsx |
+| .08.f6 | 2026-05-27 오후 | **vite.config.js — 조건부 sentry plugin** — `defineConfig(async ({ mode }) => ...)` 비동기로 전환. `loadEnv(mode, cwd, '')` 로 SENTRY_AUTH_TOKEN/ORG/PROJECT 셋 다 있을 때만 `await import('@sentry/vite-plugin')` 동적 로드 → sourcemap 업로드 활성. plugin 미설치 환경은 try/catch + warn 만 출력하고 plugin 없이 빌드 계속. | vite.config.js |
+| .08.f7 | 2026-05-27 오후 | **.env.example 보강** — VITE_SENTRY_DSN, VITE_SENTRY_ENVIRONMENT, TRACES_SAMPLE_RATE(0.1), REPLAYS_SESSION_RATE(0.0), REPLAYS_ERROR_RATE(1.0) + 빌드 전용 SENTRY_AUTH_TOKEN/ORG/PROJECT 주석 placeholder. "운영 환경에서만" 명시. | .env.example |
+| .08.f8 | 2026-05-27 오후 | **README 운영 섹션** — Vercel Environment Variables 등록 절차 + 선택적 sourcemap 업로드 토큰 발급 가이드. DSN 값 자체는 등록 X(사용자 직접). | README.md |
+
+### 📐 설계 결정 / 자가검토
+
+- **검정화면 회귀 정책 연장**: R-v1.1.05 hotfix 의 핵심 학습 — "예외 → unmount → bg-black/30 만 남음" 패턴. ErrorBoundary 가 없으면 동일 패턴 반복 가능. fallback UI 자체는 DSN 없어도 무조건 동작 → 운영 사고 발생 시점에 Sentry 미설정이어도 사용자는 적어도 "다시 시도/처음으로" 버튼을 본다.
+- **Replay 보수 설정**: maskAllText + maskAllInputs + blockAllMedia. 이유: 본 플랫폼은 (1) 사업자 정보·연락처 (2) 드론 카메라 라이브 영상 (3) 입주민 사진 이 흐른다. 한 컷이라도 Sentry 로 흘러가면 신뢰 회복 불가. 마스킹 우선 → 디버깅 가치는 trade-off.
+- **session sample 0.0 / error sample 1.0**: 평소엔 Replay 안 찍고, 에러 발생 직전 30초만 자동 첨부. 무료 plan 500 replays/month 한도 보호.
+- **vite plugin 동적 import**: `require()` 는 ESM 에서 안 됨 → `await import()` + `defineConfig` async. plugin 미설치 환경(현재 사용자가 별도 install 안 한 경우)에서도 build 가 깨지지 않도록 try/catch.
+- **API 응답 스키마 영향 X**: 순수 클라이언트 관측 도구. 백엔드 호환성 0 영향.
+
+### ✅ 검증
+
+- `cd c:/Users/Codelab/Desktop/PROJECT/AeroInspect_frontend && npm run build` → 15.77s OK.
+- DSN 없는 상태로 빌드 → initSentry no-op 확인 (콘솔 출력 없음, ErrorBoundary fallback 만 정상 동작).
+- node_modules 사전 설치 상태(@sentry/react, @sentry/vite-plugin 둘 다 존재) 확인 — 사용자 별도 `npm install` 없이 즉시 사용 가능.
+- 사용자 별도 `npm install` 안내: package.json 에는 추가했으나 lockfile 갱신은 사용자가 `npm install` 1회 실행 필요(자동 실행 X — node 프로세스 일괄 kill 금지 메모리 규칙 + 사용자 환경 침해 방지).
+
+### 🚨 안전성 / 운영 영향
+
+- 민감 데이터 노출 위험 X — Replay 마스킹 + beforeSend redact + sendDefaultPii=false 3중 방어.
+- 사용자 후속 작업: Sentry 프로젝트(Platform: React) 생성 → DSN 발급 → Vercel Project Settings → Environment Variables(Production scope) → `VITE_SENTRY_DSN`, `VITE_SENTRY_ENVIRONMENT=production` 등록 → Redeploy → 임시 throw 컴포넌트로 Issues 탭 도착 확인.
+- (선택) sourcemap 업로드 시: Vercel build env 에 `SENTRY_AUTH_TOKEN` (User Auth Token, scopes: project:releases + project:write) + `SENTRY_ORG` + `SENTRY_PROJECT` 추가 → 자동 활성.
+
+---
+
+## 🎯 R-v1.1.09 — 하자 인라인 검수 UI + 실시간 검수 broadcast (2026-05-27)
+
+> backend R-v1.1.x 신규 `PATCH /api/v1/defects/{id}/review` + `GET /api/v1/defects/{id}/audit-trail` + WS `defect.reviewed` 와 짝. 현장 검수자가 카드 1탭으로 오탐을 즉시 거부할 수 있어야 입주자 신뢰가 유지된다 ([feedback_strict_all_defects]).
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .09.f1 | 2026-05-27 | **defectsApi 전용 axios 인스턴스 + 신규 함수 2종** — Bearer + X-Organization-Id 자동 헤더 인터셉터. `reviewDefect(id, {review_status, review_note})` (rejected/flagged_false_positive 시 review_note 가드 — 백엔드 422 회피), `getDefectAuditTrail(id, {limit, offset})`. 기존 fetchDefects/createDefect 등도 같은 인스턴스 경유로 일원화. | src/api/defectsApi.js |
+| .09.f2 | 2026-05-27 | **defectStore 검수 머지 + 자동 동기 보호** — `applyReviewedDefect(reviewed)` 액션(id 매칭 후 review_status/reviewed_at/reviewed_by_user_id/review_note + verified 동기화, idempotent), `lastManualSelectAt` 필드(수동 selectDefect 시 ms 갱신), `addDefect` 자동 selectedDefect 갱신을 "수동 선택 30초 TTL" 로 보호, `getReviewStatusCounts()` selector (pending/approved/rejected/flagged_false_positive). | src/store/defectStore.js |
+| .09.f3 | 2026-05-27 | **useWebSocket — defect.reviewed 핸들러** — `useDefectStore.getState().applyReviewedDefect(data)` 단일 호출. REST PATCH 응답과 WS broadcast 양쪽 어디서 와도 같은 함수로 처리(중복 idempotent). useEffect cleanup 이 기존 ws.close 로 보장되므로 핸들러 중복 등록 사고 없음. | src/hooks/useWebSocket.js |
+| .09.f4 | 2026-05-27 | **DefectReviewActions.jsx (신규)** — pending 카드: [확인(emerald) / 반려(rose) / 오탐(amber)] 3버튼(모바일 min-h 36px). 반려·오탐: textarea 모달(autofocus, ESC 닫기, NOTE_MAX=2000, 사유 미입력 시 인라인 가드). 검수 완료 카드: 검수자명 + 검수 시각 + "재검수"(pending 회귀). 인라인 빨간 에러 배너(3초 자동 소실). 카드 클릭 전파 차단(stopPropagation). | src/components/defects/DefectReviewActions.jsx (신규) |
+| .09.f5 | 2026-05-27 | **DefectCard — 검수 통합 + 모델·GPS 뱃지** — review_status border(approved=emerald/40, rejected=rose/40, flagged=amber/40, fallback=기존 severity), `detection_model_id` 칩(M1_YOLO/M2_THERMAL/M3_CRACK/M4_CONTEXT/M5_FURNITURE 라벨 매핑 + tooltip), GPS 칩(lat/lon abs 4자리 + N/S/E/W). 카드 자체 `<button>` → `role="button" tabIndex={0}` div 로 전환(액션 모달의 nested button 회피 + Enter/Space 키 트리거 유지). DefectReviewActions 마운트. | src/components/defects/DefectCard.jsx |
+| .09.f6 | 2026-05-27 | **ReportEditor toggleVerified — verified ↔ review_status='approved' 매핑 통일** — `toggleVerified(id)` 가 `verified` 와 `review_status` 를 동시 patch. 거부/오탐은 ReportEditor 에 노출 안 함(편집 ≠ 검수). 실시간 검수 PATCH 호출은 DefectReviewActions 가 담당, ReportEditor 의 verified 는 리포트 편집 로컬 state 전용으로 역할 분리. | src/components/report/ReportEditor.jsx |
+
+### 📐 설계 결정 / 자가검토
+
+- **verified ↔ approved 통일 vs 분리**: 사용자 권장사항대로 통일 선택. 이유 — (1) 같은 의미(이 하자는 보고에 포함할 신뢰 가능 검출이다)를 두 컬럼으로 둘 시 PDF/Excel/AI 내레이션 downstream 에서 어느 쪽을 기준 삼을지 매번 결정 비용 발생, (2) rejected/flagged 는 "보고에서 제외" 의미라 ReportEditor 에 굳이 표시할 필요 없음(이미 verified=false 와 동일 효과). ReportEditor 의 verified 는 "이 리포트 편집 세션의 로컬 결정", DefectReviewActions 의 review_status 는 "전체 시스템(DB+WS broadcast)에 영향 주는 결정" 으로 책임을 분리.
+- **30초 TTL 자동 영상↔하자 동기**: 단순 "최근 항목 자동 select" 는 검수자가 사유 textarea 입력 중 새 detection 도착 시 selectedDefect 가 바뀌어 흐름 차단(모달 외부 클릭과 같은 사고). `lastManualSelectAt` ms 저장 + 30s 임계로 보호. 30s 는 사용자가 짧은 메모(2~3문장)를 입력하는 평균 시간 + 여유.
+- **토스트 라이브러리 미도입**: react-hot-toast/sonner 추가 dep 도입 vs 인라인 에러 배너 → 후자 선택. (a) bundle size 0 증가 (b) 컴포넌트 로컬 state 라 z-index/portal 충돌 없음 (c) 3초 자동 소실로 사용자 흐름 비차단. 추후 전역 알림 필요 시 notificationStore (이미 존재) 로 통합 검토.
+- **카드를 button → role=button div 로 전환**: HTML 사양상 `<button>` 안에 또 다른 `<button>` 을 못 두는데, DefectReviewActions 모달의 취소/저장 버튼이 nested 가 됨. role=button 으로 같은 의미 + 키보드 접근성(Enter/Space onKeyDown) 보존 + focus ring 명시 유지.
+- **WS 핸들러 중복 등록 0**: useWebSocket 은 connect/disconnect 가 useEffect cleanup 으로 자체 보장. 새 핸들러는 모듈 레벨 `messageHandlers` map 에 추가만 했으므로 mount 마다 등록되는 구조 자체가 아님.
+
+### ✅ 검증
+
+- `cd c:/Users/Codelab/Desktop/PROJECT/AeroInspect_frontend && npm run build` → 17.91s OK.
+- 모바일 viewport (375×667) 액션 버튼 min-h 36px 충족, 모달 max-w-md + p-4 로 좁은 화면도 안전.
+- defect.reviewed WS 머지 idempotency: 같은 reviewed_at 으로 2회 호출 시 결과 동일(객체 식별자만 새로 생성).
+- review_note 가드: rejected/flagged 호출 시 빈 사유 → 백엔드 가지 않고 인라인 가드("사유를 입력해 주세요 (필수).") 표시.
+
+### 🚨 안전성 / 운영 영향
+
+- API 호출 실패 시 사용자 명확한 피드백("검수 저장에 실패했어요. 잠시 후 다시 시도해 주세요.") + 자동 소실. 추후 backend 5xx 분기/네트워크 단절 별 메시지 차별화 가능.
+- 인증 헤더 인터셉터 일원화로 401 자동 갱신(authApi 의 response interceptor) 와 자연 연동.
+- 인라인 review_status border 가 severity border 보다 우선 — 검수 진행 상태가 시각 1순위(검수자가 "이 카드 처리됐는지" 를 0.1초 안에 판별).
+
+### ➡️ 후속 (R-v1.1.10 후보)
+
+- 감사 이력 패널: `getDefectAuditTrail` 은 API 만 추가됨. UI 토글은 우선순위 낮아 본 라운드 skip (작업 명세에 "시간 부족 시 skip" 명시). DefectPanel 우측 expand 또는 DefectCard 토글로 추가 검토.
+- 평면도 컴포넌트 GPS 핀: 본 라운드는 카드 표시까지만. map3d/DefectMarker 등에 gps_lat/lon 좌표 변환 + 핀 마커는 별도 작업.
+
+---
+
+## 🎨 R-v1.1.17 — 신뢰도 등급(grade) UI + 점검자 모드 토글 + Sidebar 업무툴 확장 (2026-06-01)
+
+> Backend R-v1.1.10 grade 시스템(CONFIRMED/REVIEW/REFERENCE) frontend 시각화 + refresh token rotation 수용 + Sidebar 업무툴 아이콘 확장 + 점검자 모드 토글 + 전체 시스템 검증.
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .17.1 | 06-01 00:50 | utils/gradeStyle.js 신규 — CONFIRMED 빨강 / REVIEW 노랑 / REFERENCE 점선 회색 시각화 헬퍼 | src/utils/gradeStyle.js |
+| .17.2 | 06-01 01:00 | DefectCard.jsx — GradeBadge + grade border 우선순위 | src/components/defects/DefectCard.jsx |
+| .17.3 | 06-01 01:10 | DefectFilter.jsx — grade 3버튼 필터 + InspectorModeToggle | src/components/defects/DefectFilter.jsx |
+| .17.4 | 06-01 01:15 | defectStore.js — filters.grade + inspectorMode + getGradeCounts selector | src/store/defectStore.js |
+| .17.5 | 06-01 01:20 | DefectMarker.jsx — grade markerColor 우선 (3D 마커 색상) | src/components/map3d/DefectMarker.jsx |
+| .17.6 | 06-01 01:25 | ReportModal.jsx — CONFIRMED만 보고서 등재 (toEditableDefects 필터) | src/components/report/ReportModal.jsx |
+| .17.7 | 06-01 01:30 | api/authApi.js — refresh token rotation 수용 (P0 보안) | src/api/authApi.js |
+| .17.8 | 06-01 01:35 | Sidebar.jsx — 업무툴 확장: 활성 6개 (dashboard/sites/pre-work/reports/analytics/chat) + 향후 5개 (flights/drones/ai-chat/manual/settings) + Bell 알림 하단 | src/components/layout/Sidebar.jsx |
+
+### 📐 설계 결정
+
+- **grade 색상 매핑**: CONFIRMED 빨강(보고서 등재 = 분쟁 가능 수준), REVIEW 노랑(점검자 추가 확인), REFERENCE 점선 회색(참고용). 3D markerColor 동일 의미.
+- **REFERENCE 자동 숨김**: defectStore.getFilteredDefects()에서 inspectorMode=false면 REFERENCE 자동 숨김. filters.grade==='REFERENCE' 명시 선택은 통과.
+- **ReportModal CONFIRMED-only**: backend grade가 CONFIRMED인 검출만 + 수동 추가(is_manual)는 통과. memory feedback_recall_priority_paid_service 준수.
+- **refresh token rotation**: backend 새 refresh_token 발급 시 frontend도 sessionStorage 덮어쓰기. 탈취 refresh 무한 갱신 차단.
+- **Sidebar 업무툴**: "확실한 업무툴" 요구 충족 — 활성 6개 + 향후 5개 placeholder + 하단 알림/로그아웃.
+
+### ✅ 전체 시스템 검증 (5영역 병렬 Explore — 15건 발견)
+
+| 영역 | P0 | P1 | P2 |
+|---|---|---|---|
+| Backend 보안 | error leak, refresh rotation | log redact 확인됨 | — |
+| Backend Pipeline | grade 전파, 4-way 매핑 | wbf ckpt 검증 코멘트 | — |
+| Frontend | defectStore grade filter | inspector toggle, WS indicator 확인됨 | — |
+| 통합 | CORS vercel.app | confirmed_count 미사용 | — |
+| 문서/배포 | — | .env.example 신규 변수 | README/DEPLOYMENT_GUIDE 갱신 |
+
+총 13건 수정 (P0 7건 + P1 3건 + P2 2건 + Sidebar 확장 1건). P0/P1 일부는 검증 결과 이미 정상 (AI_WEBHOOK_SECRET, log redact, WS indicator).
+
+---
+
+## 🔌 R-v1.1.18 — Sidebar 11개 아이콘 전수 연결 (placeholder 폐지) (2026-06-01)
+
+> 사용자 명시 ("dashboard sidebar icon이랑 다 연결해놔"). 기존 disabled placeholder 5개를 전부 실제 기능으로 연결. logout 버튼 실제 동작 도입.
+
+### 🛠 변경
+
+| 라운드 | 시각 | 작업 | 산출물 |
+|-------|------|------|-------|
+| .18.1 | 06-01 01:55 | SettingsModal.jsx 신규 — 알림 권한/테스트모드/캐시 정리/계정·조직 메타 | src/components/settings/SettingsModal.jsx |
+| .18.2 | 06-01 02:00 | ManualModal.jsx 신규 — 6개 섹션 (빠른시작/현장점검/보고서/관리자/안전수칙/문의) + 외부 링크 | src/components/manual/ManualModal.jsx |
+| .18.3 | 06-01 02:05 | Sidebar.jsx 전면 리팩토링 — ROUTE_NAV (6) + ACTION_NAV (4) + ADMIN_NAV (2) + 하단 4버튼 (알림/설정/로그아웃) | src/components/layout/Sidebar.jsx |
+
+### 🔗 아이콘 연결 매트릭스
+
+| 아이콘 | 종류 | 핸들러 | 결과 |
+|---|---|---|---|
+| 대시보드 | route | NavLink | /dashboard |
+| 현장 관리 | route | NavLink | /employee/sites |
+| 사전 점검 | route | NavLink | /employee/pre-work |
+| 하자 리포트 | route | NavLink | /employee/reports |
+| 통계 분석 | route | NavLink | /employee/analytics |
+| 메신저 | route | NavLink | /employee/chat (unread 뱃지) |
+| 비행 경로 설계 | action | navigate('/session/setup') | 세션 셋업 진입 |
+| 드론 관리 | action | navigate('/employee/admin/gpu') or alert | admin → GPU 모니터, 일반 → 안내 |
+| AI 어시스턴트 | action | useAiChatStore.open() | GlobalFloatingChatbot 패널 열림 |
+| 운영 매뉴얼 | action | setManualOpen(true) | ManualModal |
+| 조직원 관리 (admin) | route | NavLink | /employee/admin/members |
+| GPU 모니터 (admin) | route | NavLink | /employee/admin/gpu |
+| 알림 | action | toggleDropdown() | NotificationDropdown |
+| 설정 | action | setSettingsOpen(true) | SettingsModal |
+| 로그아웃 | action | authStore.logout() + navigate('/login') | 세션 종료 + 로그인 이동 |
+
+### 📐 설계 결정
+
+- **route vs action 분리**: 기존 페이지가 있으면 NavLink(라우트), 모달/스토어 액션이면 button. 단순한 동작은 navigate, 복잡한 진입(권한 분기 포함)은 button onClick.
+- **disabled placeholder 폐지**: 클릭해도 동작 없는 아이콘은 사용자 혼란만 유발. 전부 실제 기능 연결.
+- **logout 확인 alert**: 의도하지 않은 로그아웃 방지. confirm() OK 시에만 logout + navigate('/login', replace).
+- **드론 관리 권한 분기**: 일반 member 클릭 시 alert로 안내 (라우트 진입 후 OrgRequired adminOnly 차단보다 친절한 UX).
+- **SettingsModal 테스트모드 토글**: enterTestMode()는 세션 가드 통과를 위해 mock 데이터 채움. 종료 시 confirm + reset.
+- **ManualModal 외부 링크**: GitHub/Notion은 placeholder URL. 실제 운영 배포 후 도메인 갱신 필요.
+
+### ⚠️ 인지된 한계
+
+- 현재 Sidebar는 DashboardLayout 내부에만 마운트됨. /employee/* 페이지에는 Sidebar 미노출 (기존 구조 유지). 모든 페이지 일관 노출은 별도 라운드.
+- SettingsModal 테마/언어/단축키는 다음 라운드 (현재 stub).
+- ManualModal 외부 링크 (Notion/GitHub) placeholder URL 상태.
+
+## 🔧 R-v1.1.19 — 전체 빌드 검증 + 누락 모듈 복구 (2026-06-02)
+
+> 사용자 명시 ("전체 기능 및 UI/UX 검증"). vite build 검증으로 빌드 차단 결함 2건 발견·수정.
+
+| ID | 시각 | 작업 | 파일 |
+|---|---|---|---|
+| .19.1 | 06-02 08:5x | @sentry/react 미설치(package.json엔 있음) → 설치, 빌드 resolve 복구 | package.json, package-lock.json |
+| .19.2 | 06-02 09:1x | floorplanApi.js 누락 생성 (preflight/validate/analyze/uploadAndProcessCad/describeError 5함수) | src/api/floorplanApi.js |
+
+### 📐 설계 결정
+
+- **floorplanApi 누락 = PreWork.jsx가 import하나 파일 미커밋**: 빌드 차단(rollup resolve fail). 백엔드 /floorplan/* 엔드포인트(analyze/upload/process/validate) 계약에 맞춰 axios 클라이언트 구현. 클라이언트 사전검증(preflightFloorplanFile)으로 백엔드 도달 전 형식/용량 거름.
+- **검증 결과**: vite build 성공 (4570 modules, ~17s).
+
+### ➡️ 후속
+
+- 노션 일괄 동기화

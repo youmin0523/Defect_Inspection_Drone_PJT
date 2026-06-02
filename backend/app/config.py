@@ -11,7 +11,7 @@ from pydantic import field_validator, model_validator
 import json
 import os
 import warnings
-from typing import List
+from typing import List, Optional
 
 
 # 운영(prod) 환경 판정에 사용되는 환경변수.
@@ -65,24 +65,10 @@ class Settings(BaseSettings):
     # ── Camera ───────────────────────────────
     RGB_CAMERA_INDEX: int = 0
     THERMAL_CAMERA_INDEX: int = 1
-    # 빈 문자열이 아니면 RTSP URL 사용 (Pi → 백엔드 송출). 우선순위: RTSP > USB index.
-    THERMAL_RTSP_URL: str = ""
-    RGB_RTSP_URL: str = ""
 
     # ── LiDAR ────────────────────────────────
     LIDAR_SERIAL_PORT: str = "COM3"
     LIDAR_BAUD_RATE: int = 115200
-
-    # ── 자율비행 (Indoor Autonomous Inspection v1.1) ──
-    # Skydroid FUAV 5.8G OTG 동글의 캡처 디바이스 식별자.
-    # 정수면 cv2.VideoCapture index, 문자열이면 RTSP/file URI.
-    SLAM_CAPTURE_DEVICE: str = "0"
-    # Pi reverse-WS attach 시 검증 토큰 (mission/fc-bridge 엔드포인트)
-    AEROINSPECT_PI_TOKEN: str = ""
-    # Visual-Inertial SLAM 백엔드 선택 (orbslam3 | rtabmap | dummy)
-    SLAM_BACKEND: str = "dummy"
-    # SLAM 출력 점군 디렉터리 (PLY/PCD blob 저장 위치)
-    SLAM_POINTCLOUD_DIR: str = "./data/pointclouds"
 
     # ── AI Model (3-모델 파이프라인) ──────────
     # 가중치 디렉토리 + 개별 파일명 분리 → 배포 환경별로 경로만 바꾸면 됨
@@ -142,6 +128,15 @@ class Settings(BaseSettings):
     M6_PATCHCORE_ONNX: str = "m6_patchcore_feature_extractor.onnx"
     PATCHCORE_THRESHOLD: float = 27.0        # 이상 점수 임계값 (feature extractor + coreset 거리 기반)
 
+    # Thermal Anomaly (Moisture/delam YOLO 대체 — PatchCore unsupervised)
+    # 학습: thermal_yolo 정상 패치 2000개 (라벨 영역 제외 crop)
+    # 출력: anomaly heatmap → bbox 변환 후 grade 분류
+    # 활성화: 사용자 명시 (2026-05-28) — Thermal Anomaly 일시 보류, M4 U-Net 단열은 유지
+    THERMAL_ANOMALY_ENABLED: bool = False    # False면 ONNX 있어도 로드/추론 X (보류 상태)
+    THERMAL_ANOMALY_ONNX: str = "thermal_anomaly.onnx"
+    THERMAL_ANOMALY_THRESHOLD: float = 0.5   # anomaly score 임계 (0~1 정규화). 첫 적용 후 튜닝
+    THERMAL_ANOMALY_BBOX_MIN_AREA: int = 400 # anomaly mask → bbox 변환 시 최소 픽셀 영역
+
     # furniture_aware: 빌트인 가구 인식 (M1+M2+M3 검출이 가구 위면 false positive 차단용)
     FURNITURE_AWARE_ONNX: str = "furniture_aware.onnx"
     FURNITURE_AWARE_CONF_THRESHOLD: float = 0.60  # 매우 보수적 (확실한 가구만)
@@ -182,6 +177,15 @@ class Settings(BaseSettings):
     # ── LLM ──────────────────────────────────
     ANTHROPIC_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""
+
+    # OpenAI 챗봇 (건축물·하자 도메인 어시스턴트)
+    # gpt-4o-mini 기본 — 저비용/저지연. 운영에서 품질 필요 시 OPENAI_MODEL 만 갱신.
+    # OPENAI_MAX_OUTPUT_TOKENS: 응답 한 회당 최대 출력 토큰 (비용/길이 가드).
+    # OPENAI_SUMMARY_MODEL: 컨텍스트 압축 요약 전용 모델. 비용 절감 위해 mini 동일.
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MAX_OUTPUT_TOKENS: int = 1200
+    OPENAI_SUMMARY_MODEL: str = "gpt-4o-mini"
 
     # ── JWT ──────────────────────────────────
     JWT_SECRET: str = "change-me-in-production"
@@ -242,12 +246,26 @@ class Settings(BaseSettings):
     SMTP_FROM: str = "noreply@droneinspect.com"
     SMTP_FROM_NAME: str = "DRONE INSPECT"
 
+    # ── Sentry (운영 에러 모니터링) ────────────
+    # SENTRY_DSN 이 비어 있으면 init_sentry 가 no-op → 로컬 개발 영향 0.
+    # APP_ENV=production 이고 DSN 이 비어 있으면 startup 시 경고 로그만 (기동 차단 X).
+    # TRACES_SAMPLE_RATE: 트랜잭션 성능 추적 샘플링 비율 (0.0~1.0). 운영 비용 가드용 0.1 기본.
+    # PROFILES_SAMPLE_RATE: 프로파일링은 비용 큼 → 기본 비활성(0.0). 필요 시 0.05~0.1.
+    SENTRY_DSN: Optional[str] = None
+    SENTRY_ENVIRONMENT: str = "development"
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+    SENTRY_PROFILES_SAMPLE_RATE: float = 0.0
+
     # ── CORS ─────────────────────────────────
+    # R-v1.1.17: Vercel 배포 URL 추가 (memory reference_production_urls)
     CORS_ORIGINS: List[str] = [
         "http://localhost:5173",
         "http://localhost:3000",
         "https://www.aeroinspect.site",
         "https://aeroinspect.site",
+        "https://aero-inspect-frontend.vercel.app",
+        "https://aero-inspect-frontend-git-main.vercel.app",
+        "https://aero-inspect-frontend-git-develop.vercel.app",
     ]
 
     @field_validator("CORS_ORIGINS", mode="before")
@@ -298,6 +316,9 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        # //* [Modified Code 2026-05-13] .env 의 추가 키(APP_ENV 등 도구용 변수)가
+        # 들어와도 부팅 차단하지 않음 — 알 수 없는 키는 무시.
+        extra = "ignore"
 
 
 # 전역 싱글톤: 애플리케이션 전체에서 공유

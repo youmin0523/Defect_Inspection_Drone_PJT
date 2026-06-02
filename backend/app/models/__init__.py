@@ -19,12 +19,6 @@ from app.models.defect import DefectLog  # noqa: F401
 from app.models.telemetry import TelemetryLog  # noqa: F401
 from app.models.slam_map import SlamMap  # noqa: F401
 
-# ── 자율비행 미션 ───────────────────────────
-from app.models.mission_plan import MissionPlan  # noqa: F401
-from app.models.slam_pointcloud import SlamPointcloud  # noqa: F401
-from app.models.coverage_grid import CoverageGrid  # noqa: F401
-from app.models.room_topology import RoomTopology  # noqa: F401
-
 # ── 평면도 / 환경 생성 ───────────────────────
 from app.models.floorplan import Floorplan  # noqa: F401
 
@@ -48,6 +42,12 @@ from app.models.conversation import Conversation  # noqa: F401
 from app.models.message import Message  # noqa: F401
 from app.models.conversation_member import ConversationMember  # noqa: F401
 
+# ── AI 챗봇 (OpenAI 도메인 어시스턴트) ──────
+from app.models.ai_chat import AiChatThread, AiChatMessage  # noqa: F401
+
+# ── 감사 추적 ────────────────────────────────
+from app.models.audit_log import AuditLog  # noqa: F401
+
 __all__ = [
     # 사용자 / 인증
     "User",
@@ -59,11 +59,6 @@ __all__ = [
     # 드론 / 센서
     "TelemetryLog",
     "SlamMap",
-    # 자율비행 미션
-    "MissionPlan",
-    "SlamPointcloud",
-    "CoverageGrid",
-    "RoomTopology",
     # 평면도
     "Floorplan",
     # 현장 관리
@@ -82,4 +77,9 @@ __all__ = [
     "Conversation",
     "Message",
     "ConversationMember",
+    # AI 챗봇
+    "AiChatThread",
+    "AiChatMessage",
+    # 감사 추적
+    "AuditLog",
 ]

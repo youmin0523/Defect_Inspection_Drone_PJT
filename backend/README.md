@@ -52,11 +52,20 @@ Spot, W.F_D.F, Wrong_punch, good
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
 | `GET` | `/health` | 카메라 + 3-모델 + 스트림 워커 상태 |
-| `POST` | `/api/v1/detect` | multipart 이미지 1장 → `DetectionResult` |
+| `POST` | `/api/v1/detect` | multipart 이미지 1장 → `DetectionResult` (R-v1.1.17: grade 필드 포함) |
 | `POST` | `/api/v1/detect/batch` | 최대 10장 → `List[DetectionResult]` |
 | `GET` | `/api/v1/defects/recent?limit=50&severity=HIGH` | 최신순 하자 로그 N건 |
 | `GET` | `/api/v1/defects` | 하자 로그 목록 (필터+페이지네이션) |
 | `POST` | `/api/v1/defects` | 하자 로그 저장 + WS broadcast |
+| `PATCH` | `/api/v1/defects/{id}/review` | 검수 승인/거부/플래그 (R-v1.1.08 감사 로그 기록) |
+| `GET` | `/api/v1/defects/{id}/audit-trail` | 단일 하자 검수 이력 조회 |
+| `GET` | `/api/v1/audit-logs` | 전체 감사 로그 (admin/owner/superadmin 전용) |
+| `GET` | `/api/v1/employee/schedule/today` | 오늘 점검 일정 (R-v1.1.05) |
+| `GET` | `/api/v1/employee/kpi/monthly` | 월간 KPI |
+| `GET` | `/api/v1/employee/activities` | 최근 활동 |
+| `GET` | `/api/v1/stream/stats` | 추론 워커 실시간 메트릭 |
+| `GET` | `/api/v1/coverage/{site_id}` | 현장별 점검 커버리지 |
+| `POST` | `/api/v1/auth/refresh` | refresh token rotation (R-v1.1.17) — 응답에 새 access_token + 새 refresh_token |
 
 ### WebSocket
 
@@ -347,6 +356,21 @@ alembic upgrade head  # deviation_degrees, deviation_mm_per_m, delta_temperature
 - **`good` 클래스는 터짐**: 필터링 시 절대 "정상"으로 취급 금지. 위 경고 박스 참조.
 - **단일 워커 프로세스 전제**: `stream_inference_worker`는 프로세스 내 싱글톤. gunicorn multi-worker로 띄우면 워커마다 큐가 생겨 FRAME_SKIP 효과가 배수. uvicorn 단일 워커 또는 Redis pub/sub 기반 리팩터링 필요.
 - **MAVLink/LiDAR 좌표 연동은 아직**: `drone_coordinates`는 당분간 NULL. 추후 TF 연동 시 기존 `lidar_x/y/z` 컬럼에 채움.
+
+## 운영 에러 모니터링 (Sentry)
+
+운영 환경에서만 활성화. 로컬 개발은 `SENTRY_DSN` 비워두면 자동 no-op.
+
+1. **DSN 발급**: [sentry.io](https://sentry.io) → 새 프로젝트 (Platform: `FastAPI / Python`) → Settings → Client Keys (DSN) 복사
+2. **Fly.io secrets 등록** (운영 배포 직전):
+   ```bash
+   flyctl secrets set \
+     SENTRY_DSN="https://xxxxxxxx@oXXXXX.ingest.sentry.io/YYYYY" \
+     SENTRY_ENVIRONMENT="production" \
+     -a aeroinspect-backend
+   ```
+3. **자동 적용 항목**: FastAPI/Starlette/SQLAlchemy/Asyncio 미처리 예외, `RequestIDMiddleware`의 `request_id` 자동 태깅, 민감 키(`password/token/secret/...`) `[REDACTED]` 처리, `send_default_pii=False` (이메일/IP 미수집).
+4. **검증**: 배포 후 `curl https://aeroinspect-backend.fly.dev/health` 정상 → 임시 테스트 라우트에서 `raise RuntimeError("sentry test")` → Sentry Issues 탭에 이벤트 도착 확인.
 
 ## 동작 확인 체크리스트
 

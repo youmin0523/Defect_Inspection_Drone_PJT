@@ -261,6 +261,25 @@
 
 ## Revision History
 
+### v6.0_260515 (작성자: @youminsu0523 / branch: MS)
+- **(R-v1.1.01 / v1.1) OpenAI 챗봇(건축물·하자 도메인 어시스턴트) 통합 — 통합/분리 repo 동시 적용**:
+  - **백엔드 (TEAM_PROJECT_2 + AeroInspect_backend)**: 모델 2(AiChatThread / AiChatMessage, user+org 격리, summary watermark), 마이그레이션 `m6a7b8c9d0e1` (FK 사이클 회피, down_revision 통합=`j3d4e5f6a7b8` / 분리=`k4e5f6a7b8c9`), `OpenAIChatService` (SYSTEM_PROMPT = `DEFECT_CATALOG` 20종 표 dump + 안전 가이드 + 인젝션 거절, SSE 스트리밍, light-RAG = 정규식 카테고리 코드/사이트 키워드 + organization_id 필수, 30턴 초과 시 BackgroundTasks 자동 요약), `/api/v1/ai-chat` 6 엔드포인트 (`get_current_org_member` + user_id·org_id 이중 검증 + 사용자별 분당 20 메시지 카운터). settings 4(OPENAI_API_KEY/MODEL=`gpt-4o-mini`/MAX_OUTPUT_TOKENS=1200/SUMMARY_MODEL), requirements `openai>=1.40.0`.
+  - **프론트엔드 (frontend + AeroInspect_frontend)**: `aiChatApi.js`(REST + SSE fetch+ReadableStream 파서), `aiChatStore.js`(Zustand, 낙관적 user 메시지 + onDone thread 끌어올림 + AbortController), 8 컴포넌트(`FloatingChatbotButton` violet right-24 / `ChatbotPanel` 우측 sliding drawer ESC / `Header` 뒤로·새 대화·삭제·닫기 / `ThreadList` 빈 상태 추천 질문 4 / `ChatbotMessageThread` 자동 스크롤 + 임시 스트리밍 bubble / `ChatbotMessageBubble` react-markdown raw HTML 비허용 / `ChatbotInput` Enter 전송 + 4000자 가드 + 중단 / `GlobalFloatingChatbot` /employee/* + 토큰 보유 시). `App.jsx` 마운트. `package.json` `react-markdown` ^9.0.1.
+  - **사용자 시나리오**: ChatGPT 스타일 세션별 대화방 수동 생성, 다음날 동일 thread 흐름 유지. "B-02 결함 보여줘" 같은 사용자 데이터 질문 시 자동 light-RAG.
+  - **보안·상업 수준 가이드**: 시스템 프롬프트/RAG 별도 system role 분리, 사용자 입력 system 격상 X, OPENAI_API_KEY 응답/스키마 미노출. B 영역(단열·방수·기밀) 더 엄격 평가 + "안전 직결" + "추측 금지" + "DIY 수준 X" 가이드를 시스템 프롬프트에 영구 주입(사용자 메모리 규칙 `feedback_strict_all_defects`, `feedback_insulation_strict`, `project_commercial_grade_target` 반영).
+
+### v5.4_260512 (작성자: @youminsu0523 / branch: MS)
+- **(R28 / v1.1) test_mode 영상 60fps 아키텍처 — MJPEG 폐기, `<video>` 직접재생**:
+  - **결정 배경**: Fly 1 vCPU 머신에서 MJPEG = 매 프레임 cv2 decode + PIL overlay + JPEG re-encode → 30fps 자체가 불안정. 원본 mp4 가 이미 H.264인데 풀 재인코딩하는 모순 제거.
+  - **PR1 (backend, 4파일)**: `services/test_stream.py` — `_video_inference_loop` background task + `activate_video_mode` 메타 peek + `_pending_video_detection / _active_video_*` 상태 + `_broadcast_detection` payload 에 `video_timestamp_sec / frame_w / frame_h` 조건부 첨부 + `_detect/_detect_real` tier 파라미터 도입(영상 tier=2). 기존 `_stream_video_frames` 삭제. `api/stream.py` — `GET /test/upload/file/{name}` HTTP Range(206) 정적 서빙 (traversal `realpath+commonpath` 차단, 416 처리, mp4/mov/mkv/avi/webm mime) + `GET /test/active` 메타 endpoint.
+  - **PR2 (frontend, 5파일)**: 신규 `components/video/DetectionOverlay.jsx` (SVG bbox, rAF 33ms) + `hooks/useTestActiveMedia.js` (`/test/active` 2초 폴링) + `store/testDetectionsStore.js` (timestamp 정렬 타임라인). 변경 `components/video/LiveVideoFeed.jsx` (영상 분기 early return `<video src=/test/upload/file/{name}>` + testPlayState ↔ video.play()/pause()/seek 동기화 + onLoadedMetadata 게이트 open) + `hooks/useWebSocket.js` (`defect.new`의 timestamp 있는 detection을 testDetectionsStore.ingest() 라우팅).
+  - **PR3 (backend, 같은 파일)**: 영상 inference tier 3→2 — M4 thermal U-Net + M6 PatchCore 제외(RGB 영상에 무의미, 무거움). 이미지 경로는 tier 3 유지.
+  - **수락 기준**: 로컬 RTX 5070 mp4 30/60fps 원본 그대로, Fly 1 vCPU 30fps 안정(추론 dip 1-2fps 이내). detection 타임라인 ±0.4s 윈도우.
+  - **검증**: backend `python -m ast` OK, frontend `vite build` 13.12s OK.
+
+### v5.3_260512 (작성자: @youminsu0523 / branch: MS)
+- **(backend R27 / v1.1)** test_stream 영상 재생 끊김 + OOD 거짓 검출 동시 수정 — `services/test_stream.py::_stream_video_frames` 의 인-루프 `await self._detect(...)` 차단을 제거하고 추론을 background asyncio task로 fire-and-forget 발사. 추론 주기 7→10프레임. yield 30fps가 추론 지연에 끌려가지 않음. `_ui_conf_gate` 에 OOD-취약 RGB 클래스(caulking/코킹·scratch/스크래치·paint_stain/도색·surface_defect·baseboard/걸레받이·pollution/오염) 0.75 게이트 신설 — test mode 첨부 영상이 사람/SNS 밈 같은 OOD 입력일 때 M1-YOLO가 52~64% 신뢰도로 "코킹 누락·불량" 카드를 띄우던 회귀 사고 차단. 단열 0.30 / 기본 0.50 유지.
+
 ### v5.2_260506 (작성자: @youminsu0523 / branch: main)
 - **(frontend R19)** 브라우저 탭 favicon = 자체 로고 그래픽만 적용 — `frontend/public/`에 favicon.ico(16/32/48 다중 entry) + favicon-{16,32,192,512}.png + apple-touch-icon.png(180×180) 신규. `frontend/index.html` 의 누락 자산 참조 `/drone-icon.svg` 1줄 → ico/PNG 5줄 명시 등록으로 교체. PowerShell + System.Drawing 알파 row 스캔으로 로고 graphic/text 자동 분리(rows 59–252, cols 235–441), 정사각 캔버스 가운데 배치(텍스트 "DRONE INSPECT / PRECISION DEFECT ANALYSIS" 제외). 배포 사이트 globe 기본 favicon 이슈 해소.
 - **(frontend R23, R19 후속)** favicon 흰 원 배경 추가 + 로고 확대 — 다크 탭/작은 사이즈에서 어두운 푸른빛이 잘 안 보이는 이슈 해결(구글 G 스타일). 512×512 master 캔버스에 흰 원(`FillEllipse(0,0,512,512)`) + inscribed 사각형 92%(333×312) 기준 로고 가운데 fit + 모든 사이즈 재생성 + 픽셀 검증.

@@ -10,45 +10,47 @@
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { Suspense } from 'react'
+import * as THREE from 'three'
 import BuildingMesh from './BuildingMesh.jsx'
 import DefectMarker from './DefectMarker.jsx'
 import DroneMarker from './DroneMarker.jsx'
-import PointCloudLayer from './PointCloudLayer.jsx'
-import MissionPathLayer from './MissionPathLayer.jsx'
-import CoverageHeatmapLayer from './CoverageHeatmapLayer.jsx'
-import DiscrepancyOverlay from './DiscrepancyOverlay.jsx'
 import useDefectStore from '../../store/defectStore.js'
 import useSessionStore from '../../store/sessionStore.js'
-import useMissionStore from '../../store/missionStore.js'
 
 export default function BuildingScene() {
   const defects = useDefectStore((s) => s.defects)
   // //* [Modified Code] 세션 level + L2 이미지 URL + 벽체/윤곽 데이터 구독 — BuildingMesh 에 전달
+  // //* [Modified Code 2026-05-13] 종횡비 보존을 위해 imageWidth/imageHeight/scalePxPerMeter 도 전달
   const level = useSessionStore((s) => s.level)
   const imageUrl = useSessionStore((s) => s.uploadedImageDataUrl)
   const wallsData = useSessionStore((s) => s.wallsData)
   const outline = useSessionStore((s) => s.outline)
+  const imageWidth = useSessionStore((s) => s.imageWidth)
+  const imageHeight = useSessionStore((s) => s.imageHeight)
+  const scalePxPerMeter = useSessionStore((s) => s.scalePxPerMeter)
+  const furnitureData = useSessionStore((s) => s.furnitureData)
 
   // LiDAR 좌표가 있는 하자만 마커 표시
   const mappedDefects = defects.filter(
     (d) => d.lidar_x != null && d.lidar_y != null && d.lidar_z != null
   )
-  // 자율비행 활성화 — phase 가 idle/complete 가 아니거나 점군이 누적되어 있으면 L3 레이어 표시
-  const missionPhase = useMissionStore((s) => s.phase)
-  const showAutonomousLayers = level === 3 || (missionPhase && missionPhase !== 'idle')
 
   return (
     // //* [Modified Code] relative 부여 — 범례 absolute 기준 + 풀스크린 HUD 레이아웃에서 안전 배치
     <div className="relative w-full h-full overflow-hidden">
       <Canvas shadows>
         <PerspectiveCamera makeDefault position={[8, 6, 8]} fov={50} />
+        {/* //* [Modified Code v3] (2026-05-27) 모바일 터치 제스처 — 1손가락 회전 / 2손가락 핀치줌+팬 + damping */}
         <OrbitControls
           enablePan
           enableZoom
           enableRotate
+          enableDamping
+          dampingFactor={0.08}
           maxPolarAngle={Math.PI / 2}
           minDistance={2}
           maxDistance={30}
+          touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
         />
 
         {/* 조명 */}
@@ -57,7 +59,16 @@ export default function BuildingScene() {
 
         <Suspense fallback={null}>
           {/* //* [Modified Code] 세션 level 기반 건물 구조 렌더 (L1/L2/L3 분기) */}
-          <BuildingMesh level={level} imageUrl={imageUrl} wallsData={wallsData} outline={outline} />
+          <BuildingMesh
+            level={level}
+            imageUrl={imageUrl}
+            wallsData={wallsData}
+            outline={outline}
+            imageWidth={imageWidth}
+            imageHeight={imageHeight}
+            scalePxPerMeter={scalePxPerMeter}
+            furnitureData={furnitureData}
+          />
 
           {/* 하자 마커 */}
           {mappedDefects.map((defect) => (
@@ -66,16 +77,6 @@ export default function BuildingScene() {
 
           {/* //* [Modified Code] 드론 실시간 위치 마커 */}
           <DroneMarker />
-
-          {/* //* [Autonomous v1.1] 자율비행 라이브 레이어 — 점군 / 미션 경로 / 커버리지 / 차이영역 */}
-          {showAutonomousLayers && (
-            <>
-              <PointCloudLayer />
-              <MissionPathLayer />
-              <CoverageHeatmapLayer />
-              <DiscrepancyOverlay />
-            </>
-          )}
         </Suspense>
       </Canvas>
 
