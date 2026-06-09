@@ -123,3 +123,6 @@ test_dashboard.png
 # fine-tuning 임시 산출물 (2026-06)
 backend/training/*.err
 backend/training/_*.txt
+
+# Roboflow 데이터셋 다운로드 (datasets/ 와 동일 성격 — git 제외)
+backend/training/rf_downloads/

@@ -70,12 +70,11 @@ CONFIGS = {
     "M4": {
         "base_pt": ROOT / "runs/detect/runs/m4_context/train/weights/best.pt",
         "our_data": BT / "datasets/m4_context",
-        "rf_dir": BT / "rf_downloads/m4_wcf_v1",
-        "rf_project": ("wall-detection", "wall-ceiling-floor-m6bao", 1),
-        # RF: 0 ceiling,1 wall,2 floor → 우리 0 wall,1 ceiling,2 floor
-        "remap": {0: 1, 1: 0, 2: 2},
+        "rf_dir": BT / "rf_downloads/m4_wallfloor_v2",
+        # RF x-aqdd1/wall-floor: 0 background, 1 floor, 2 wall → 우리 floor(2)/wall(0), bg drop
+        "remap": {0: None, 1: 2, 2: 0},
         "names": ["wall", "ceiling", "floor", "window", "door"],
-        "imgsz": 640, "epochs": 30,
+        "imgsz": 640, "epochs": 25, "our_sample": 1500, "our_sample_val": 300,
         "onnx_out": "m4_yolo_context_elements.onnx", "onnx_imgsz": 960, "task": "detect",
     },
 }
@@ -147,6 +146,10 @@ def main():
     for split, cap in (("train", our_sample), ("val", our_sample_val)):
         si = our / "images" / split
         sl = our / "labels" / split
+        # datasets 정리로 train/val 삭제된 경우 test split을 앵커 소스로 폴백
+        if not si.exists():
+            si = our / "images" / "test"
+            sl = our / "labels" / "test"
         if not si.exists():
             continue
         imgs = sorted(list(si.glob("*.jpg")) + list(si.glob("*.png")))

@@ -3213,3 +3213,22 @@ uploads/gazebo_worlds_real/
 
 - thermal/M4/furniture는 데이터 부족이 근본 — 추가 데이터 확보 시 재학습
 - 노션 일괄 동기화
+
+## 🔧 데이터셋 추적 정리 + Roboflow 대체 검증 스크립트 (2026-06-09)
+
+> VSCode 에 9,711 changes 노출(대부분 backend/training/rf_downloads/ 데이터셋 9,707개). 데이터셋은 git 제외 관례(datasets/·runs/) 에 맞춰 ignore 처리하고, 추적되던 ignore 대상은 rm --cached.
+
+| ID | 시각 | 작업 | 파일 |
+|---|---|---|---|
+| 1 | 06-09 | rf_downloads/(Roboflow 다운로드 데이터셋) .gitignore 추가 | .gitignore |
+| 2 | 06-09 | 추적되던 ignore 대상 rm --cached(working copy 유지) | frontend/.vercel/, backend/training/README_데이터셋정리.txt |
+| 3 | 06-09 | Roboflow 대체 데이터셋 검증/주석 스크립트 + 사이클 갱신 | backend/training/{finetune_rf_cycle.py, roboflow_alt_datasets.md, verify_alt_export.py, verify_alt_export2.py} |
+
+### 📐 설계 결정
+
+- **데이터셋은 git 비대상**: 9,707개 파일을 히스토리에 박으면 영구 비대 + 시크릿/용량 리스크. datasets/ 와 동일 정책으로 rf_downloads/ ignore.
+- **rm --cached 만(삭제 아님)**: .vercel/·README 는 추적만 끊고 디스크 파일은 보존.
+
+### ➡️ 후속
+
+- 노션 일괄 동기화
