@@ -3111,3 +3111,16 @@ LandingHeader: `fixed top-0 ... z-50`. 기존 ContactModal: `fixed inset-0 z-[10
 ### ➡️ 후속
 
 - 노션 일괄 동기화
+
+---
+
+## 2026-06-11 — 분기(AeroInspect) repo 블로커·보안·성능 수정 통합 반영 (frontend)
+
+분기 repo(배포본)에 적용·배포한 변경 중 통합 repo에 해당하는 것 반영:
+- 전역 토스트 시스템(toastStore, ToastContainer) + App 마운트, useDefects 로드실패 토스트
+- 404 폴백 라우트(NotFound) + 코드 스플리팅(무거운 라우트 React.lazy + vendor manualChunks)
+- 인증 가드(/dashboard·/session), ContactModal 조건부 훅 버그 수정
+- OAuth state CSRF(google/kakao/naver + 콜백 검증), apiClient export, reportApi 인증헤더/절대URL
+- ESLint v9 flat config 신설(lint 미작동 복구), 이미지 최적화+WebP(80MB→9.9MB)
+- (통합 repo 미해당: missionApi[신규 FSM 시스템], logout 폐기/토큰회전 localStorage[구세대 auth] — 스킵)
+검증: vite build 성공, lint 0 errors.

@@ -193,6 +193,16 @@ class Settings(BaseSettings):
     # Refresh token: 장기 유효 (기본 14일). /auth/refresh 엔드포인트로 access token 재발급용.
     JWT_REFRESH_EXPIRE_DAYS: int = 14
 
+    # ── 슈퍼관리자 시드 ──────────────────────
+    # 보안: 운영에서 'admin/admin' 자동 생성 사고 방지.
+    #   - SEED_SUPERADMIN=false 면 시드 자체를 건너뜀.
+    #   - 비-dev 환경에서는 SUPERADMIN_PASSWORD(12자 이상)를 명시하지 않으면 시드를 건너뛴다.
+    #   - dev/test 환경에서만 비밀번호 미설정 시 'admin' 폴백 허용(로컬 편의).
+    SEED_SUPERADMIN: bool = True
+    SUPERADMIN_USERNAME: str = "admin"
+    SUPERADMIN_EMAIL: str = "admin@aeroinspect.io"
+    SUPERADMIN_PASSWORD: str = ""
+
     # ── AI Webhook 인증 ──────────────────────
     # AI 추론 서버 → 백엔드 콜백(/api/v1/ai/*) 보호용 사전 공유 시크릿.
     # 빈 값이면 모든 요청이 401로 거부됨 (운영 안전 기본값).

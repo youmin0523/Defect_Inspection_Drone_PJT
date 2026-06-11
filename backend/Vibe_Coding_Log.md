@@ -3232,3 +3232,16 @@ uploads/gazebo_worlds_real/
 ### ➡️ 후속
 
 - 노션 일괄 동기화
+
+---
+
+## 2026-06-11 — 분기(AeroInspect) repo 보안·신뢰성 수정 통합 반영 (backend)
+
+분기 repo(배포본)에 적용·배포한 변경 중 통합 repo에 해당하는 것 반영:
+- 슈퍼관리자 시드 차단: SEED_SUPERADMIN + 비-dev SUPERADMIN_PASSWORD(12자+) 강제 (config.py, main.py)
+- 전역 예외 핸들러: 풀 스택트레이스 노출 차단 → 일반화 500 + request_id (main.py)
+- CORS allow_methods/headers 와일드카드 → 화이트리스트 (main.py)
+- RequestIDMiddleware request.state.request_id 보관 (middleware.py)
+- 로그인 계정 잠금 login_guard (연속 5회 → 5분, redis 없으면 메모리 폴백) + auth.py 연동
+- (통합 repo 미해당: inference_proxy — 미존재, 스킵)
+검증: import app.main OK.

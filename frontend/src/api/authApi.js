@@ -102,6 +102,9 @@ API.interceptors.response.use(
   }
 )
 
+// 토큰 자동첨부 + 401 자동 refresh 가 걸린 공용 인증 클라이언트 (다른 API 모듈 재사용용).
+export { API as apiClient }
+
 /** 일반 로그인 */
 export const login = (username, password) =>
   API.post('/api/v1/auth/login', { username, password })
@@ -154,6 +157,23 @@ export const updateMe = (payload) =>
 // ── OAuth 인가 URL 빌더 ─────────────────────
 const REDIRECT_BASE = window.location.origin
 
+// OAuth CSRF 방지용 state 저장 키 (provider 별). 콜백에서 동일 키로 검증.
+const oauthStateKey = (provider) => `oauth_state_${provider}`
+
+/** provider 별 state 생성·저장 후 반환 (CSRF 방지) */
+export function issueOAuthState(provider) {
+  const state = crypto.randomUUID()
+  sessionStorage.setItem(oauthStateKey(provider), state)
+  return state
+}
+
+/** 콜백에서 state 검증 — 일치하면 true, 일회용이므로 검증 후 제거 */
+export function consumeOAuthState(provider, received) {
+  const expected = sessionStorage.getItem(oauthStateKey(provider))
+  sessionStorage.removeItem(oauthStateKey(provider))
+  return !!expected && !!received && expected === received
+}
+
 export const getGoogleAuthUrl = () => {
   const params = new URLSearchParams({
     client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
@@ -161,6 +181,7 @@ export const getGoogleAuthUrl = () => {
     response_type: 'code',
     scope: 'openid email profile',
     access_type: 'offline',
+    state: issueOAuthState('google'),
     // 구글 세션이 살아있어도 계정 선택 화면 강제 (다른 계정 전환 허용)
     prompt: 'select_account consent',
   })
@@ -172,6 +193,7 @@ export const getKakaoAuthUrl = () => {
     client_id: import.meta.env.VITE_KAKAO_JS_KEY,
     redirect_uri: `${REDIRECT_BASE}/auth/kakao/callback`,
     response_type: 'code',
+    state: issueOAuthState('kakao'),
     // 카카오 자동 로그인 무시, ID/PW 재입력 강제
     prompt: 'login',
   })
@@ -179,13 +201,11 @@ export const getKakaoAuthUrl = () => {
 }
 
 export const getNaverAuthUrl = () => {
-  const state = crypto.randomUUID()
-  sessionStorage.setItem('naver_oauth_state', state)
   const params = new URLSearchParams({
     client_id: import.meta.env.VITE_NAVER_CLIENT_ID || '',
     redirect_uri: `${REDIRECT_BASE}/auth/naver/callback`,
     response_type: 'code',
-    state,
+    state: issueOAuthState('naver'),
     // 네이버 세션이 살아있어도 ID/PW 재입력을 강제 (다른 계정 전환 허용)
     auth_type: 'reprompt',
   })
